@@ -1,0 +1,42 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  dev.ryanhcode.sable.Sable
+ *  dev.ryanhcode.sable.companion.math.Pose3d
+ *  dev.ryanhcode.sable.sublevel.SubLevel
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.Position
+ *  net.minecraft.world.level.Level
+ *  net.minecraft.world.phys.Vec3
+ *  org.jetbrains.annotations.Nullable
+ *  org.joml.Quaterniond
+ */
+package dev.simulated_team.simulated.util;
+
+import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.companion.math.Pose3d;
+import dev.ryanhcode.sable.sublevel.SubLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Position;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Quaterniond;
+
+public record SimMovementContext(Level level, Vec3 localPosition, Vec3 globalPosition, Quaterniond orientation, @Nullable SubLevel subLevel) {
+    public static SimMovementContext getMovementContext(Level level, Vec3 position) {
+        SubLevel subLevel = Sable.HELPER.getContaining(level, (Position)position);
+        if (subLevel != null) {
+            Pose3d logicalPose = subLevel.logicalPose();
+            Vec3 globalPosition = logicalPose.transformPosition(position);
+            Quaterniond orientation = logicalPose.orientation();
+            return new SimMovementContext(level, position, globalPosition, orientation, subLevel);
+        }
+        return new SimMovementContext(level, position, position, new Quaterniond(), null);
+    }
+
+    public BlockPos localBlockPos() {
+        return BlockPos.containing((double)this.localPosition.x(), (double)this.localPosition.y(), (double)this.localPosition.z());
+    }
+}

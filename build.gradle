@@ -78,6 +78,9 @@ dependencies {
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
     runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
     implementation("com.tterrag.registrate:Registrate:${registrate_version}")
+
+    compileOnly files('run/mods/sable-neoforge-1.21.1-1.2.2.jar')
+    compileOnly files('run/mods/create-aeronautics-bundled-1.21.1-1.2.1.jar')
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
