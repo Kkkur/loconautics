@@ -6,7 +6,8 @@
     "StationBlockEntityAssembleMixin"
   ],
   "client": [
-    "client.AssemblyScreenMixin"
+    "client.AssemblyScreenMixin",
+    "client.StationBlockEntityAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
