@@ -127,27 +127,29 @@ public final class PhysicsTrainTickHandler {
     }
 
     /**
-     * The world position the sub-level's center of mass should occupy so the carriage blocks line
-     * up with where Create renders the carriage.
+     * The world position to teleport the sub-level to so its blocks line up with where Create
+     * renders the carriage.
      *
-     * <p>{@code entity.position()} is the bogey anchor (track level). The sub-level's rotation point
-     * is its center of mass, which sits above the bogey, so we add the (rotated) center-of-mass
-     * offset measured against the plot's anchor block.
+     * <p>Teleport moves the sub-level's rotation point. A block at local position {@code bp} renders
+     * at {@code position + rotate(bp - rotationPoint, Q)}. We want the bogey block (at the plot's
+     * anchor) to land at {@code entity.position()}, which solves to:
+     * {@code position = entityPos + rotate(rotationPoint - plotAnchor, Q)}.
+     *
+     * <p>We read the sub-level's actual {@code rotationPoint} (not the center of mass, which can be
+     * null right after assembly), so the lift is always consistent with how the sub-level was built.
      */
     private static Vector3d targetPosition(CarriageContraptionEntity entity, ServerSubLevel sub, Quaterniond orientation) {
         Vec3 pos = entity.position();
         Vector3d target = new Vector3d(pos.x, pos.y, pos.z);
 
-        Vector3dc com = sub.getMassTracker().getCenterOfMass();
-        if (com != null) {
-            BlockPos plotCenter = sub.getPlot().getCenterBlock();
-            Vector3d offset = new Vector3d(
-                    com.x() - (plotCenter.getX() + 0.5),
-                    com.y() - (plotCenter.getY() + 0.5),
-                    com.z() - (plotCenter.getZ() + 0.5));
-            orientation.transform(offset); // rotate the local offset into world space
-            target.add(offset);
-        }
+        Vector3dc rotationPoint = sub.logicalPose().rotationPoint();
+        BlockPos plotAnchor = sub.getPlot().getCenterBlock();
+        Vector3d offset = new Vector3d(
+                rotationPoint.x() - (plotAnchor.getX() + 0.5),
+                rotationPoint.y() - (plotAnchor.getY() + 0.5),
+                rotationPoint.z() - (plotAnchor.getZ() + 0.5));
+        orientation.transform(offset); // rotate the local offset into world space
+        target.add(offset);
         return target;
     }
 
