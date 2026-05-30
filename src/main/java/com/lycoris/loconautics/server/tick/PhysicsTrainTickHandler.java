@@ -11,6 +11,7 @@ import org.joml.Vector3dc;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 import com.lycoris.loconautics.server.PhysicsTrainRegistry;
+import com.lycoris.loconautics.server.assembly.PhysicsTrainDisassembler;
 
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
@@ -59,24 +60,25 @@ public final class PhysicsTrainTickHandler {
         boolean log = (tickCounter++ % LOG_INTERVAL) == 0;
         for (PhysicsTrainTag tag : new ArrayList<>(registry.all())) {
             try {
-                driveTrain(tag, log);
+                driveTrain(server, tag, log);
             } catch (Throwable t) {
                 LoconauticsConstants.LOGGER.error("Error driving physics train {}", tag.trainId(), t);
             }
         }
     }
 
-    private static void driveTrain(PhysicsTrainTag tag, boolean log) {
+    private static void driveTrain(MinecraftServer server, PhysicsTrainTag tag, boolean log) {
         Train train = Create.RAILWAYS.trains.get(tag.trainId());
         if (train == null) {
-            if (log) {
-                LoconauticsConstants.LOGGER.info("[drive] train {} not found in RAILWAYS", tag.trainId());
-            }
+            // Orphan: the Create train is gone (disassembled / removed). Tear down the sub-levels.
+            PhysicsTrainDisassembler.disassemble(server, tag.trainId());
             return;
         }
 
         List<Carriage> carriages = train.carriages;
         int count = Math.min(carriages.size(), tag.subLevelIds().size());
+        int driven = 0;
+        boolean sawContainer = false;
 
         for (int i = 0; i < count; i++) {
             Carriage carriage = carriages.get(i);
@@ -87,24 +89,16 @@ public final class PhysicsTrainTickHandler {
 
             CarriageContraptionEntity entity = carriage.anyAvailableEntity();
             if (entity == null || !(entity.level() instanceof ServerLevel level)) {
-                if (log && i == 0) {
-                    LoconauticsConstants.LOGGER.info("[drive] carriage {} has no server-side entity", i);
-                }
                 continue;
             }
 
             ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
             if (container == null) {
-                if (log && i == 0) {
-                    LoconauticsConstants.LOGGER.info("[drive] no sub-level container for {}", level.dimension().location());
-                }
                 continue;
             }
+            sawContainer = true;
             SubLevel sub = container.getSubLevel(subLevelId);
             if (!(sub instanceof ServerSubLevel serverSub)) {
-                if (log && i == 0) {
-                    LoconauticsConstants.LOGGER.info("[drive] sub-level {} not found in container", subLevelId);
-                }
                 continue;
             }
 
@@ -115,6 +109,7 @@ public final class PhysicsTrainTickHandler {
 
             pipeline.teleport(serverSub, target, orientation);
             pipeline.resetVelocity(serverSub);
+            driven++;
 
             if (log && i == 0) {
                 Vector3dc current = serverSub.logicalPose().position();
@@ -123,6 +118,11 @@ public final class PhysicsTrainTickHandler {
                         entity.position(), fmt(target.x), fmt(target.y), fmt(target.z),
                         fmt(current.x()), fmt(current.y()), fmt(current.z()));
             }
+        }
+
+        // Train exists but its sub-levels are gone (e.g. removed after a reload): drop the binding.
+        if (driven == 0 && sawContainer && count > 0) {
+            PhysicsTrainDisassembler.disassemble(server, tag.trainId());
         }
     }
 

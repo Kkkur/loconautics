@@ -3,7 +3,8 @@
   "package": "com.lycoris.loconautics.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "StationBlockEntityAssembleMixin"
+    "StationBlockEntityAssembleMixin",
+    "TrainDisassembleMixin"
   ],
   "client": [
     "client.AssemblyScreenMixin",
