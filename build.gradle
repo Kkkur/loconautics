@@ -83,7 +83,24 @@ dependencies {
     compileOnly files('run/mods/create-aeronautics-bundled-1.21.1-1.2.1.jar')
     // Sable bundles sable-companion via jarjar (available at runtime). We extract it for
     // compile-time only; do NOT add it to run/mods or it would double-load. See deps/.
+    // The extractSableCompanion task (below) produces this jar automatically.
     compileOnly files('deps/sable-companion-common-1.21.1-1.6.0.jar')
+}
+
+// Auto-extract sable-companion from sable's jarjar so every dev gets it without a manual step.
+// Requires the sable mod jar to be present in run/mods (each dev places it there, gitignored).
+tasks.register('extractSableCompanion', Copy) {
+    var sableModJar = file('run/mods/sable-neoforge-1.21.1-1.2.2.jar')
+    from(zipTree(sableModJar)) {
+        include 'META-INF/jarjar/sable-companion-common-*.jar'
+    }
+    eachFile { it.relativePath = new RelativePath(true, it.name) } // flatten into deps/
+    includeEmptyDirs = false
+    into 'deps'
+}
+
+tasks.named('compileJava') {
+    dependsOn 'extractSableCompanion'
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
