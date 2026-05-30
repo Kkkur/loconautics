@@ -17,41 +17,28 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 
-/**
- * Camino A. Intercepts each carriage's {@code removeBlocksFromWorld} inside
- * {@code StationBlockEntity.assemble}. During a physics assembly (flagged via
- * {@link PhysicsAssemblyContext}), instead of letting Create pull the blocks into a contraption-only
- * representation, we divert the still-in-world blocks into a Sable sub-level and skip the vanilla
- * removal (Sable's assembly already clears the world).
- *
- * <p>Target verified against Create 6.0.10 via javap: the call site emits
- * {@code CarriageContraption.removeBlocksFromWorld(Level, BlockPos)}.
- */
 @Mixin(StationBlockEntity.class)
 public class StationBlockEntityAssembleMixin {
 
     @Redirect(
             method = "assemble",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lcom/simibubi/create/content/trains/entity/CarriageContraption;"
-                            + "removeBlocksFromWorld(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V"
-            )
+            at = @At(value = "INVOKE",
+                    target = "Lcom/simibubi/create/content/trains/entity/CarriageContraption;" +
+                            "removeBlocksFromWorld(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V")
     )
     private void loconautics$captureToSubLevel(CarriageContraption contraption, Level level, BlockPos offset) {
         if (PhysicsAssemblyContext.isPending() && level instanceof ServerLevel serverLevel) {
             try {
                 ServerSubLevel subLevel = SubLevelBridge.createFromContraption(serverLevel, contraption);
                 if (subLevel != null) {
-                    PhysicsAssemblyContext.addSubLevel(subLevel.getUniqueId());
-                    return; // Sable already removed the blocks from the world.
+                    // Pass anchor alongside subLevel id so disassembler can restore BE NBT
+                    PhysicsAssemblyContext.addSubLevel(subLevel.getUniqueId(), contraption.anchor);
+                    return;
                 }
             } catch (Throwable t) {
-                LoconauticsConstants.LOGGER.error(
-                        "Failed to divert carriage to a Sable sub-level; falling back to normal removal", t);
+                LoconauticsConstants.LOGGER.error("Failed to divert carriage to Sable sub-level; falling back", t);
             }
         }
-        // Default behaviour (non-physics assembly, or fallback on error).
         contraption.removeBlocksFromWorld(level, offset);
     }
 }

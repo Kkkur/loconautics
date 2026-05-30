@@ -10,6 +10,7 @@ import javax.annotation.Nullable;
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
+import com.lycoris.loconautics.core.PhysicsTrainTag.CarriageEntry;
 import com.lycoris.loconautics.network.LoconauticsNetwork;
 import com.lycoris.loconautics.network.PhysicsTrainSyncPacket;
 import com.lycoris.loconautics.server.PhysicsTrainRegistry;
@@ -20,67 +21,48 @@ import com.simibubi.create.content.trains.station.StationBlockEntity;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
-/**
- * Drives a physics-train assembly.
- *
- * <p>It reuses Create's own assembly end to end ({@code StationBlockEntity.assemble}); the
- * {@link com.lycoris.loconautics.mixin.StationBlockEntityAssembleMixin} hijacks each carriage's
- * {@code removeBlocksFromWorld} to divert blocks into Sable sub-levels instead. After assembly we
- * diff Create's train registry to find the freshly created train and tag it as a physics train.
- */
 public final class PhysicsAssemblyOrchestrator {
 
-    private PhysicsAssemblyOrchestrator() {
-    }
+    private PhysicsAssemblyOrchestrator() {}
 
     public static void assemble(ServerPlayer player, StationBlockEntity station) {
-        UUID playerUUID = player.getUUID();
-        ServerLevel level = player.serverLevel();
-
-        // If the addon is disabled, fall back to an ordinary Create assembly.
         if (!Config.ENABLE_SABLE_MODE.getAsBoolean()) {
-            station.assemble(playerUUID);
+            station.assemble(player.getUUID());
             return;
         }
 
-        Set<UUID> trainsBefore = new HashSet<>(Create.RAILWAYS.trains.keySet());
-
+        Set<UUID> before = new HashSet<>(Create.RAILWAYS.trains.keySet());
         PhysicsAssemblyContext.begin();
-        List<UUID> subLevels;
+        List<CarriageEntry> entries;
         try {
-            station.assemble(playerUUID);
+            station.assemble(player.getUUID());
         } finally {
-            subLevels = PhysicsAssemblyContext.drain();
+            entries = PhysicsAssemblyContext.drain();
             PhysicsAssemblyContext.end();
         }
 
-        if (subLevels.isEmpty()) {
-            // Assembly failed (Create reported an AssemblyException) or nothing was captured.
+        if (entries.isEmpty()) {
             LoconauticsConstants.LOGGER.info("Physics assembly produced no sub-levels at {}", station.getBlockPos());
             return;
         }
 
-        UUID newTrainId = findNewTrain(trainsBefore);
+        UUID newTrainId = findNewTrain(before);
         if (newTrainId == null) {
-            LoconauticsConstants.LOGGER.warn(
-                    "Created {} sub-levels but could not identify the new train; aborting tag", subLevels.size());
+            LoconauticsConstants.LOGGER.warn("Created {} sub-levels but could not identify new train", entries.size());
             return;
         }
 
-        PhysicsTrainTag tag = new PhysicsTrainTag(newTrainId, subLevels);
+        ServerLevel level = player.serverLevel();
+        PhysicsTrainTag tag = new PhysicsTrainTag(newTrainId, entries);
         PhysicsTrainRegistry.get(level).register(tag);
         LoconauticsNetwork.sendToAll(new PhysicsTrainSyncPacket(tag, false));
-
-        LoconauticsConstants.LOGGER.info(
-                "Assembled physics train {} with {} carriage sub-level(s)", newTrainId, subLevels.size());
+        LoconauticsConstants.LOGGER.info("Assembled physics train {} with {} carriage(s)", newTrainId, entries.size());
     }
 
     @Nullable
     private static UUID findNewTrain(Set<UUID> before) {
         for (UUID id : Create.RAILWAYS.trains.keySet()) {
-            if (!before.contains(id)) {
-                return id;
-            }
+            if (!before.contains(id)) return id;
         }
         return null;
     }

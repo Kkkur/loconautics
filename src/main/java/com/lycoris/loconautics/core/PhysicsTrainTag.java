@@ -4,8 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -13,54 +15,46 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.core.UUIDUtil;
 
 /**
- * Marks a Create {@link com.simibubi.create.content.trains.entity.Train} as assembled in Sable
- * physics mode, and records which Sable sub-level backs each carriage.
+ * Marks a Create Train as assembled in Sable physics mode.
  *
- * <p>The list index lines up with the train's carriage index: {@code subLevelIds.get(i)} is the
- * sub-level UUID for {@code train.carriages.get(i)}. A null entry means that carriage has no
- * sub-level yet (should not normally happen once assembly succeeds).
- *
- * <p>This is a plain data holder. It never keeps a hard reference to the {@code Train} (which can
- * be garbage-collected / managed by Create); the train is always resolved by UUID through
- * {@code Create.RAILWAYS}.
+ * Each carriage entry holds its sub-level UUID and the world-space anchor BlockPos
+ * that was used during assembly (= contraption.anchor). The anchor is needed at
+ * disassembly time to map plot-local block positions back to world positions for
+ * NBT restoration.
  */
 public final class PhysicsTrainTag {
 
+    public record CarriageEntry(UUID subLevelId, BlockPos anchor) {}
+
     private final UUID trainId;
-    private final List<UUID> subLevelIds;
+    private final List<CarriageEntry> carriages;
 
-    public PhysicsTrainTag(UUID trainId, List<UUID> subLevelIds) {
+    public PhysicsTrainTag(UUID trainId, List<CarriageEntry> carriages) {
         this.trainId = trainId;
-        this.subLevelIds = new ArrayList<>(subLevelIds);
+        this.carriages = new ArrayList<>(carriages);
     }
 
-    public PhysicsTrainTag(UUID trainId) {
-        this(trainId, new ArrayList<>());
-    }
+    public UUID trainId() { return trainId; }
+    public List<CarriageEntry> carriages() { return carriages; }
+    public int carriageCount() { return carriages.size(); }
 
-    public UUID trainId() {
-        return trainId;
-    }
-
+    /** Back-compat helper used by tick driver. */
     public List<UUID> subLevelIds() {
-        return subLevelIds;
+        List<UUID> ids = new ArrayList<>(carriages.size());
+        for (CarriageEntry e : carriages) ids.add(e.subLevelId());
+        return ids;
     }
 
-    public int carriageCount() {
-        return subLevelIds.size();
-    }
-
-    // ----- NBT (for PhysicsTrainRegistry SavedData persistence) -----
+    // ----- NBT -----
 
     public CompoundTag toNbt() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("TrainId", trainId);
         ListTag list = new ListTag();
-        for (UUID id : subLevelIds) {
+        for (CarriageEntry e : carriages) {
             CompoundTag entry = new CompoundTag();
-            if (id != null) {
-                entry.putUUID("SubLevel", id);
-            }
+            if (e.subLevelId() != null) entry.putUUID("SubLevel", e.subLevelId());
+            if (e.anchor() != null) entry.put("Anchor", NbtUtils.writeBlockPos(e.anchor()));
             list.add(entry);
         }
         tag.put("SubLevels", list);
@@ -69,21 +63,27 @@ public final class PhysicsTrainTag {
 
     public static PhysicsTrainTag fromNbt(CompoundTag tag) {
         UUID trainId = tag.getUUID("TrainId");
-        List<UUID> ids = new ArrayList<>();
+        List<CarriageEntry> entries = new ArrayList<>();
         ListTag list = tag.getList("SubLevels", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
-            CompoundTag entry = list.getCompound(i);
-            ids.add(entry.contains("SubLevel") ? entry.getUUID("SubLevel") : null);
+            CompoundTag e = list.getCompound(i);
+            UUID subId = e.contains("SubLevel") ? e.getUUID("SubLevel") : null;
+            BlockPos anchor = e.contains("Anchor") ? NbtUtils.readBlockPos(e, "Anchor").orElse(null) : null;
+            entries.add(new CarriageEntry(subId, anchor));
         }
-        return new PhysicsTrainTag(trainId, ids);
+        return new PhysicsTrainTag(trainId, entries);
     }
 
-    // ----- Network codec (for sync packets) -----
+    // ----- Network codec (clients only need subLevelIds for render suppression) -----
 
     public static final StreamCodec<RegistryFriendlyByteBuf, PhysicsTrainTag> STREAM_CODEC =
             StreamCodec.composite(
                     UUIDUtil.STREAM_CODEC, PhysicsTrainTag::trainId,
                     ByteBufCodecs.collection(ArrayList::new, UUIDUtil.STREAM_CODEC), PhysicsTrainTag::subLevelIds,
-                    PhysicsTrainTag::new
+                    (id, ids) -> {
+                        List<CarriageEntry> entries = new ArrayList<>();
+                        for (UUID u : ids) entries.add(new CarriageEntry(u, BlockPos.ZERO));
+                        return new PhysicsTrainTag(id, entries);
+                    }
             );
 }

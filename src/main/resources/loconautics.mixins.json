@@ -3,15 +3,13 @@
   "package": "com.lycoris.loconautics.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "CarriageContraptionEntityMixin",
     "ContraptionColliderMixin",
+    "MovingInteractionBehaviourMixin",
     "StationBlockEntityAssembleMixin",
     "TrainDisassembleMixin"
   ],
   "client": [
     "client.AssemblyScreenMixin",
-    "client.CarriageContraptionEntityClientMixin$PoseStackHook",
-    "client.CarriageContraptionEntityClientMixin$ClientContraptionHook",
     "client.StationBlockEntityAccessor"
   ],
   "injectors": {
