@@ -1,4 +1,6 @@
 {
+  "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
+
   "loconautics.configuration.title": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Config",

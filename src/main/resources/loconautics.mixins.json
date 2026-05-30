@@ -3,6 +3,9 @@
   "package": "com.lycoris.loconautics.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
+  "client": [
+    "client.AssemblyScreenMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   },
