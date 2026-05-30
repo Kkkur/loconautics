@@ -42,5 +42,7 @@ repo/
 ### Loconautics ###
 # Copyrighted mod JARs — each dev places these locally (see PLAN_EQUIPO.md)
 libs/
+# Compile-only deps extracted from sable's jarjar (regenerated locally, see PLAN docs)
+deps/
 # Local Claude/agent settings
 .claude/

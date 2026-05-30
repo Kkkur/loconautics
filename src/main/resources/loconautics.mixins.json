@@ -2,7 +2,9 @@
   "required": true,
   "package": "com.lycoris.loconautics.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "StationBlockEntityAssembleMixin"
+  ],
   "client": [
     "client.AssemblyScreenMixin"
   ],

@@ -1,6 +1,9 @@
 package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.server.assembly.PhysicsAssemblyOrchestrator;
+
+import com.simibubi.create.content.trains.station.StationBlockEntity;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -45,12 +48,12 @@ public record AssembleAsPhysicsTrainPacket(BlockPos stationPos) implements Custo
             return;
         }
         BlockEntity be = player.level().getBlockEntity(pos);
-        if (be == null) {
+        if (!(be instanceof StationBlockEntity station)) {
             return;
         }
 
-        // TODO Phase 3: hand off to PhysicsAssemblyOrchestrator.assemble(player, stationBlockEntity).
         LoconauticsConstants.LOGGER.info(
-                "Received physics-train assembly request at {} from {}", pos, player.getName().getString());
+                "Physics-train assembly request at {} from {}", pos, player.getName().getString());
+        PhysicsAssemblyOrchestrator.assemble(player, station);
     }
 }
