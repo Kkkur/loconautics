@@ -1,13 +1,8 @@
 {
-  "itemGroup.loconautics": "Example Mod Tab",
-  "block.loconautics.example_block": "Example Block",
-  "item.loconautics.example_item": "Example Item",
-
-  "loconautics.configuration.title": "Loconautics Configs",
-  "loconautics.configuration.section.loconautics.common.toml": "Loconautics Configs",
-  "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Configs",
-  "loconautics.configuration.items": "Item List",
-  "loconautics.configuration.logDirtBlock": "Log Dirt Block",
-  "loconautics.configuration.magicNumberIntroduction": "Magic Number Text",
-  "loconautics.configuration.magicNumber": "Magic Number"
+  "loconautics.configuration.title": "Loconautics Config",
+  "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
+  "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Config",
+  "loconautics.configuration.enableSableMode": "Enable Sable Physics Mode",
+  "loconautics.configuration.physicsTrainMaxSpeed": "Physics Train Max Speed",
+  "loconautics.configuration.debugRender": "Debug Render"
 }

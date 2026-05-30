@@ -17,31 +17,24 @@
 
 ## 1. Dependencias (build.gradle)
 
-JARs ya en `libs/`:
+JARs en `run/mods/` (decisión de Lycoris; gitignored por copyright). NeoForge los carga solos
+en runtime desde esa carpeta, y se referencian como `compileOnly` para compilar:
 - `create-aeronautics-bundled-1.21.1-1.2.1.jar`
 - `sable-neoforge-1.21.1-1.2.2.jar`
 
-Estrategia Gradle (NeoForge ModDevGradle 2.0.140):
+Estrategia Gradle (NeoForge ModDevGradle 2.0.140) — estado real en build.gradle:
 ```gradle
-repositories {
-    maven { url = "https://maven.createmod.net" }
-    maven { url = "https://maven.ithundxr.dev/snapshots" }
-    // Sable también está en https://maven.ryanhcode.dev/releases pero los devs de Aero
-    // piden NO depender del maven de Aero (API cambiará). Usamos los JAR locales.
-}
 dependencies {
-    // Create (ya existente en el template)
+    // Create (template)
     implementation("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
     implementation("net.createmod.ponder:ponder-neoforge:${ponder_version}+mc${minecraft_version}")
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
     runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
     implementation("com.tterrag.registrate:Registrate:${registrate_version}")
 
-    // Sable + Aeronautics desde JAR locales
-    compileOnly(files("libs/sable-neoforge-1.21.1-1.2.2.jar"))
-    compileOnly(files("libs/create-aeronautics-bundled-1.21.1-1.2.1.jar"))
-    // En runtime se cargan como mods en run/mods (o vía localRuntime). ⚠️ VERIFICAR
-    // si ModDevGradle requiere additionalRuntimeClasspath o copiarlos a run/mods.
+    // Sable + Aeronautics desde JAR locales en run/mods (cargados como mods en runtime)
+    compileOnly files('run/mods/sable-neoforge-1.21.1-1.2.2.jar')
+    compileOnly files('run/mods/create-aeronautics-bundled-1.21.1-1.2.1.jar')
 }
 ```
 `neoforge.mods.toml` (en `src/main/templates/META-INF/`) ya declara `create`, `sable`, `aeronautics` como `required`. **⚠️ VERIFICAR** modId real de Aeronautics — puede ser `aeronautics`, `simulated` o `create_aeronautics`. Revisar el `neoforge.mods.toml` dentro del JAR bundled.

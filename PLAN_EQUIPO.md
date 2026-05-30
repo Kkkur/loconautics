@@ -47,13 +47,15 @@
 
 | Entregable | Estado | Responsable |
 |------------|--------|-------------|
-| JAR de Aeronautics en `libs/` | ✅ Hecho (`create-aeronautics-bundled-1.21.1-1.2.1.jar`) | Lycoris |
-| JAR de Sable en `libs/` | ✅ Hecho (`sable-neoforge-1.21.1-1.2.2.jar`) | Lycoris |
+| JAR de Aeronautics en `run/mods/` | ✅ Hecho (`create-aeronautics-bundled-1.21.1-1.2.1.jar`) | Lycoris |
+| JAR de Sable en `run/mods/` | ✅ Hecho (`sable-neoforge-1.21.1-1.2.2.jar`) | Lycoris |
 | Decompiles de Create (estación, tren, carriage…) | ✅ Hecho (`src/depend/Create/`) | Lycoris |
 | Decompiles de Sable (sublevel, pipeline, eventos…) | ✅ Hecho (`src/depend/Sable/`) | Lycoris |
 | Decompiles de Aeronautics (assembly helper…) | ✅ Hecho (`src/depend/Aeronautics/`) | Lycoris |
 
 > **Todo lo que Claude necesitaba para empezar ya está entregado.** No hay bloqueos para arrancar.
+>
+> ⚠️ **Importante para compilar:** los JAR de Sable y Aeronautics viven en `run/mods/` (carpeta gitignored por copyright). Cada dev debe colocar ahí esos dos JAR antes de hacer `./gradlew build`, o la compilación fallará.
 
 ---
 
