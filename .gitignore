@@ -38,3 +38,9 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Loconautics ###
+# Copyrighted mod JARs — each dev places these locally (see PLAN_EQUIPO.md)
+libs/
+# Local Claude/agent settings
+.claude/
