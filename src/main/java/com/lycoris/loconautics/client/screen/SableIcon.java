@@ -11,9 +11,13 @@ import net.minecraft.resources.ResourceLocation;
  * A {@link ScreenElement} that draws a custom 16x16 icon from this mod's textures, so our button
  * can use its own art instead of a Create atlas sprite.
  *
- * <p>The PNG must live at {@code assets/loconautics/textures/gui/sable_button.png} (16x16).
+ * <p>The PNG lives at {@code assets/loconautics/textures/gui/sable_button.png} (24x16, which fits
+ * a {@code WideIconButton}'s 26x18 frame with a 1px border).
  */
 public final class SableIcon implements ScreenElement {
+
+    private static final int WIDTH = 24;
+    private static final int HEIGHT = 16;
 
     /** The button icon texture. Provided by the art pass; place the PNG at this path. */
     public static final SableIcon SABLE_BUTTON =
@@ -28,6 +32,6 @@ public final class SableIcon implements ScreenElement {
     @Override
     public void render(GuiGraphics graphics, int x, int y) {
         // 1.21.1 blit: (texture, x, y, uOffset, vOffset, width, height, textureWidth, textureHeight)
-        graphics.blit(texture, x, y, 0.0F, 0.0F, 16, 16, 16, 16);
+        graphics.blit(texture, x, y, 0.0F, 0.0F, WIDTH, HEIGHT, WIDTH, HEIGHT);
     }
 }

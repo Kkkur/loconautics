@@ -13,7 +13,7 @@ import com.simibubi.create.content.trains.station.AbstractStationScreen;
 import com.simibubi.create.content.trains.station.AssemblyScreen;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
-import com.simibubi.create.foundation.gui.widget.IconButton;
+import com.simibubi.create.content.trains.station.WideIconButton;
 
 /**
  * Adds the "Assemble as Physics Train" button to Create's train assembly screen.
@@ -31,7 +31,7 @@ import com.simibubi.create.foundation.gui.widget.IconButton;
 public abstract class AssemblyScreenMixin extends AbstractStationScreen {
 
     @Unique
-    private IconButton loconautics$physicsButton;
+    private WideIconButton loconautics$physicsButton;
 
     private AssemblyScreenMixin(StationBlockEntity be, GlobalStation station) {
         super(be, station);
@@ -43,9 +43,9 @@ public abstract class AssemblyScreenMixin extends AbstractStationScreen {
         int y = this.guiTop;
         int by = y + this.background.getHeight() - 24;
 
-        // Sits left of the vanilla quit (x+73) / assemble (x+94) buttons, with a gap so it does
-        // not touch the cancel ("X") button.
-        this.loconautics$physicsButton = SableModeButton.create(x + 48, by, this.blockEntity.getBlockPos());
+        // Wide button is 26px wide; quit ("X") sits at x+73. x+44 leaves a 3px gap so they don't
+        // touch.
+        this.loconautics$physicsButton = SableModeButton.create(x + 44, by, this.blockEntity.getBlockPos());
         this.loconautics$physicsButton.active = false; // greyed until there is something to assemble
         this.addRenderableWidget(this.loconautics$physicsButton);
     }

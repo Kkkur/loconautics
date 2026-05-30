@@ -153,10 +153,10 @@ public final class PhysicsTrainTickHandler {
 
     /**
      * Converts the carriage entity's yaw/pitch into a JOML quaternion for Sable.
-     * Convention may still need tuning against in-game results.
+     * The +180 yaw corrects the sub-level appearing turned around vs the Create carriage.
      */
     private static Quaterniond orientationOf(CarriageContraptionEntity entity) {
-        double yawRad = Math.toRadians(-entity.yaw);
+        double yawRad = Math.toRadians(-entity.yaw + 180.0);
         double pitchRad = Math.toRadians(entity.pitch);
         return new Quaterniond().rotationYXZ(yawRad, pitchRad, 0.0);
     }
