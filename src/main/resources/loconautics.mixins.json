@@ -12,7 +12,8 @@
     "client.AssemblyScreenMixin",
     "client.StationBlockEntityAccessor",
     "client.ClientContraptionRenderMixin",
-    "client.CarriageBogeyRenderMixin"
+    "client.CarriageBogeyRenderMixin",
+    "client.ContraptionVisualSetupMixin"
   ],
   "injectors": {
     "defaultRequire": 1

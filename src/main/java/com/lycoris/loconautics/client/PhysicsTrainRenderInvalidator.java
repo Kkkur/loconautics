@@ -71,9 +71,11 @@ public final class PhysicsTrainRenderInvalidator {
             var entry = it.next();
             UUID trainId = entry.getKey();
             boolean invalidatedAny = false;
+            int matched = 0;
 
             for (Entity e : mc.level.entitiesForRendering()) {
                 if (e instanceof CarriageContraptionEntity cce && trainId.equals(cce.trainId)) {
+                    matched++;
                     Contraption contraption = cce.getContraption();
                     if (contraption != null) {
                         ClientContraption client = contraption.getOrCreateClientContraptionLazy();
@@ -85,9 +87,9 @@ public final class PhysicsTrainRenderInvalidator {
 
             int remaining = entry.getValue() - 1;
             if (invalidatedAny || remaining <= 0) {
-                if (invalidatedAny) {
-                    LoconauticsConstants.LOGGER.debug("Invalidated contraption children for physics train {}", trainId);
-                }
+                LoconauticsConstants.LOGGER.info(
+                        "[bogey-inv] train={} matchedEntities={} invalidated={} (ticksLeft={})",
+                        trainId, matched, invalidatedAny, remaining);
                 it.remove();
             } else {
                 entry.setValue(remaining);
