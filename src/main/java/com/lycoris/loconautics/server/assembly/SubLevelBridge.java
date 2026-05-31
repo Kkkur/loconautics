@@ -41,8 +41,15 @@ public final class SubLevelBridge {
         BoundingBox3i bounds = new BoundingBox3i(minX, minY, minZ, maxX, maxY, maxZ);
         ServerSubLevel subLevel = SubLevelAssemblyHelper.assembleBlocks(level, anchor, worldBlocks, bounds);
 
-        LoconauticsConstants.LOGGER.info("Created sub-level {} from carriage at {} ({} blocks)",
-                subLevel != null ? subLevel.getUniqueId() : "null", anchor, worldBlocks.size());
+        if (subLevel != null) {
+            var pose = subLevel.logicalPose();
+            LoconauticsConstants.LOGGER.info(
+                    "[assemble] sub-level {} | worldAnchor={} plotAnchor={} pose.pos={} rotationPoint={} ({} blocks, bounds {})",
+                    subLevel.getUniqueId(), anchor, subLevel.getPlot().getCenterBlock(),
+                    pose.position(), pose.rotationPoint(), worldBlocks.size(), bounds);
+        } else {
+            LoconauticsConstants.LOGGER.warn("[assemble] sub-level creation returned null for carriage at {}", anchor);
+        }
 
         return subLevel;
     }

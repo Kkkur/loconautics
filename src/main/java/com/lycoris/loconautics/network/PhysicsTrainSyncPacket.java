@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.client.ClientPhysicsTrainRegistry;
+import com.lycoris.loconautics.client.PhysicsTrainRenderInvalidator;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 
@@ -40,6 +41,9 @@ public record PhysicsTrainSyncPacket(PhysicsTrainTag tag, boolean remove) implem
             ClientPhysicsTrainRegistry.remove(packet.tag().trainId());
         } else {
             ClientPhysicsTrainRegistry.put(packet.tag());
+            // Force the Flywheel contraption visual to rebuild its children so the bogey wheels — built
+            // once, possibly before this packet arrived — get suppressed too (see invalidator docs).
+            PhysicsTrainRenderInvalidator.request(packet.tag().trainId());
         }
         LoconauticsConstants.LOGGER.debug("Physics train sync: train={} remove={}",
                 packet.tag().trainId(), packet.remove());

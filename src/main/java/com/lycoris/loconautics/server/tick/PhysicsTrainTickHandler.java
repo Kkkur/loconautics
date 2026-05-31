@@ -107,16 +107,26 @@ public final class PhysicsTrainTickHandler {
             Quaterniond orientation = orientationOf(entity);
             Vector3d target = targetPosition(entity, serverSub, orientation);
 
+            // Capture the inputs BEFORE teleport so the log reflects what fed into targetPosition.
+            Vector3dc rpBefore = serverSub.logicalPose().rotationPoint();
+            BlockPos plotAnchor = serverSub.getPlot().getCenterBlock();
+            Vector3dc com = serverSub.getMassTracker().getCenterOfMass();
+
             pipeline.teleport(serverSub, target, orientation);
             pipeline.resetVelocity(serverSub);
             driven++;
 
             if (log && i == 0) {
-                Vector3dc current = serverSub.logicalPose().position();
+                Vector3dc after = serverSub.logicalPose().position();
                 LoconauticsConstants.LOGGER.info(
-                        "[drive] carriage 0: entityPos={} -> teleport target=({},{},{}) | subPoseBefore=({},{},{})",
-                        entity.position(), fmt(target.x), fmt(target.y), fmt(target.z),
-                        fmt(current.x()), fmt(current.y()), fmt(current.z()));
+                        "[drive] c0: entityPos={} yaw={} pitch={} | plotAnchor={} rotationPoint=({},{},{}) com={} "
+                        + "| orient=({},{},{},{}) -> target=({},{},{}) | poseAfter=({},{},{})",
+                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), plotAnchor,
+                        fmt(rpBefore.x()), fmt(rpBefore.y()), fmt(rpBefore.z()),
+                        com == null ? "null" : ("(" + fmt(com.x()) + "," + fmt(com.y()) + "," + fmt(com.z()) + ")"),
+                        fmt(orientation.x), fmt(orientation.y), fmt(orientation.z), fmt(orientation.w),
+                        fmt(target.x), fmt(target.y), fmt(target.z),
+                        fmt(after.x()), fmt(after.y()), fmt(after.z()));
             }
         }
 
@@ -144,9 +154,13 @@ public final class PhysicsTrainTickHandler {
 
         Vector3dc rotationPoint = sub.logicalPose().rotationPoint();
         BlockPos plotAnchor = sub.getPlot().getCenterBlock();
+        // Create's carriage entity sits at the anchor block's horizontal CENTER (x/z + 0.5) but at the
+        // anchor's BOTTOM (y, no +0.5 — that's the rail height). So we only re-center on x/z; adding
+        // +0.5 on y would sink the sub-level half a block into the ground. Verified empirically: the
+        // sub-level's resting pose.y matches (rotationPoint.y - plotAnchor.y) above entity.y.
         Vector3d offset = new Vector3d(
                 rotationPoint.x() - (plotAnchor.getX() + 0.5),
-                rotationPoint.y() - (plotAnchor.getY() + 0.5),
+                rotationPoint.y() - plotAnchor.getY(),
                 rotationPoint.z() - (plotAnchor.getZ() + 0.5));
         orientation.transform(offset); // rotate the local offset into world space
         target.add(offset);

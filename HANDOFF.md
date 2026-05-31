@@ -412,3 +412,66 @@ tick handler limpia el registro (huérfano).
 (commit `d1a78b0`) y reporte: (1) ¿no crashea?, (2) ¿desaparece el vagón de Create?, (3) ¿el
 disassembly mantiene cofres + bloques rotos? Según el resultado, afinar (rotación del disassembly,
 race del render, sonidos). Leer el `latest.log` directamente para diagnosticar.
+
+---
+
+## 12. Última sesión (2026-05-31, tarde) — qué se añadió y qué falta
+
+**Probado in-game tras `d1a78b0`:** arranca sin crash ✅, ensambla ✅, **vagón (estructura)
+desaparece pero los BOGEYS no** ❌, sub-level **hundido medio bloque** ❌, cofres no accesibles ❌
+(consecuencia del hundido), disassembly mantiene cofres + bloques rotos ✅.
+
+### Cambios de esta sesión (aún SIN commit hasta este push)
+1. **FIX posición hundida (`PhysicsTrainTickHandler.targetPosition`)** ✅ CONFIRMADO in-game.
+   - Con logging real (`[drive]`) se vio: el driver mandaba el sub-level a `Y = entityY + (rotationPoint.y
+     - (plotAnchor.y + 0.5))`, medio bloque por debajo. El entity de Create ya está en el **fondo** del
+     vagón (altura del raíl), así que en Y NO hay que aplicar el `+0.5` de centrado de bloque (sí en X/Z).
+   - Cambio: el offset Y pasó a `rotationPoint.y() - plotAnchor.getY()` (sin `+0.5`). Ahora el vagón
+     físico sube a la altura del contraption de Create. X/Z ya eran correctas.
+2. **Logging de diagnóstico** (clave para depurar posición): `[drive]` ahora imprime `entityPos, yaw,
+   pitch, plotAnchor, rotationPoint, com, orient(quat), target, poseAfter`; `[assemble]` (en
+   `SubLevelBridge`) imprime `worldAnchor, plotAnchor, pose.pos, rotationPoint, bounds`. **Úsalo.**
+3. **`CarriageBogeyRenderMixin` (nuevo, client)** — `@Inject HEAD cancellable` en
+   `CarriageContraptionEntityRenderer.render(CarriageContraptionEntity,...)`, cancela para trenes
+   físicos. **Solo sirve sin Flywheel** (ver abajo). Inofensivo con Flywheel.
+4. **`PhysicsTrainRenderInvalidator` (nuevo, client) + llamada en `PhysicsTrainSyncPacket.handle`** —
+   intento de ocultar bogeys: al recibir el sync, `ClientContraption.invalidateChildren()` de cada
+   carriage (con reintentos en `ClientTickEvent.Post` por si las entidades aún no cargaron). **NO
+   FUNCIONA todavía** — los bogeys siguen visibles.
+
+### HALLAZGO IMPORTANTE sobre el render de bogeys (verificado en bytecode con javap)
+- `CarriageContraptionEntityRenderer.render()` dibuja los bogeys en un bucle `carriage.bogeys.forEach`
+  en **modo inmediato**, PERO en `lambda$render$1` el **offset 43** hace `if VisualizationManager.
+  supportsVisualization(level) -> goto (skip)`. O sea, **con Flywheel el render inmediato de bogeys se
+  SALTA** → los bogeys vienen de un **visual de Flywheel**, no del renderer inmediato.
+- La estructura del vagón se oculta bien porque `ClientContraption.getRenderedBlocks` se reevalúa cada
+  frame (mixin `ClientContraptionRenderMixin`). Pero los bogeys son **block-entities hijos** que
+  `ContraptionVisual.setupChildren` (constructor) recopila **una sola vez** de
+  `ClientContraption.renderedBlockEntityView` y crea sus `BogeyBlockEntityVisual`. Como se construye
+  antes del sync → no se suprimen. Es la **race del render** (limitación #4).
+- El invalidador intenta forzar el rebuild (`invalidateChildren` bumpea `childrenVersion` →
+  `ContraptionVisual` re-ejecuta `setupChildren`), pero **aún se ven los bogeys**. Hipótesis a probar:
+  (a) `invalidateChildren` no llega a las entidades a tiempo / no se encuentran en `entitiesForRendering`;
+  (b) `setupRenderLevelAndRenderedBlockEntities` (que cancelamos) NO es lo que puebla
+  `renderedBlockEntityView`, o se cachea aparte; (c) hay que vaciar `renderedBlockEntityView` /
+  `shouldRenderBlockEntities` directamente o suprimir en `ContraptionVisual.setupChildren`/`setupVisualizer`
+  vía mixin. **Investigar `ClientContraption.setupRenderLevelAndRenderedBlockEntities` (privado) y los
+  campos `renderedBlockEntities`/`renderedBlockEntityView`/`shouldRenderBlockEntities`.** Posible mejor
+  approach: mixin directo en `ContraptionVisual.setupChildren` o `setupVisualizer` que salte BEs (o solo
+  los bogeys) si el tren es físico, en vez de depender del invalidate.
+
+### PENDIENTE (lo que falta — el usuario lo confirmó así)
+1. **Ocultar los bogeys del contraption de Create** (siguen visibles; ver hallazgo arriba). PRIORIDAD.
+2. **Que el sub-level físico siga bien las vías:** ahora sube a la altura correcta pero queda **TORCIDO**
+   y al ir **adelante/atrás cambia de posición y queda mal**. Sospecha: la **orientación**
+   (`orientationOf` = `rotationYXZ(-yaw+180, pitch, 0)`) o el punto de referencia no es estable cuando el
+   tren se mueve / invierte (`currentlyBackwards`). Mirar el `[drive]` log con el tren en movimiento y en
+   curva: comparar `yaw/pitch` y `orient` con la pose real del vagón de Create. Probablemente haya que
+   usar el yaw/pitch del `CarriageContraptionEntity` con partial-ticks o derivar la orientación de los dos
+   bogeys (leading/trailing) como hace Create en `CarriageBogey.updateAngles`.
+
+**Funciona y confirmado in-game:** altura correcta ✅, cofres accesibles ✅, disassembly conserva
+cofres+inventarios+bloques rotos ✅.
+
+**Workflow de prueba:** el jar se despliega en `Skybound SMP/mods/` y el `latest.log` de esa instancia
+SÍ lo puede leer Claude directamente (la prueba debe hacerse en ESA máquina, no en la del compañero).
