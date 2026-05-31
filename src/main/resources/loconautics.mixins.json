@@ -10,7 +10,8 @@
   ],
   "client": [
     "client.AssemblyScreenMixin",
-    "client.StationBlockEntityAccessor"
+    "client.StationBlockEntityAccessor",
+    "client.ClientContraptionRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1

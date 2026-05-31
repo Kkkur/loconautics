@@ -17,14 +17,13 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
 /**
- * Tears down a physics train: removes its Sable sub-levels and clears the registry/clients.
+ * Safety-net cleanup for physics trains: removes any leftover Sable sub-levels and clears the
+ * registry/clients. Used by the tick-time orphan sweep ({@code PhysicsTrainTickHandler}) when a
+ * physics train's Create train is gone (player disassembled it, world reload, crash, etc.).
  *
- * <p>Used both when the player disassembles the train (via a mixin on {@code Train.disassemble},
- * for prompt removal before the sub-level can drift) and as a tick-time safety net for orphans
- * (train gone, or its sub-levels vanished after a reload).
- *
- * <p>We only DELETE the sub-levels; we never place their blocks back, because Create's own
- * disassembly already returns the carriage blocks to the world. Re-placing them would duplicate.
+ * <p>The normal player disassembly is handled by {@code TrainDisassembleMixin} +
+ * {@link SubLevelDisassembler}, which move the live blocks back to the world. This class only
+ * deletes any sub-levels that are still around and forgets the train.
  */
 public final class PhysicsTrainDisassembler {
 
@@ -59,6 +58,6 @@ public final class PhysicsTrainDisassembler {
 
         registry.unregister(trainId);
         LoconauticsNetwork.sendToAll(new PhysicsTrainSyncPacket(tag, true));
-        LoconauticsConstants.LOGGER.info("Disassembled physics train {} ({} sub-level(s) removed)", trainId, removed);
+        LoconauticsConstants.LOGGER.info("Cleaned up physics train {} ({} leftover sub-level(s))", trainId, removed);
     }
 }

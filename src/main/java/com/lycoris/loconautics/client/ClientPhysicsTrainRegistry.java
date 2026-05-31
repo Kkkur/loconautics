@@ -1,8 +1,8 @@
 package com.lycoris.loconautics.client;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.annotation.Nullable;
 
@@ -10,12 +10,14 @@ import com.lycoris.loconautics.core.PhysicsTrainTag;
 
 /**
  * Client-side mirror of {@link com.lycoris.loconautics.server.PhysicsTrainRegistry}, populated by
- * {@code PhysicsTrainSyncPacket}. Lets client code (e.g. render suppression in Phase 4) know which
- * trains are physics trains without a server round-trip.
+ * {@code PhysicsTrainSyncPacket}. Lets client code (e.g. render suppression) know which trains are
+ * physics trains without a server round-trip.
+ *
+ * <p>Concurrent map: written from the network/main thread and read from the render thread.
  */
 public final class ClientPhysicsTrainRegistry {
 
-    private static final Map<UUID, PhysicsTrainTag> TAGS = new HashMap<>();
+    private static final Map<UUID, PhysicsTrainTag> TAGS = new ConcurrentHashMap<>();
 
     private ClientPhysicsTrainRegistry() {
     }

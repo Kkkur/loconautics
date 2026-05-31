@@ -29,7 +29,7 @@ public class ClientContraptionRenderMixin {
     @Inject(method = "getRenderedBlocks", at = @At("RETURN"), remap = false, cancellable = true)
     private void loconautics$emptyRenderedBlocks(CallbackInfoReturnable<ClientContraption.RenderedBlocks> cir) {
         if (loconautics$isPhysicsTrain()) {
-            cir.setReturnValue(new ClientContraption.RenderedBlocks(_ -> Blocks.AIR.defaultBlockState(), List.of()));
+            cir.setReturnValue(new ClientContraption.RenderedBlocks(pos -> Blocks.AIR.defaultBlockState(), List.of()));
         }
     }
 
