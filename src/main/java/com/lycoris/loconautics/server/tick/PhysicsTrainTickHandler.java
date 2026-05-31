@@ -119,9 +119,9 @@ public final class PhysicsTrainTickHandler {
             if (log && i == 0) {
                 Vector3dc after = serverSub.logicalPose().position();
                 LoconauticsConstants.LOGGER.info(
-                        "[drive] c0: entityPos={} yaw={} pitch={} | plotAnchor={} rotationPoint=({},{},{}) com={} "
+                        "[drive] c0: entityPos={} yaw={} pitch={} initYaw={} | plotAnchor={} rotationPoint=({},{},{}) com={} "
                         + "| orient=({},{},{},{}) -> target=({},{},{}) | poseAfter=({},{},{})",
-                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), plotAnchor,
+                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), fmt(entity.getInitialYaw()), plotAnchor,
                         fmt(rpBefore.x()), fmt(rpBefore.y()), fmt(rpBefore.z()),
                         com == null ? "null" : ("(" + fmt(com.x()) + "," + fmt(com.y()) + "," + fmt(com.z()) + ")"),
                         fmt(orientation.x), fmt(orientation.y), fmt(orientation.z), fmt(orientation.w),
@@ -168,13 +168,37 @@ public final class PhysicsTrainTickHandler {
     }
 
     /**
-     * Converts the carriage entity's yaw/pitch into a JOML quaternion for Sable.
-     * The +180 yaw corrects the sub-level appearing turned around vs the Create carriage.
+     * Builds the carriage's world orientation as a JOML quaternion, replicating EXACTLY what Create
+     * does in {@code OrientedContraptionEntity.applyLocalTransforms} (verified via javap):
+     *
+     * <pre>
+     *   center -> rotateY(viewYaw) -> rotateZ(pitch) -> rotateY(initialYaw) -> uncenter
+     * </pre>
+     *
+     * where (from {@code getViewYRot}/{@code getViewXRot}/{@code getInitialYaw}):
+     * <ul>
+     *   <li>{@code viewYaw  = -yaw}   — getViewYRot negates the (lerped) yaw;</li>
+     *   <li>{@code pitch    =  pitch} — applied around <b>Z</b>, not X;</li>
+     *   <li>{@code initialYaw = initialOrientation.toYRot()} (0/90/180/270, SOUTH=0).</li>
+     * </ul>
+     *
+     * <p>At assembly the carriage faces its initial orientation, so {@code yaw == initialYaw} and this
+     * reduces to identity — which matches the sub-level captured world-aligned (Rotation.NONE). As the
+     * train turns, this rotates the sub-level the same way Create rotates the carriage. The previous
+     * formula ({@code rotationYXZ(-yaw+180, pitch, 0)}) used a bogus +180, treated pitch as an X
+     * rotation, and ignored {@code initialYaw} — hence the "twisted" look.
+     *
+     * <p>JOML {@code rotateY/rotateZ} post-multiply, matching Flywheel's {@code rotateYDegrees/
+     * rotateZDegrees} call order, and share Minecraft's right-handed convention.
      */
     private static Quaterniond orientationOf(CarriageContraptionEntity entity) {
-        double yawRad = Math.toRadians(-entity.yaw + 180.0);
-        double pitchRad = Math.toRadians(entity.pitch);
-        return new Quaterniond().rotationYXZ(yawRad, pitchRad, 0.0);
+        double viewYaw = -entity.yaw;
+        double pitch = entity.pitch;
+        double initialYaw = entity.getInitialYaw();
+        return new Quaterniond()
+                .rotateY(Math.toRadians(viewYaw))
+                .rotateZ(Math.toRadians(pitch))
+                .rotateY(Math.toRadians(initialYaw));
     }
 
     private static String fmt(double d) {

@@ -27,9 +27,13 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
  * hides correctly anyway (its {@code getRenderedBlocks} is re-evaluated every frame), but the cached
  * children are not — hence the wheels stay visible.
  *
- * <p>Calling {@link ClientContraption#invalidateChildren()} bumps {@code childrenVersion}, so on the
- * next frame {@code ContraptionVisual} re-runs {@code setupChildren}; this time
- * {@code ClientContraptionRenderMixin} suppresses the block entities and the bogey visual is dropped.
+ * <p>We call {@link ClientContraption#resetRenderLevel()} (NOT just {@code invalidateChildren()}):
+ * {@code invalidateChildren} only rebuilds the child visuals from the <i>already-populated</i>
+ * {@code renderedBlockEntityView}, so the bogey BEs would survive. {@code resetRenderLevel} instead
+ * CLEARS {@code renderedBlockEntities}, re-runs {@code setupRenderLevelAndRenderedBlockEntities} —
+ * which {@code ClientContraptionRenderMixin} now cancels for physics trains, leaving the list empty —
+ * and then bumps both structure/children versions, so {@code ContraptionVisual} rebuilds with no
+ * bogey visual.
  *
  * <p>The carriage entities may not have spawned on the client at sync time, so we retry for a short
  * window on the client tick until the train's carriages are found.
@@ -73,7 +77,7 @@ public final class PhysicsTrainRenderInvalidator {
                     Contraption contraption = cce.getContraption();
                     if (contraption != null) {
                         ClientContraption client = contraption.getOrCreateClientContraptionLazy();
-                        client.invalidateChildren();
+                        client.resetRenderLevel();
                         invalidatedAny = true;
                     }
                 }

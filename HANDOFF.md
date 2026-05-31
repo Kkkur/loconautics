@@ -460,18 +460,34 @@ desaparece pero los BOGEYS no** ❌, sub-level **hundido medio bloque** ❌, cof
   approach: mixin directo en `ContraptionVisual.setupChildren` o `setupVisualizer` que salte BEs (o solo
   los bogeys) si el tren es físico, en vez de depender del invalidate.
 
-### PENDIENTE (lo que falta — el usuario lo confirmó así)
-1. **Ocultar los bogeys del contraption de Create** (siguen visibles; ver hallazgo arriba). PRIORIDAD.
-2. **Que el sub-level físico siga bien las vías:** ahora sube a la altura correcta pero queda **TORCIDO**
-   y al ir **adelante/atrás cambia de posición y queda mal**. Sospecha: la **orientación**
-   (`orientationOf` = `rotationYXZ(-yaw+180, pitch, 0)`) o el punto de referencia no es estable cuando el
-   tren se mueve / invierte (`currentlyBackwards`). Mirar el `[drive]` log con el tren en movimiento y en
-   curva: comparar `yaw/pitch` y `orient` con la pose real del vagón de Create. Probablemente haya que
-   usar el yaw/pitch del `CarriageContraptionEntity` con partial-ticks o derivar la orientación de los dos
-   bogeys (leading/trailing) como hace Create en `CarriageBogey.updateAngles`.
+### FIXES de esta sub-sesión (aplicados, PENDIENTES DE PROBAR in-game)
+1. **Bogeys — fix real (cambio `invalidateChildren` → `resetRenderLevel`).** Diagnóstico definitivo (javap):
+   `ContraptionVisual.setupChildren` lee `ClientContraption.renderedBlockEntityView` que pobló
+   `setupRenderLevelAndRenderedBlockEntities` (privado) ANTES del sync. `invalidateChildren()` solo
+   reconstruye los visuales desde esa lista YA poblada → los bogeys sobrevivían. **`resetRenderLevel()`**
+   sí: `renderedBlockEntities.clear()` + re-llama `setupRenderLevelAndRenderedBlockEntities` (que nuestro
+   `ClientContraptionRenderMixin` CANCELA para físicos → lista vacía) + invalida estructura/children.
+   `PhysicsTrainRenderInvalidator` ahora llama `resetRenderLevel()`. (El `CarriageBogeyRenderMixin` sigue,
+   solo cubre el caso sin-Flywheel.)
+2. **Orientación "torcida" — fix replicando a Create EXACTO (javap de
+   `OrientedContraptionEntity.applyLocalTransforms`).** Create rota el vagón así:
+   `center → rotateY(viewYaw) → rotateZ(pitch) → rotateY(initialYaw) → uncenter`, con
+   `viewYaw = -yaw` (getViewYRot **niega** el yaw), `pitch` **alrededor de Z** (no X), e
+   `initialYaw = initialOrientation.toYRot()` (SOUTH=0/WEST=90/NORTH=180/EAST=270). El `orientationOf`
+   viejo (`rotationYXZ(-yaw+180, pitch, 0)`) tenía un **+180 inventado**, pitch como X, e **ignoraba
+   initialYaw** → de ahí el torcido. Ahora:
+   `new Quaterniond().rotateY(toRad(-yaw)).rotateZ(toRad(pitch)).rotateY(toRad(initialYaw))`. En
+   ensamblado `yaw==initialYaw` → identidad, que casa con el sub-level capturado world-aligned. El log
+   `[drive]` ahora imprime también `initYaw`.
+   - **Riesgo a verificar:** (a) handedness de `rotateYDegrees`/`rotateZDegrees` de Flywheel vs JOML
+     (asumido igual, right-handed); si sale espejado, invertir signos. (b) El **pivote de posición**: la
+     fórmula `targetPosition` rota el offset alrededor del `rotationPoint` (≈COM), pero Create pivota en el
+     centro del vagón; si al **invertir marcha** (`currentlyBackwards`, yaw flipea 180) el vagón se
+     desplaza, hay que alinear el pivote (usar el centro del vagón, no COM). Mirar `[drive]` en
+     movimiento/curva.
 
-**Funciona y confirmado in-game:** altura correcta ✅, cofres accesibles ✅, disassembly conserva
-cofres+inventarios+bloques rotos ✅.
+**Funciona y confirmado in-game (antes de estos 2 fixes):** altura correcta ✅, cofres accesibles ✅,
+disassembly conserva cofres+inventarios+bloques rotos ✅.
 
 **Workflow de prueba:** el jar se despliega en `Skybound SMP/mods/` y el `latest.log` de esa instancia
 SÍ lo puede leer Claude directamente (la prueba debe hacerse en ESA máquina, no en la del compañero).
