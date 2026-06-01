@@ -505,9 +505,12 @@ SÍ lo puede leer Claude directamente (la prueba debe hacerse en ESA máquina, n
   arrastre, recto y en curva (commit **`cf956b8`**).
 - ✅ Altura correcta, cofres accesibles, disassembly conserva inventarios/bloques rotos.
 - ✅ El sub-level lleva su **propio bogey físico** sincronizado con el cuerpo.
-- ❌ **TAREA ABIERTA:** el **bogey FANTASMA de Create** (el del contraption invisible) TODAVÍA se ve
-  y va con lag (~0.5s). Hay que ocultarlo. Build de diagnóstico desplegado (jar `74db9aa2`, **SIN
-  commitear**). Ver §13.5.
+- ✅ **RESUELTO (2026-06-01):** el **bogey fantasma de Create** (el que giraba y seguía al tren con
+  ~0.5s de lag) **ya NO se ve.** Era el **bogey VIAJERO** de `CarriageContraptionVisual.animate()`
+  (un `BogeyVisual[]` propio de la subclase, ANIMADO siguiendo la vía) — una vía de Flywheel APARTE
+  de los children y del `BlockEntityStorage`. Se oculta con `CarriageBogeyVisualMixin`. Ver §13.5.
+- ⏳ **Pendiente (polish, opcional):** el bogey que queda (el del sub-level) va rígido pero **NO gira**
+  (es bloque estático). Para ruedas girando habría que animarlo en fase con el cuerpo (CI Opción 2).
 
 ### 13.1 ARQUITECTURA DE RENDER (cómo se dibuja el tren físico)
 Create maneja la LÓGICA y la POSICIÓN del tren (vías, señales). El sub-level de Sable es lo que SE VE y
@@ -533,11 +536,18 @@ lo FÍSICO (colisión, cofres). Para que el sub-level se vea exactamente donde e
 - `mixin/client/ClientSubLevelRenderMixin.java` — el acoplamiento de render (`renderPose(F)`).
 - `client/ClientPhysicsTrainRegistry.java` — `findCarriage(subLevelId)`, `isPhysicsSubLevel(uuid)`,
   `physicsCarriages()`.
-- `mixin/client/BlockEntityStorageMixin.java` — `@Mixin` de Flywheel
-  `impl.visualization.storage.BlockEntityStorage`, hook `willAccept(BlockEntity)`. Oculta el bogey
-  fantasma de Create. Necesita el jar FULL de Flywheel como `compileOnly` (ya en build.gradle).
-- `client/PhysicsTrainRenderInvalidator.java` — además del invalidador, mantiene `PHYSICS_RENDER_WORLDS`
-  (los `VirtualRenderWorld` de los contraptions fantasma) cada tick.
+- `mixin/client/CarriageBogeyVisualMixin.java` — **(EL FIX del bogey, 2026-06-01)** `@Mixin` de
+  `CarriageContraptionVisual` (subclase de `ContraptionVisual`), `@Inject HEAD cancellable` en
+  `animate(float)`. Para trenes físicos: `visuals[i].hide()` en cada `BogeyVisual` + cancel. Detecta
+  el tren por `contraption.entity` (campo propio `@Shadow`, fiable). Esto oculta el bogey viajero.
+- `mixin/client/ContraptionVisualChildrenMixin.java` — `@Mixin(ContraptionVisual)`, `@Inject HEAD` en
+  `setupChildren(Contraption,...)`: borra/limpia los `children` (otros BE como cofres) + cancela, para
+  no doble-renderizarlos (el sub-level ya los dibuja). Detecta por el arg `Contraption`. NOTA: los
+  bogeys NO son children (ver §13.3.5), de eso se encarga `CarriageBogeyVisualMixin`.
+- `client/PhysicsTrainRenderInvalidator.java` — al recibir el sync, `resetRenderLevel()` del contraption
+  para forzar el rebuild del visual (estructura/children) ahora que el tren se sabe físico (gana la race
+  de "visual construido antes del sync"). El bogey viajero NO necesita rebuild (se oculta por frame).
+- ~~`BlockEntityStorageMixin`~~ — **ELIMINADO.** Fue un callejón sin salida (ver §13.5).
 
 ### 13.3 LECCIONES / CALLEJONES SIN SALIDA (NO repetir) 🚫
 1. **NO reconstruir la orientación a mano** desde yaw/pitch. Falla en curvas. Usar `getRotationState()`.
@@ -547,11 +557,18 @@ lo FÍSICO (colisión, cofres). Para que el sub-level se vea exactamente donde e
    adelantaba/vibraba. Quitado. Solo `resetVelocity`.
 4. **`getPosition(partialTick)` SÍ, `getAnchorVec()` NO.** Create dibuja el contraption con
    `getPosition` (lerp xOld/x). anchorVec hacía el cuerpo ir "rápido".
-5. **Ocultar el bogey NO es por `ContraptionVisual.setupVisualizer` ni `resetRenderLevel`.** El bogey
-   del contraption se visualiza por `BlockEntityStorage.willAccept` de Flywheel. `[bogey-cancel]` NUNCA
-   sale → ese camino no es el de los bogeys.
-6. **Los bloques de bogey SÍ se capturan en el sub-level** (`CarriageContraption.capture`,
-   `instanceof AbstractBogeyBlock`). Por eso: mostrar los del sub-level, ocultar los de Create.
+5. **El bogey VIAJERO de Create NO es un child ni un BE-visual del `BlockEntityStorage`.** ⭐ (CLAVE,
+   resuelto 2026-06-01) Los bogeys de Create tienen `AbstractBogeyBlock.captureBlockEntityForTrain()
+   == false` → `CarriageClientContraption.readBlockEntity` devuelve `null` → el bogey NUNCA entra en
+   `renderedBlockEntityView` → `setupChildren`/`setupVisualizer` NUNCA crean un visual de bogey (por eso
+   `[bogey-cancel]`/`[bogey-kill]` salían con 0 / no salían). El bogey viajero (animado, sigue la vía)
+   lo dibuja **`CarriageContraptionVisual` (subclase de `ContraptionVisual`)** con su propio array
+   `BogeyVisual[] visuals`, creado/animado en `animate(float)` (llamado desde `beginFrame`). **Se oculta
+   ahí**: `visuals[i].hide()` + cancel `animate` → `CarriageBogeyVisualMixin`.
+6. **Los bloques de bogey SÍ se capturan en el sub-level** (`CarriageContraption.capture` →
+   `super.capture` los mete en `getBlocks()` → `SubLevelBridge` los lleva al sub-level). Ese bogey del
+   sub-level es el que se MUESTRA (rígido con el cuerpo, pero estático: sin ruedas girando). El bogey
+   de Create que se OCULTA es el **viajero** (otra cosa, ver #5).
 7. **`@Shadow` de campo HEREDADO de superclase ajena = CRASH** (problema #8). Para `entity` de
    `AbstractEntityVisual` se EXTIENDE la clase (no `@Shadow`). Para campos del PROPIO target (p.ej.
    `renderPose` de `ClientSubLevel`) sí vale `@Shadow`.
@@ -561,26 +578,43 @@ lo FÍSICO (colisión, cofres). Para que el sub-level se vea exactamente donde e
 9. **El render inmediato de bogeys (`CarriageContraptionEntityRenderer.render`) se SALTA bajo Flywheel**
    (offset 43). `CarriageBogeyRenderMixin` solo sirve sin Flywheel.
 
-### 13.4 EL DESAFÍO DE FONDO (por qué cuerpo y bogey de Create no van 100% juntos)
-El cuerpo lo dibuja Sable, el bogey de Create lo dibuja Create/Flywheel → dos motores con fases de
-interpolación distintas → desajuste pequeño imposible de cuadrar mientras vengan de motores distintos.
-**Solución (en curso):** que el bogey también lo dibuje el SUB-LEVEL (sus bloques de bogey ya van
-rígidos con el cuerpo) y **ocultar el de Create**. El sub-level ya lleva su bogey físico ✅; falta
-ocultar el de Create.
+### 13.4 EL DESAFÍO DE FONDO (cuerpo Sable vs bogey Create) — RESUELTO
+El cuerpo lo dibuja Sable (chunk render del sub-level, acoplado por `ClientSubLevelRenderMixin`), y el
+bogey **viajero** lo dibujaba Create vía Flywheel (`CarriageContraptionVisual.animate`) interpolando en
+la fase del entity de Create → de ahí el lag de ~0.5s y la sensación de "fantasma que sigue al tren".
+**Solución aplicada:** ocultar el bogey viajero de Create (`CarriageBogeyVisualMixin`) y dejar que el
+bogey lo aporte el SUB-LEVEL (sus bloques de bogey ya van rígidos con el cuerpo). Resultado: un único
+bogey, clavado, sin lag. (Queda estático/sin girar — ver §13.5 polish.)
 
-### 13.5 TAREA ABIERTA: ocultar el bogey fantasma de Create
-- Es un `AbstractBogeyBlockEntity` visualizado por Flywheel vía `BlockEntityStorage`.
-- Estrategia (jar `74db9aa2`, sin commitear): `BlockEntityStorageMixin.willAccept` devuelve `false` si
-  `be.getLevel()` está en `PHYSICS_RENDER_WORLDS` (los `VirtualRenderWorld` de los contraptions físicos,
-  rastreados por `PhysicsTrainRenderInvalidator` cada tick vía
-  `contraption.getOrCreateClientContraptionLazy().getRenderLevel()`).
-- **Diagnóstico desplegado:** logs `[bogey-accept]` (nivel del bogey BE: clase + identityHashCode +
-  `ghostWorld`) y `[ghost-world]` (los renderLevel rastreados). **PRÓXIMO PASO: el usuario prueba, leer
-  el log y comparar los identityHashCode.** Hipótesis: `be.getLevel()` ≠ el `getRenderLevel()`
-  rastreado (instancia distinta tras `resetRenderLevel`), o el bogey está en el main level. Ajustar la
-  detección según eso.
-- **NO suprimir los bogeys del SUB-LEVEL** (esos SE MUESTRAN). Solo los del mundo-de-render fantasma.
-  En `willAccept`, `getContainingClient(be) != null` = sub-level → dejar pasar.
+### 13.5 RESUELTO: el bogey fantasma de Create (cómo se llegó, qué NO funcionó)
+**Qué era:** el bogey **viajero** de `CarriageContraptionVisual` (§13.3.5). Se oculta con
+`CarriageBogeyVisualMixin` (`@Inject HEAD` en `animate(float)`, `visuals[i].hide()` + cancel). ✅
+
+**Callejones sin salida de esta caza (NO repetir):**
+1. **`BlockEntityStorage.willAccept` por "render world fantasma"** (idea de la sesión anterior):
+   el log demostró que el bogey BE **nunca** está en el `VirtualRenderWorld` rastreado — siempre en el
+   `ClientLevel` principal (`ClientSubLevel.getLevel()` devuelve el ClientLevel; los sub-levels viven en
+   el mundo principal a coords de plot lejanas, p.ej. x=20481032). Detección por nivel = imposible.
+   `BlockEntityStorageMixin` ELIMINADO.
+2. **Suprimir en `willAccept` los bogeys DENTRO del sub-level físico** (invertir lo anterior): MAL —
+   eso quitaba el bogey BUENO del sub-level y dejaba el fantasma. Confirmó que el `willAccept` NO es el
+   camino del fantasma. (La nota vieja "getContainingClient != null → dejar pasar" era correcta.)
+3. **`ContraptionVisual.setupVisualizer` / `setupChildren` / `resetRenderLevel`:** NO afectan al bogey
+   (no es child, ver §13.3.5). `ContraptionVisualChildrenMixin` sí sirve para OTROS BE (cofres), no para
+   bogeys.
+4. **El bloque de bogey en el mundo (x=-125, la pos de ensamblado)** existe (`subLevel=none`) pero está
+   FIJO ahí, NO es el fantasma que sigue al tren. Pista decisiva del usuario: "el bogey fantasma SIGUE
+   al tren con lag" → descartó el fijo y apuntó al viajero animado.
+
+**Cómo diagnosticar vías de render de un bogey (receta que funcionó):** `javap` de
+`CarriageContraptionEntityRenderer.lambda$render$1` (inmediato, se salta bajo Flywheel),
+`ContraptionVisual.setupChildren/setupVisualizer` (children), y **`CarriageContraptionVisual`** (el
+viajero: campos `BogeyVisual[] visuals`, `CarriageBogey[] bogeys`, métodos `animate`/`checkCarriage`).
+
+**Polish pendiente (opcional):** el bogey del sub-level va rígido pero NO gira (bloque estático). Para
+ruedas girando: re-render del bogey en fase con el cuerpo (estilo CI Opción 2, `translateBogeyWithShip`
+→ con `subLevel.renderPose`), o dejar el bogey viajero de Create pero forzar su pose a la del sub-level
+en `animate` en vez de ocultarlo.
 
 ### 13.6 RECORDATORIOS DE WORKFLOW
 - **Build+deploy:** `./gradlew build` → `cp build/libs/loconautics-1.0.0.jar "/c/Users/User/curseforge/

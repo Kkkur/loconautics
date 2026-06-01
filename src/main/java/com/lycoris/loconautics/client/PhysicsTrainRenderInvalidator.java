@@ -1,7 +1,6 @@
 package com.lycoris.loconautics.client;
 
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -12,30 +11,22 @@ import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * Forces Create's Flywheel contraption visual to rebuild its child block-entity visuals — notably the
- * spinning <b>bogey wheels</b> — after a train is marked as a physics train.
+ * Forces Create's Flywheel contraption visual to rebuild after a train is marked as a physics train.
  *
- * <p>Why this is needed: {@code ContraptionVisual} builds its child block-entity visuals <b>once</b>,
- * at first render, from {@code ClientContraption.renderedBlockEntityView}. That first render can
- * happen <i>before</i> our {@code PhysicsTrainSyncPacket} arrives, so at build time the train isn't
- * yet known to be physical and the bogey visual is created normally. The contraption <i>structure</i>
- * hides correctly anyway (its {@code getRenderedBlocks} is re-evaluated every frame), but the cached
- * children are not — hence the wheels stay visible.
- *
- * <p>We call {@link ClientContraption#resetRenderLevel()} (NOT just {@code invalidateChildren()}):
- * {@code invalidateChildren} only rebuilds the child visuals from the <i>already-populated</i>
- * {@code renderedBlockEntityView}, so the bogey BEs would survive. {@code resetRenderLevel} instead
- * CLEARS {@code renderedBlockEntities}, re-runs {@code setupRenderLevelAndRenderedBlockEntities} —
- * which {@code ClientContraptionRenderMixin} now cancels for physics trains, leaving the list empty —
- * and then bumps both structure/children versions, so {@code ContraptionVisual} rebuilds with no
- * bogey visual.
+ * <p>The contraption's <i>structure</i> and child block-entity visuals are built from
+ * {@code ClientContraption} state that is captured at first render — which can happen <i>before</i> our
+ * {@code PhysicsTrainSyncPacket} arrives, so at build time the train isn't yet known to be physical and
+ * the visuals are created normally. {@link ClientContraption#resetRenderLevel()} clears that state and
+ * bumps the structure/children versions, so on the next frame the visual rebuilds — and this time
+ * {@code ClientContraptionRenderMixin} / {@code ContraptionVisualChildrenMixin} see a physics train and
+ * suppress it. (The travelling bogey is handled per-frame by {@code CarriageBogeyVisualMixin} and needs
+ * no rebuild.)
  *
  * <p>The carriage entities may not have spawned on the client at sync time, so we retry for a short
  * window on the client tick until the train's carriages are found.
@@ -47,28 +38,14 @@ public final class PhysicsTrainRenderInvalidator {
     private static final Map<UUID, Integer> PENDING = new ConcurrentHashMap<>();
     private static final int RETRY_TICKS = 60;
 
-    /**
-     * The virtual render worlds of physics trains' ghost contraptions, refreshed every client tick.
-     * Create draws the ghost carriage's bogeys as Flywheel block-entity visuals living in these
-     * worlds; {@code BlockEntityStorageMixin} consults this set to hide them (the sub-level draws the
-     * real, rigidly-attached bogeys instead).
-     */
-    private static final Set<Level> PHYSICS_RENDER_WORLDS = ConcurrentHashMap.newKeySet();
-    private static int worldLogCounter = 0;
-
     private PhysicsTrainRenderInvalidator() {
     }
 
-    /** Request a child-visual rebuild for the given train (call when it enters physics mode). */
+    /** Request a render rebuild for the given train (call when it enters physics mode). */
     public static void request(UUID trainId) {
         if (trainId != null) {
             PENDING.put(trainId, RETRY_TICKS);
         }
-    }
-
-    /** True if {@code level} is the render world of a physics train's ghost contraption. */
-    public static boolean isPhysicsContraptionWorld(Level level) {
-        return level != null && PHYSICS_RENDER_WORLDS.contains(level);
     }
 
     @SubscribeEvent
@@ -76,24 +53,8 @@ public final class PhysicsTrainRenderInvalidator {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) {
             PENDING.clear();
-            PHYSICS_RENDER_WORLDS.clear();
             return;
         }
-
-        // Refresh the set of physics-train contraption render worlds (cheap: a handful of trains).
-        PHYSICS_RENDER_WORLDS.clear();
-        for (CarriageContraptionEntity carriage : ClientPhysicsTrainRegistry.physicsCarriages()) {
-            Contraption c = carriage.getContraption();
-            if (c != null) {
-                var rl = c.getOrCreateClientContraptionLazy().getRenderLevel();
-                PHYSICS_RENDER_WORLDS.add(rl);
-                if (worldLogCounter++ % 40 == 0) {
-                    LoconauticsConstants.LOGGER.info("[ghost-world] tracking renderLevel {}#{}",
-                            rl == null ? "null" : rl.getClass().getSimpleName(), System.identityHashCode(rl));
-                }
-            }
-        }
-
         if (PENDING.isEmpty()) {
             return;
         }
@@ -103,15 +64,12 @@ public final class PhysicsTrainRenderInvalidator {
             var entry = it.next();
             UUID trainId = entry.getKey();
             boolean invalidatedAny = false;
-            int matched = 0;
 
             for (Entity e : mc.level.entitiesForRendering()) {
                 if (e instanceof CarriageContraptionEntity cce && trainId.equals(cce.trainId)) {
-                    matched++;
                     Contraption contraption = cce.getContraption();
                     if (contraption != null) {
-                        ClientContraption client = contraption.getOrCreateClientContraptionLazy();
-                        client.resetRenderLevel();
+                        contraption.getOrCreateClientContraptionLazy().resetRenderLevel();
                         invalidatedAny = true;
                     }
                 }
@@ -119,9 +77,6 @@ public final class PhysicsTrainRenderInvalidator {
 
             int remaining = entry.getValue() - 1;
             if (invalidatedAny || remaining <= 0) {
-                LoconauticsConstants.LOGGER.info(
-                        "[bogey-inv] train={} matchedEntities={} invalidated={} (ticksLeft={})",
-                        trainId, matched, invalidatedAny, remaining);
                 it.remove();
             } else {
                 entry.setValue(remaining);

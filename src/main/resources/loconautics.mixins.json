@@ -13,8 +13,8 @@
     "client.StationBlockEntityAccessor",
     "client.ClientContraptionRenderMixin",
     "client.CarriageBogeyRenderMixin",
-    "client.ContraptionVisualSetupMixin",
-    "client.BlockEntityStorageMixin",
+    "client.CarriageBogeyVisualMixin",
+    "client.ContraptionVisualChildrenMixin",
     "client.ClientSubLevelRenderMixin"
   ],
   "injectors": {
