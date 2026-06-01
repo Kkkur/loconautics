@@ -1,5 +1,7 @@
 package com.lycoris.loconautics.client;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -10,6 +12,7 @@ import javax.annotation.Nullable;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 
 import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
 
@@ -82,5 +85,23 @@ public final class ClientPhysicsTrainRegistry {
 
     public static boolean isPhysicsTrain(UUID trainId) {
         return TAGS.containsKey(trainId);
+    }
+
+    /** Every currently-available client carriage entity that belongs to a physics train. */
+    public static List<CarriageContraptionEntity> physicsCarriages() {
+        List<CarriageContraptionEntity> out = new ArrayList<>();
+        for (PhysicsTrainTag tag : TAGS.values()) {
+            Train train = Create.RAILWAYS.trains.get(tag.trainId());
+            if (train == null) {
+                continue;
+            }
+            for (Carriage carriage : train.carriages) {
+                CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+                if (entity != null) {
+                    out.add(entity);
+                }
+            }
+        }
+        return out;
     }
 }

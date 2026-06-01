@@ -1,10 +1,9 @@
 package com.lycoris.loconautics.mixin.client;
 
+import com.lycoris.loconautics.client.PhysicsTrainRenderInvalidator;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlockEntity;
 import dev.engine_room.flywheel.impl.visualization.storage.BlockEntityStorage;
-import dev.ryanhcode.sable.Sable;
-import dev.ryanhcode.sable.sublevel.ClientSubLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -12,17 +11,16 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Stops Flywheel from creating a visual for a <b>bogey block entity</b> that lives inside a physics
- * train's Sable sub-level.
+ * Hides Create's <b>ghost-carriage bogey</b> from Flywheel so the train's bogeys come ONLY from the
+ * Sable sub-level — making the body and the bogeys one rigid object that can't drift apart (they share
+ * the sub-level's render pose, which {@code ClientSubLevelRenderMixin} couples to the carriage).
  *
- * <p>When a train is assembled, Create captures the bogey blocks into the contraption, so they end up
- * as real blocks in the sub-level's plot. Flywheel then visualizes their {@link AbstractBogeyBlockEntity}
- * (the animated wheels) directly via {@link BlockEntityStorage}, independently of the (already
- * suppressed) ghost-carriage render — which is why the wheels stayed visible despite every
- * contraption-side fix. This is the same hook Create-Interactive uses for Valkyrien Skies ships
- * ({@code MixinVisualManager} on Flywheel's BlockEntityStorage); reimplemented here for Sable.
- *
- * <p>We only pay the sub-level lookup for actual bogey BEs (cheap {@code instanceof} guard first).
+ * <p>Create draws the ghost carriage's bogey as a Flywheel {@link AbstractBogeyBlockEntity} visual that
+ * lives in the contraption's <i>virtual render world</i>. We suppress exactly those (the BE's level is
+ * one of the physics trains' contraption render worlds, tracked by
+ * {@link PhysicsTrainRenderInvalidator}). The bogey blocks the sub-level captured render normally, at
+ * the coupled pose. This is the same Flywheel hook Create-Interactive uses ({@code MixinVisualManager}
+ * on {@code BlockEntityStorage}); reimplemented here for Sable.
  */
 @Mixin(BlockEntityStorage.class)
 public class BlockEntityStorageMixin {
@@ -34,18 +32,17 @@ public class BlockEntityStorageMixin {
             at = @At("HEAD"),
             cancellable = true,
             remap = false)
-    private void loconautics$suppressPhysicsTrainBogey(BlockEntity be, CallbackInfoReturnable<Boolean> cir) {
+    private void loconautics$hideGhostBogey(BlockEntity be, CallbackInfoReturnable<Boolean> cir) {
         if (be instanceof AbstractBogeyBlockEntity) {
-            // Race-free: suppress the Flywheel bogey visual for ANY bogey that lives inside a Sable
-            // sub-level. We only ever create sub-levels for physics trains, and this check works the
-            // moment the sub-level exists (no dependency on the sync packet arriving first).
-            ClientSubLevel sub = Sable.HELPER.getContainingClient(be);
-            if (loconautics$logged < 12) {
+            boolean ghostWorld = PhysicsTrainRenderInvalidator.isPhysicsContraptionWorld(be.getLevel());
+            if (loconautics$logged < 20) {
                 loconautics$logged++;
-                LoconauticsConstants.LOGGER.info("[bogey-accept] bogey BE at {} containingSubLevel={}",
-                        be.getBlockPos(), sub == null ? "null" : sub.getUniqueId());
+                LoconauticsConstants.LOGGER.info("[bogey-accept] bogey BE at {} level={}#{} ghostWorld={}",
+                        be.getBlockPos(),
+                        be.getLevel() == null ? "null" : be.getLevel().getClass().getSimpleName(),
+                        System.identityHashCode(be.getLevel()), ghostWorld);
             }
-            if (sub != null) {
+            if (ghostWorld) {
                 cir.setReturnValue(false);
             }
         }

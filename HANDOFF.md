@@ -491,3 +491,106 @@ disassembly conserva cofres+inventarios+bloques rotos ✅.
 
 **Workflow de prueba:** el jar se despliega en `Skybound SMP/mods/` y el `latest.log` de esa instancia
 SÍ lo puede leer Claude directamente (la prueba debe hacerse en ESA máquina, no en la del compañero).
+
+---
+
+## 13. SESIÓN DE RENDER (2026-06-01) — LA MÁS RECIENTE Y FUENTE DE VERDAD ⭐
+
+> **Léela ANTES de tocar render.** Todo lo aprendido haciendo que el tren físico SE VEA bien.
+> Complementa `ANALISIS_CREATE_INTERACTIVE.md`. Donde haya conflicto con secciones anteriores sobre
+> render/orientación, MANDA ESTA.
+
+### 13.0 Estado actual (qué funciona / qué falta)
+- ✅ El **cuerpo del vagón (sub-level) va CLAVADO** a la posición del vagón de Create, sin jitter ni
+  arrastre, recto y en curva (commit **`cf956b8`**).
+- ✅ Altura correcta, cofres accesibles, disassembly conserva inventarios/bloques rotos.
+- ✅ El sub-level lleva su **propio bogey físico** sincronizado con el cuerpo.
+- ❌ **TAREA ABIERTA:** el **bogey FANTASMA de Create** (el del contraption invisible) TODAVÍA se ve
+  y va con lag (~0.5s). Hay que ocultarlo. Build de diagnóstico desplegado (jar `74db9aa2`, **SIN
+  commitear**). Ver §13.5.
+
+### 13.1 ARQUITECTURA DE RENDER (cómo se dibuja el tren físico)
+Create maneja la LÓGICA y la POSICIÓN del tren (vías, señales). El sub-level de Sable es lo que SE VE y
+lo FÍSICO (colisión, cofres). Para que el sub-level se vea exactamente donde está el vagón:
+
+1. **Driver servidor** (`PhysicsTrainTickHandler`): cada tick teleporta el cuerpo físico del sub-level a
+   la pose del vagón (`teleport` + `resetVelocity`). Es para la COLISIÓN.
+   - OJO: en el SERVIDOR `entity.getRotationState()` devuelve TODO CERO → la orientación de colisión es
+     identidad. Aceptable para colisión.
+2. **Acoplamiento de render CLIENTE** = `ClientSubLevelRenderMixin` (mixin sobre
+   `ClientSubLevel.renderPose(F)`). **EL TRUCO CLAVE.** Cada frame sobrescribe la pose con la que Sable
+   dibuja el sub-level para que sea la pose interpolada EXACTA del vagón de Create:
+   - posición = `carriage.getPosition(partialTick)` (= `lerp(xOld,x)`, lo MISMO que usa Create para el
+     contraption, verificado en `ContraptionMatrices.translateToEntity`).
+   - orientación = `PhysicsTrainPose.orientationOf(carriage)` (de `getRotationState()`, en CLIENTE sí
+     está calculado → correcto en curvas).
+   - anclaje: `renderPos = carriagePos + Q·(rotationPoint - plotAnchor - (0.5,0,0.5))`.
+   - Esto eliminó el jitter/arrastre. **NO volver a conducir el render desde la pose del servidor.**
+
+### 13.2 ARCHIVOS NUEVOS/CLAVE de esta sesión
+- `core/PhysicsTrainPose.java` — `orientationOf(carriage)` compartido. Usa `ContraptionRotationState`:
+  `rotateZYX(zRot,yRot,xRot).rotateLocalY(yawOffset)`.
+- `mixin/client/ClientSubLevelRenderMixin.java` — el acoplamiento de render (`renderPose(F)`).
+- `client/ClientPhysicsTrainRegistry.java` — `findCarriage(subLevelId)`, `isPhysicsSubLevel(uuid)`,
+  `physicsCarriages()`.
+- `mixin/client/BlockEntityStorageMixin.java` — `@Mixin` de Flywheel
+  `impl.visualization.storage.BlockEntityStorage`, hook `willAccept(BlockEntity)`. Oculta el bogey
+  fantasma de Create. Necesita el jar FULL de Flywheel como `compileOnly` (ya en build.gradle).
+- `client/PhysicsTrainRenderInvalidator.java` — además del invalidador, mantiene `PHYSICS_RENDER_WORLDS`
+  (los `VirtualRenderWorld` de los contraptions fantasma) cada tick.
+
+### 13.3 LECCIONES / CALLEJONES SIN SALIDA (NO repetir) 🚫
+1. **NO reconstruir la orientación a mano** desde yaw/pitch. Falla en curvas. Usar `getRotationState()`.
+2. **El SERVIDOR no calcula `getRotationState()`** (devuelve 0). Solo en CLIENTE. Por eso el render se
+   acopla en cliente, no desde la pose del servidor.
+3. **NO usar velocidad/extrapolación** (`addLinearAndAngularVelocity`) para suavizar: el cuerpo se
+   adelantaba/vibraba. Quitado. Solo `resetVelocity`.
+4. **`getPosition(partialTick)` SÍ, `getAnchorVec()` NO.** Create dibuja el contraption con
+   `getPosition` (lerp xOld/x). anchorVec hacía el cuerpo ir "rápido".
+5. **Ocultar el bogey NO es por `ContraptionVisual.setupVisualizer` ni `resetRenderLevel`.** El bogey
+   del contraption se visualiza por `BlockEntityStorage.willAccept` de Flywheel. `[bogey-cancel]` NUNCA
+   sale → ese camino no es el de los bogeys.
+6. **Los bloques de bogey SÍ se capturan en el sub-level** (`CarriageContraption.capture`,
+   `instanceof AbstractBogeyBlock`). Por eso: mostrar los del sub-level, ocultar los de Create.
+7. **`@Shadow` de campo HEREDADO de superclase ajena = CRASH** (problema #8). Para `entity` de
+   `AbstractEntityVisual` se EXTIENDE la clase (no `@Shadow`). Para campos del PROPIO target (p.ej.
+   `renderPose` de `ClientSubLevel`) sí vale `@Shadow`.
+8. **Bug de edición recurrente:** poner un campo `private static int loconautics$logged` JUSTO antes
+   del método con `@Inject` lo mete ENTRE la anotación y el método → error "annotation interface not
+   applicable". Poner el campo ANTES de la anotación.
+9. **El render inmediato de bogeys (`CarriageContraptionEntityRenderer.render`) se SALTA bajo Flywheel**
+   (offset 43). `CarriageBogeyRenderMixin` solo sirve sin Flywheel.
+
+### 13.4 EL DESAFÍO DE FONDO (por qué cuerpo y bogey de Create no van 100% juntos)
+El cuerpo lo dibuja Sable, el bogey de Create lo dibuja Create/Flywheel → dos motores con fases de
+interpolación distintas → desajuste pequeño imposible de cuadrar mientras vengan de motores distintos.
+**Solución (en curso):** que el bogey también lo dibuje el SUB-LEVEL (sus bloques de bogey ya van
+rígidos con el cuerpo) y **ocultar el de Create**. El sub-level ya lleva su bogey físico ✅; falta
+ocultar el de Create.
+
+### 13.5 TAREA ABIERTA: ocultar el bogey fantasma de Create
+- Es un `AbstractBogeyBlockEntity` visualizado por Flywheel vía `BlockEntityStorage`.
+- Estrategia (jar `74db9aa2`, sin commitear): `BlockEntityStorageMixin.willAccept` devuelve `false` si
+  `be.getLevel()` está en `PHYSICS_RENDER_WORLDS` (los `VirtualRenderWorld` de los contraptions físicos,
+  rastreados por `PhysicsTrainRenderInvalidator` cada tick vía
+  `contraption.getOrCreateClientContraptionLazy().getRenderLevel()`).
+- **Diagnóstico desplegado:** logs `[bogey-accept]` (nivel del bogey BE: clase + identityHashCode +
+  `ghostWorld`) y `[ghost-world]` (los renderLevel rastreados). **PRÓXIMO PASO: el usuario prueba, leer
+  el log y comparar los identityHashCode.** Hipótesis: `be.getLevel()` ≠ el `getRenderLevel()`
+  rastreado (instancia distinta tras `resetRenderLevel`), o el bogey está en el main level. Ajustar la
+  detección según eso.
+- **NO suprimir los bogeys del SUB-LEVEL** (esos SE MUESTRAN). Solo los del mundo-de-render fantasma.
+  En `willAccept`, `getContainingClient(be) != null` = sub-level → dejar pasar.
+
+### 13.6 RECORDATORIOS DE WORKFLOW
+- **Build+deploy:** `./gradlew build` → `cp build/libs/loconautics-1.0.0.jar "/c/Users/User/curseforge/
+  minecraft/Instances/Skybound SMP/mods/"`. **Hay que REINICIAR Minecraft** (no hay hot-reload). El
+  usuario está MUY cansado de reiniciar → batch de cambios, acertar a la primera, verificar md5 del jar
+  desplegado vs compilado.
+- **Log:** `...\Skybound SMP\logs\latest.log` (Claude lo lee directo). Verificar que el run arrancó
+  DESPUÉS del deploy y que el md5 del jar coincide.
+- Para "ver" de verdad, pedir al usuario una CAPTURA (las suyas fueron clarísimas).
+- **Create-Interactive** (`ValkyrienSkies/Create-Interactive`, licencia *All Rights Reserved* →
+  REIMPLEMENTAR, NO copiar). El mapa VS→Sable está en `ANALISIS_CREATE_INTERACTIVE.md`.
+- **Commit/push solo cuando el usuario lo pida.** Usar `-m` múltiples de bash (NO here-string de
+  PowerShell `@'...'@`, mete un `@` en el asunto). Acabar con `Co-Authored-By: Claude Opus 4.8`.

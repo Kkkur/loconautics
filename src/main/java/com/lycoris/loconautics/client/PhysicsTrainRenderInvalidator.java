@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.client;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -11,6 +12,7 @@ import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -45,6 +47,15 @@ public final class PhysicsTrainRenderInvalidator {
     private static final Map<UUID, Integer> PENDING = new ConcurrentHashMap<>();
     private static final int RETRY_TICKS = 60;
 
+    /**
+     * The virtual render worlds of physics trains' ghost contraptions, refreshed every client tick.
+     * Create draws the ghost carriage's bogeys as Flywheel block-entity visuals living in these
+     * worlds; {@code BlockEntityStorageMixin} consults this set to hide them (the sub-level draws the
+     * real, rigidly-attached bogeys instead).
+     */
+    private static final Set<Level> PHYSICS_RENDER_WORLDS = ConcurrentHashMap.newKeySet();
+    private static int worldLogCounter = 0;
+
     private PhysicsTrainRenderInvalidator() {
     }
 
@@ -55,14 +66,35 @@ public final class PhysicsTrainRenderInvalidator {
         }
     }
 
+    /** True if {@code level} is the render world of a physics train's ghost contraption. */
+    public static boolean isPhysicsContraptionWorld(Level level) {
+        return level != null && PHYSICS_RENDER_WORLDS.contains(level);
+    }
+
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
-        if (PENDING.isEmpty()) {
-            return;
-        }
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) {
             PENDING.clear();
+            PHYSICS_RENDER_WORLDS.clear();
+            return;
+        }
+
+        // Refresh the set of physics-train contraption render worlds (cheap: a handful of trains).
+        PHYSICS_RENDER_WORLDS.clear();
+        for (CarriageContraptionEntity carriage : ClientPhysicsTrainRegistry.physicsCarriages()) {
+            Contraption c = carriage.getContraption();
+            if (c != null) {
+                var rl = c.getOrCreateClientContraptionLazy().getRenderLevel();
+                PHYSICS_RENDER_WORLDS.add(rl);
+                if (worldLogCounter++ % 40 == 0) {
+                    LoconauticsConstants.LOGGER.info("[ghost-world] tracking renderLevel {}#{}",
+                            rl == null ? "null" : rl.getClass().getSimpleName(), System.identityHashCode(rl));
+                }
+            }
+        }
+
+        if (PENDING.isEmpty()) {
             return;
         }
 
