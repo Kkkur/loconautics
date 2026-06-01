@@ -13,7 +13,9 @@
     "client.StationBlockEntityAccessor",
     "client.ClientContraptionRenderMixin",
     "client.CarriageBogeyRenderMixin",
-    "client.ContraptionVisualSetupMixin"
+    "client.ContraptionVisualSetupMixin",
+    "client.BlockEntityStorageMixin",
+    "client.ClientSubLevelRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1

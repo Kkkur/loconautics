@@ -1,12 +1,17 @@
 package com.lycoris.loconautics.client;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.annotation.Nullable;
 
 import com.lycoris.loconautics.core.PhysicsTrainTag;
+
+import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
+import com.simibubi.create.content.trains.entity.Train;
 
 /**
  * Client-side mirror of {@link com.lycoris.loconautics.server.PhysicsTrainRegistry}, populated by
@@ -19,19 +24,55 @@ public final class ClientPhysicsTrainRegistry {
 
     private static final Map<UUID, PhysicsTrainTag> TAGS = new ConcurrentHashMap<>();
 
+    /** Flat set of every sub-level id belonging to a physics train, for O(1) lookup by render code. */
+    private static final Set<UUID> PHYSICS_SUBLEVELS = ConcurrentHashMap.newKeySet();
+
     private ClientPhysicsTrainRegistry() {
     }
 
     public static void put(PhysicsTrainTag tag) {
         TAGS.put(tag.trainId(), tag);
+        PHYSICS_SUBLEVELS.addAll(tag.subLevelIds());
     }
 
     public static void remove(UUID trainId) {
-        TAGS.remove(trainId);
+        PhysicsTrainTag removed = TAGS.remove(trainId);
+        if (removed != null) {
+            removed.subLevelIds().forEach(PHYSICS_SUBLEVELS::remove);
+        }
     }
 
     public static void clear() {
         TAGS.clear();
+        PHYSICS_SUBLEVELS.clear();
+    }
+
+    /** True if the given Sable sub-level id backs a carriage of some physics train. */
+    public static boolean isPhysicsSubLevel(@Nullable UUID subLevelId) {
+        return subLevelId != null && PHYSICS_SUBLEVELS.contains(subLevelId);
+    }
+
+    /**
+     * The client carriage entity whose sub-level is {@code subLevelId}, or {@code null}. Resolves
+     * sub-level -> train (via the tag's ordered carriage list) -> Create's client train -> entity.
+     */
+    @Nullable
+    public static CarriageContraptionEntity findCarriage(@Nullable UUID subLevelId) {
+        if (subLevelId == null) {
+            return null;
+        }
+        for (PhysicsTrainTag tag : TAGS.values()) {
+            int idx = tag.subLevelIds().indexOf(subLevelId);
+            if (idx < 0) {
+                continue;
+            }
+            Train train = Create.RAILWAYS.trains.get(tag.trainId());
+            if (train == null || idx >= train.carriages.size()) {
+                return null;
+            }
+            return train.carriages.get(idx).anyAvailableEntity();
+        }
+        return null;
     }
 
     @Nullable

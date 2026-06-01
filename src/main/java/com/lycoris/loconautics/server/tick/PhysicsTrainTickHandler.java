@@ -2,20 +2,20 @@ package com.lycoris.loconautics.server.tick;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.core.PhysicsTrainPose;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 import com.lycoris.loconautics.server.PhysicsTrainRegistry;
 import com.lycoris.loconautics.server.assembly.PhysicsTrainDisassembler;
 
 import com.simibubi.create.Create;
+import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
@@ -49,18 +49,6 @@ public final class PhysicsTrainTickHandler {
     private static final int LOG_INTERVAL = 40;
     private static int tickCounter = 0;
 
-    /** Server ticks per second — used to turn a per-tick pose delta into a velocity. */
-    private static final double TICKS_PER_SECOND = 20.0;
-
-    /**
-     * Last pose we drove each sub-level to, as {@code [px,py,pz, qx,qy,qz,qw]}, keyed by sub-level id.
-     * Used to feed the physics body a velocity (delta * tickrate) instead of zeroing it, so the client
-     * interpolates the body smoothly between server ticks rather than snapping. This mirrors
-     * Create-Interactive's {@code ServerShipTransformProvider}, which supplies the body a linear and
-     * angular velocity derived from the pose change each tick.
-     */
-    private static final Map<UUID, double[]> PREV_POSE = new ConcurrentHashMap<>();
-
     private PhysicsTrainTickHandler() {
     }
 
@@ -85,7 +73,6 @@ public final class PhysicsTrainTickHandler {
         Train train = Create.RAILWAYS.trains.get(tag.trainId());
         if (train == null) {
             // Orphan: the Create train is gone (disassembled / removed). Tear down the sub-levels.
-            tag.subLevelIds().forEach(PREV_POSE::remove);
             PhysicsTrainDisassembler.disassemble(server, tag.trainId());
             return;
         }
@@ -119,7 +106,7 @@ public final class PhysicsTrainTickHandler {
 
             PhysicsPipeline pipeline = container.physicsSystem().getPipeline();
 
-            Quaterniond orientation = orientationOf(entity);
+            Quaterniond orientation = PhysicsTrainPose.orientationOf(entity);
             Vector3d target = targetPosition(entity, serverSub, orientation);
 
             // Capture the inputs BEFORE teleport so the log reflects what fed into targetPosition.
@@ -127,32 +114,21 @@ public final class PhysicsTrainTickHandler {
             BlockPos plotAnchor = serverSub.getPlot().getCenterBlock();
             Vector3dc com = serverSub.getMassTracker().getCenterOfMass();
 
+            // Pin the sub-level EXACTLY to the pose Create computed for the carriage this tick, with no
+            // velocity/extrapolation (which made the body drift/jitter ahead of the bogeys). Sable still
+            // interpolates between server poses on the client.
             pipeline.teleport(serverSub, target, orientation);
-
-            // Instead of zeroing the velocity (which makes the body snap from tick to tick on the
-            // client), feed it the velocity implied by this tick's pose change, so Sable interpolates
-            // it smoothly between ticks. resetVelocity first so the add SETS rather than accumulates.
             pipeline.resetVelocity(serverSub);
-            double[] prev = PREV_POSE.get(subLevelId);
-            if (prev != null) {
-                Vector3d linVel = new Vector3d(
-                        (target.x - prev[0]) * TICKS_PER_SECOND,
-                        (target.y - prev[1]) * TICKS_PER_SECOND,
-                        (target.z - prev[2]) * TICKS_PER_SECOND);
-                Vector3d omega = angularVelocity(orientation, new Quaterniond(prev[3], prev[4], prev[5], prev[6]));
-                pipeline.addLinearAndAngularVelocity(serverSub, linVel, omega);
-            }
-            PREV_POSE.put(subLevelId, new double[] {
-                    target.x, target.y, target.z,
-                    orientation.x, orientation.y, orientation.z, orientation.w });
             driven++;
 
             if (log && i == 0) {
                 Vector3dc after = serverSub.logicalPose().position();
+                AbstractContraptionEntity.ContraptionRotationState rs = entity.getRotationState();
                 LoconauticsConstants.LOGGER.info(
-                        "[drive] c0: entityPos={} yaw={} pitch={} initYaw={} | plotAnchor={} rotationPoint=({},{},{}) com={} "
+                        "[drive] c0: entityPos={} yaw={} pitch={} initYaw={} rotState=(x{},y{},z{},yawOff{}) | plotAnchor={} rotationPoint=({},{},{}) com={} "
                         + "| orient=({},{},{},{}) -> target=({},{},{}) | poseAfter=({},{},{})",
-                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), fmt(entity.getInitialYaw()), plotAnchor,
+                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), fmt(entity.getInitialYaw()),
+                        fmt(rs.xRotation), fmt(rs.yRotation), fmt(rs.zRotation), fmt(rs.getYawOffset()), plotAnchor,
                         fmt(rpBefore.x()), fmt(rpBefore.y()), fmt(rpBefore.z()),
                         com == null ? "null" : ("(" + fmt(com.x()) + "," + fmt(com.y()) + "," + fmt(com.z()) + ")"),
                         fmt(orientation.x), fmt(orientation.y), fmt(orientation.z), fmt(orientation.w),
@@ -163,7 +139,6 @@ public final class PhysicsTrainTickHandler {
 
         // Train exists but its sub-levels are gone (e.g. removed after a reload): drop the binding.
         if (driven == 0 && sawContainer && count > 0) {
-            tag.subLevelIds().forEach(PREV_POSE::remove);
             PhysicsTrainDisassembler.disassemble(server, tag.trainId());
         }
     }
@@ -197,54 +172,6 @@ public final class PhysicsTrainTickHandler {
         orientation.transform(offset); // rotate the local offset into world space
         target.add(offset);
         return target;
-    }
-
-    /**
-     * Builds the carriage's world orientation as a JOML quaternion, replicating EXACTLY what Create
-     * does in {@code OrientedContraptionEntity.applyLocalTransforms} (verified via javap):
-     *
-     * <pre>
-     *   center -> rotateY(viewYaw) -> rotateZ(pitch) -> rotateY(initialYaw) -> uncenter
-     * </pre>
-     *
-     * where (from {@code getViewYRot}/{@code getViewXRot}/{@code getInitialYaw}):
-     * <ul>
-     *   <li>{@code viewYaw  = -yaw}   — getViewYRot negates the (lerped) yaw;</li>
-     *   <li>{@code pitch    =  pitch} — applied around <b>Z</b>, not X;</li>
-     *   <li>{@code initialYaw = initialOrientation.toYRot()} (0/90/180/270, SOUTH=0).</li>
-     * </ul>
-     *
-     * <p>At assembly the carriage faces its initial orientation, so {@code yaw == initialYaw} and this
-     * reduces to identity — which matches the sub-level captured world-aligned (Rotation.NONE). As the
-     * train turns, this rotates the sub-level the same way Create rotates the carriage. The previous
-     * formula ({@code rotationYXZ(-yaw+180, pitch, 0)}) used a bogus +180, treated pitch as an X
-     * rotation, and ignored {@code initialYaw} — hence the "twisted" look.
-     *
-     * <p>JOML {@code rotateY/rotateZ} post-multiply, matching Flywheel's {@code rotateYDegrees/
-     * rotateZDegrees} call order, and share Minecraft's right-handed convention.
-     */
-    private static Quaterniond orientationOf(CarriageContraptionEntity entity) {
-        double viewYaw = -entity.yaw;
-        double pitch = entity.pitch;
-        double initialYaw = entity.getInitialYaw();
-        return new Quaterniond()
-                .rotateY(Math.toRadians(viewYaw))
-                .rotateZ(Math.toRadians(pitch))
-                .rotateY(Math.toRadians(initialYaw));
-    }
-
-    /**
-     * Angular velocity (rad/s) that carries {@code prevOrient} to {@code curOrient} over one tick,
-     * replicating Create-Interactive's omega derivation: the vector part of the quaternion difference,
-     * times two (small-angle approx of the rotation vector), sign-corrected, scaled by the tickrate.
-     */
-    private static Vector3d angularVelocity(Quaterniond curOrient, Quaterniond prevOrient) {
-        Quaterniond diff = curOrient.difference(prevOrient, new Quaterniond()).normalize();
-        Vector3d omega = new Vector3d(diff.x * 2.0, diff.y * 2.0, diff.z * 2.0);
-        if (diff.w > 0.0) {
-            omega.mul(-1.0);
-        }
-        return omega.mul(TICKS_PER_SECOND);
     }
 
     private static String fmt(double d) {
