@@ -628,3 +628,101 @@ en `animate` en vez de ocultarlo.
   REIMPLEMENTAR, NO copiar). El mapa VS→Sable está en `ANALISIS_CREATE_INTERACTIVE.md`.
 - **Commit/push solo cuando el usuario lo pida.** Usar `-m` múltiples de bash (NO here-string de
   PowerShell `@'...'@`, mete un `@` en el asunto). Acabar con `Co-Authored-By: Claude Opus 4.8`.
+
+---
+
+## 14. SESIÓN COLISIÓN/INTERACCIÓN (2026-06-02) — TAREA ABIERTA PARA EL COMPA ⭐
+
+> El render ya está clavado y el bogey fantasma oculto (§13, commit `1b57c1d`). Esta sesión atacó la
+> **colisión y la interacción** del tren físico. El bogey quedó RESUELTO. La colisión NO — se deja
+> documentada aquí con todo lo probado, los hallazgos DEFINITIVOS y la dirección recomendada.
+
+### 14.0 Qué se commiteó esta sesión (estado del repo)
+- `mixin/ContraptionColliderSkipMixin` — `@Inject HEAD cancellable` en `ContraptionCollider.collideEntities`
+  → cancela para trenes físicos. Desactiva el **empuje + anti-clip** del contraption de Create. Es el
+  enfoque de CI (`MixinContraptionCollider`: *"Disable contraption collision entirely! We'll get it from
+  VS2"*). **Verificado en log** (`[collide-skip] physics=true -> CANCELLED` en CLIENT y SERVER).
+- `mixin/EntityNoContraptionCollisionMixin` — `@Inject HEAD cancellable` en `Entity.canBeCollidedWith`
+  → `false` para `CarriageContraptionEntity` física. Belt-and-suspenders: la entidad contraption no es
+  sólida. (Probablemente no-op porque `canBeCollidedWith` ya es `false` por defecto, pero deja explícito
+  el estado deseado: **colisión de Create totalmente OFF**.)
+- Resto SIN cambios respecto a `1b57c1d` (se revirtieron los experimentos fallidos, ver §14.3).
+
+### 14.1 HALLAZGOS DEFINITIVOS (medidos in-game, no teoría) ✅
+1. **La INTERACCIÓN/RAYTRACE FUNCIONA.** Con F3, al apuntar al cuerpo visible el **"Targeted Block" sale
+   en coords del PLOT** (`20481032, 12X, 20481032`) con el bloque correcto (`create:controls`,
+   `railway_casing`, `small_bogey`). **Sable transforma el rayo del jugador al sub-level** → apuntas a los
+   bloques del cuerpo visible. **NO hay desfase de apuntado.** → NO parchear `getAnchorVec`/`toLocalVector`
+   de Create; de la interacción se encarga Sable.
+2. **La FÍSICA de Sable ESTÁ en el cuerpo visible.** Log `[poses]` (cliente, tren parado):
+   `entityPos=(-7.5, 64.0, 22.5)`, `renderPose=(-7.5, 64.643, 22.098)`, `logicalPose=(-7.5, 64.636,
+   22.098)`. → **`logicalPose` (física Sable) ≈ `renderPose` (visible), IDÉNTICOS.** La pose física del
+   sub-level YA está donde se ve. No hay nada que "sincronizar" entre física y render.
+3. **La colisión que el jugador siente ("caja gris" en F3+B) está en `entityPos`** (la del contraption de
+   Create: `y -0.64`, `z -0.40` respecto al cuerpo visible). El usuario quiere chocar con la roja (visible),
+   no con la gris.
+4. **PERO la colisión de Create está TOTALMENTE desactivada** (`collideEntities` cancelado, entidad no
+   sólida) **y la gris PERSISTE** → por eliminación, la "gris" NO es de Create: es el **cuerpo cinemático
+   de Sable comportándose mal** (la pose física = visible, pero la *resolución* de colisión empuja al
+   jugador de lado al aterrizar, y la posición efectiva se siente a nivel de raíl). Es un problema del
+   **modelo cinemático teleport-por-tick**, no de Create.
+
+### 14.2 SÍNTOMAS que reporta el usuario
+- Al volar/caer encima del tren parado, **al tocar suelo te teletransporta al bloque de al lado** (empuje
+  lateral en la resolución de colisión).
+- Al **conducir**, el cuerpo **no te arrastra** (te empuja) — el body se teletransporta por debajo de ti.
+- Probé darle velocidad al body (como CI) → **STUTTERING** notable.
+
+### 14.3 CALLEJONES SIN SALIDA de esta sesión (NO repetir) 🚫
+1. **Parchear `getAnchorVec`/`toLocalVector` de Create** para alinear interacción/colisión: INNECESARIO.
+   Sable ya maneja el raytrace (§14.1.1). Probé varias fórmulas de offset (render-offset, delta de
+   interpolación + `(Q-I)·(0,0.5,0)`); **todas dan 0 estando parado/plano** y no cambian nada → el modelo
+   de mapeo plot→mundo que asumí era incorrecto. Revertido.
+2. **`addLinearAndAngularVelocity` (velocidad CI) en el driver** para que el body arrastre al jugador:
+   causó **stutter**. Revertido a `resetVelocity`. (CI da velocidad pero su ship es `isStatic=true` con un
+   `transformProvider`, no `teleport`+velocidad como nosotros.)
+3. **Desactivar más colisión de Create**: no queda más. `collideEntities` es la única vía jugador↔contraption
+   y está off; la entidad no es sólida (`canBeCollidedWith` default false); `EntityContraptionInteractionMixin.
+   create$onMove` solo pone `onGround`, no bloquea. → la gris NO es de Create.
+
+### 14.4 CAUSA RAÍZ (hipótesis fuerte) y DIRECCIÓN RECOMENDADA para el compa 🎯
+**El driver `PhysicsTrainTickHandler` hace `pipeline.teleport(serverSub, target, orient)` + `resetVelocity`
+cada tick.** El teletransporte discreto choca con el modelo de interpolación/colisión de Sable:
+- F3 de Sable muestra `Interpolation running / Delay: 0.50t` al moverse → Sable **interpola** las poses del
+  servidor con un buffer. El teleport-por-tick produce saltos que la interpolación no suaviza para la
+  COLISIÓN (el render sí, porque lo desacoplamos en `ClientSubLevelRenderMixin`).
+- Sable tiene un modelo kinemático pensado para esto: **`dev.ryanhcode.sable.api.sublevel.KinematicContraption`**
+  expone `sable$getPosition(partialTick)` / `sable$getOrientation(partialTick)` → una transform **continua
+  e interpolada por partialTick**, no un teleport. (El §1 del ANALISIS lo descartó por necesitar
+  `MassTracker`/`FloatingClusterContainer`/`BlockGetter`; reconsiderarlo — puede que sí sea el camino, o que
+  haya forma de registrar el `ServerSubLevel` como kinemático.)
+- **Create-Interactive lo resuelve con un `ServerShipTransformProvider`** (ANALISIS §1): el ship es
+  `isStatic=true` y el provider DICTA `(transform, velocidad lineal, omega)` cada tick. El cliente
+  **extrapola suave** con la velocidad → sin stutter, y las entidades encima se mueven con el body.
+
+**Tareas concretas sugeridas:**
+1. Buscar en Sable el equivalente al `transformProvider` de VS: ¿cómo se mueve un `ServerSubLevel` de forma
+   continua (no teleport)? Mirar `PhysicsPipeline` completo (no solo `teleport`/`resetVelocity`/
+   `addLinearAndAngularVelocity`), `ServerSubLevelContainer.physicsSystem()`, y si hay un modo "kinemático"
+   o "static body con target".
+2. Estudiar **cómo Aeronautics mueve sus sub-levels** (aviones con pasajeros, mismo motor Sable, SIN stutter)
+   — es el mejor referente. El jar es `run/mods/create-aeronautics-bundled-1.21.1-1.2.1.jar` (paquete
+   `dev.simulated_team...`). Probablemente usa el pipeline de física con fuerzas/velocidad continua, no
+   teleport. Replicar ese patrón para un body que sigue un path determinista.
+3. Si el body se mueve continuo (con velocidad real) en vez de teleport: (a) la colisión dejará de empujar
+   de lado, (b) arrastrará al jugador, (c) sin stutter. El reto: que siga EXACTO el path de Create. CI lo
+   logra dictando transform+velocidad cada tick con `isStatic=true`.
+
+### 14.5 HERRAMIENTAS / DATOS para depurar
+- Log `[drive]` (servidor, cada 40 ticks) en `PhysicsTrainTickHandler`: imprime `entityPos, yaw, pitch,
+  initYaw, rotState, plotAnchor, rotationPoint, com, orient, target, poseAfter`. **Clave:** en SERVIDOR
+  `rotState` siempre 0 → `orient` identidad. En este tren `yaw=initYaw=270` → orientación correcta = identidad
+  (el cuerpo se capturó orientado así); el desfase de colisión NO es de orientación, es del modelo de movimiento.
+- El log `[poses]` (cliente) que probó §14.1.2 fue revertido, pero se puede re-añadir en
+  `ClientSubLevelRenderMixin` (loguear `entityPos / renderPose / self.logicalPose()`).
+- F3+B in-game muestra: caja **blanca** = AABB de la entidad contraption; **roja** = cuerpo visible (lo que
+  el usuario quiere); **gris** = lo que choca (cinemático Sable, a nivel raíl). El usuario hace capturas
+  excelentes con F3 — pedírselas.
+- `getRotationState()` de `OrientedContraptionEntity` (verificado javap): `zRotation=pitch`,
+  `yRotation=-yaw+getYawOffset()` (yawOffset=`getInitialYaw()`), y el campo `yawOffset` del state se queda en
+  0 (no se setea). En servidor `yaw` (animado) ya = facing real, así que `yRotation≈0` cuando `yaw=initYaw`.
