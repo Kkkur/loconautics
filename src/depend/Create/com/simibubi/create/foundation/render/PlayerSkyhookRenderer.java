@@ -1,0 +1,122 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.createmod.catnip.animation.AnimationTickHolder
+ *  net.createmod.catnip.math.AngleHelper
+ *  net.minecraft.client.Minecraft
+ *  net.minecraft.client.model.HumanoidModel
+ *  net.minecraft.client.model.geom.ModelPart
+ *  net.minecraft.util.Mth
+ *  net.minecraft.world.entity.HumanoidArm
+ *  net.minecraft.world.entity.player.Player
+ */
+package com.simibubi.create.foundation.render;
+
+import com.simibubi.create.AllTags;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+import net.createmod.catnip.animation.AnimationTickHolder;
+import net.createmod.catnip.math.AngleHelper;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.model.HumanoidModel;
+import net.minecraft.client.model.geom.ModelPart;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.player.Player;
+
+public class PlayerSkyhookRenderer {
+    private static final Set<UUID> hangingPlayers = new HashSet<UUID>();
+
+    public static void updatePlayerList(Collection<UUID> uuids) {
+        hangingPlayers.clear();
+        hangingPlayers.addAll(uuids);
+    }
+
+    public static void beforeSetupAnim(Player player, HumanoidModel<?> model) {
+        if (hangingPlayers.contains(player.getUUID())) {
+            return;
+        }
+        model.head.resetPose();
+        model.hat.resetPose();
+        model.body.resetPose();
+        model.leftArm.resetPose();
+        model.rightArm.resetPose();
+        model.leftLeg.resetPose();
+        model.rightLeg.resetPose();
+    }
+
+    public static void afterSetupAnim(Player player, HumanoidModel<?> model) {
+        if (hangingPlayers.contains(player.getUUID())) {
+            PlayerSkyhookRenderer.setHangingPose(player.getMainArm() == HumanoidArm.LEFT ^ !AllTags.AllItemTags.CHAIN_RIDEABLE.matches(player.getMainHandItem()), model);
+        }
+    }
+
+    private static void setHangingPose(boolean isLeftArmMain, HumanoidModel<?> model) {
+        if (Minecraft.getInstance().isPaused()) {
+            return;
+        }
+        model.head.x = 0.0f;
+        model.hat.x = 0.0f;
+        model.body.resetPose();
+        model.leftArm.resetPose();
+        model.rightArm.resetPose();
+        model.leftLeg.resetPose();
+        model.rightLeg.resetPose();
+        float time = (float)AnimationTickHolder.getTicks((boolean)true) + AnimationTickHolder.getPartialTicks();
+        float mainCycle = Mth.sin((float)((float)((double)((time + 10.0f) * 0.3f) / Math.PI)));
+        float limbCycle = Mth.sin((float)((float)((double)(time * 0.3f) / Math.PI)));
+        float bodySwing = AngleHelper.rad((double)(15.0f + mainCycle * 10.0f));
+        float limbSwing = AngleHelper.rad((double)(limbCycle * 15.0f));
+        if (isLeftArmMain) {
+            bodySwing = -bodySwing;
+        }
+        model.body.zRot = bodySwing;
+        model.head.zRot = bodySwing;
+        model.hat.zRot = bodySwing;
+        ModelPart hangingArm = isLeftArmMain ? model.leftArm : model.rightArm;
+        ModelPart otherArm = isLeftArmMain ? model.rightArm : model.leftArm;
+        hangingArm.y -= 3.0f;
+        float offsetX = hangingArm.x;
+        float offsetY = hangingArm.y;
+        float armPivotX = offsetX * Mth.cos((float)bodySwing) - offsetY * Mth.sin((float)bodySwing) + (float)(isLeftArmMain ? -1 : 1) * 4.5f;
+        float armPivotY = offsetX * Mth.sin((float)bodySwing) + offsetY * Mth.cos((float)bodySwing) + 2.0f;
+        hangingArm.xRot = -AngleHelper.rad((double)150.0);
+        hangingArm.zRot = (float)(isLeftArmMain ? -1 : 1) * AngleHelper.rad((double)15.0);
+        offsetX = otherArm.x;
+        offsetY = otherArm.y;
+        otherArm.x = offsetX * Mth.cos((float)bodySwing) - offsetY * Mth.sin((float)bodySwing);
+        otherArm.y = offsetX * Mth.sin((float)bodySwing) + offsetY * Mth.cos((float)bodySwing);
+        otherArm.zRot = (float)(isLeftArmMain ? -1 : 1) * -AngleHelper.rad((double)20.0) + 0.5f * bodySwing + limbSwing;
+        ModelPart leadingLeg = isLeftArmMain ? model.leftLeg : model.rightLeg;
+        ModelPart trailingLeg = isLeftArmMain ? model.rightLeg : model.leftLeg;
+        leadingLeg.y -= 0.2f;
+        offsetX = leadingLeg.x;
+        offsetY = leadingLeg.y;
+        leadingLeg.x = offsetX * Mth.cos((float)bodySwing) - offsetY * Mth.sin((float)bodySwing);
+        leadingLeg.y = offsetX * Mth.sin((float)bodySwing) + offsetY * Mth.cos((float)bodySwing);
+        leadingLeg.xRot = -AngleHelper.rad((double)25.0);
+        leadingLeg.zRot = (float)(isLeftArmMain ? -1 : 1) * AngleHelper.rad((double)10.0) + 0.5f * bodySwing + limbSwing;
+        trailingLeg.y -= 0.8f;
+        offsetX = trailingLeg.x;
+        offsetY = trailingLeg.y;
+        trailingLeg.x = offsetX * Mth.cos((float)bodySwing) - offsetY * Mth.sin((float)bodySwing);
+        trailingLeg.y = offsetX * Mth.sin((float)bodySwing) + offsetY * Mth.cos((float)bodySwing);
+        trailingLeg.xRot = AngleHelper.rad((double)10.0);
+        trailingLeg.zRot = (float)(isLeftArmMain ? -1 : 1) * -AngleHelper.rad((double)10.0) + 0.5f * bodySwing + limbSwing;
+        model.hat.x -= armPivotX;
+        model.head.x -= armPivotX;
+        model.body.x -= armPivotX;
+        otherArm.x -= armPivotX;
+        trailingLeg.x -= armPivotX;
+        leadingLeg.x -= armPivotX;
+        model.hat.y -= armPivotY;
+        model.head.y -= armPivotY;
+        model.body.y -= armPivotY;
+        otherArm.y -= armPivotY;
+        trailingLeg.y -= armPivotY;
+        leadingLeg.y -= armPivotY;
+    }
+}

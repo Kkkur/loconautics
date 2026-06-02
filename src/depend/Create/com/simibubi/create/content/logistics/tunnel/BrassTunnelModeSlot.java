@@ -1,0 +1,22 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.core.Direction
+ */
+package com.simibubi.create.content.logistics.tunnel;
+
+import com.simibubi.create.foundation.blockEntity.behaviour.CenteredSideValueBoxTransform;
+import net.minecraft.core.Direction;
+
+public class BrassTunnelModeSlot
+extends CenteredSideValueBoxTransform {
+    public BrassTunnelModeSlot() {
+        super((state, d) -> d == Direction.UP);
+    }
+
+    @Override
+    public int getOverrideColor() {
+        return 5841956;
+    }
+}

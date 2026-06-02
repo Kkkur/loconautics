@@ -1,0 +1,137 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.serialization.Codec
+ *  io.netty.buffer.ByteBuf
+ *  net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders
+ *  net.createmod.catnip.lang.Lang
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.Direction
+ *  net.minecraft.nbt.CompoundTag
+ *  net.minecraft.network.codec.StreamCodec
+ *  net.minecraft.util.StringRepresentable
+ *  net.minecraft.world.entity.player.Player
+ *  net.minecraft.world.level.Level
+ *  net.minecraft.world.level.block.Blocks
+ *  net.minecraft.world.level.block.state.BlockState
+ *  org.jetbrains.annotations.NotNull
+ *  org.jetbrains.annotations.Nullable
+ */
+package com.simibubi.create.content.equipment.zapper.terrainzapper;
+
+import com.mojang.serialization.Codec;
+import com.simibubi.create.content.equipment.zapper.ZapperItem;
+import com.simibubi.create.content.equipment.zapper.terrainzapper.FlattenTool;
+import com.simibubi.create.foundation.gui.AllIcons;
+import io.netty.buffer.ByteBuf;
+import java.util.List;
+import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
+import net.createmod.catnip.lang.Lang;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.util.StringRepresentable;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+public enum TerrainTools implements StringRepresentable
+{
+    Fill(AllIcons.I_FILL),
+    Place(AllIcons.I_PLACE),
+    Replace(AllIcons.I_REPLACE),
+    Clear(AllIcons.I_CLEAR),
+    Overlay(AllIcons.I_OVERLAY),
+    Flatten(AllIcons.I_FLATTEN);
+
+    public static final Codec<TerrainTools> CODEC;
+    public static final StreamCodec<ByteBuf, TerrainTools> STREAM_CODEC;
+    public String translationKey = Lang.asId((String)this.name());
+    public AllIcons icon;
+
+    private TerrainTools(AllIcons icon) {
+        this.icon = icon;
+    }
+
+    @NotNull
+    public String getSerializedName() {
+        return Lang.asId((String)this.name());
+    }
+
+    public boolean requiresSelectedBlock() {
+        return this != Clear && this != Flatten;
+    }
+
+    public void run(Level world, List<BlockPos> targetPositions, Direction facing, @Nullable BlockState paintedState, @Nullable CompoundTag data, Player player) {
+        switch (this.ordinal()) {
+            case 3: {
+                targetPositions.forEach(p -> world.setBlockAndUpdate(p, Blocks.AIR.defaultBlockState()));
+                break;
+            }
+            case 0: {
+                targetPositions.forEach(p -> {
+                    BlockState toReplace = world.getBlockState(p);
+                    if (!TerrainTools.isReplaceable(toReplace)) {
+                        return;
+                    }
+                    world.setBlockAndUpdate(p, paintedState);
+                    ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+                });
+                break;
+            }
+            case 5: {
+                FlattenTool.apply(world, targetPositions, facing);
+                break;
+            }
+            case 4: {
+                targetPositions.forEach(p -> {
+                    BlockState toOverlay = world.getBlockState(p);
+                    if (TerrainTools.isReplaceable(toOverlay)) {
+                        return;
+                    }
+                    if (toOverlay == paintedState) {
+                        return;
+                    }
+                    BlockState toReplace = world.getBlockState(p = p.above());
+                    if (!TerrainTools.isReplaceable(toReplace)) {
+                        return;
+                    }
+                    world.setBlockAndUpdate(p, paintedState);
+                    ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+                });
+                break;
+            }
+            case 1: {
+                targetPositions.forEach(p -> {
+                    world.setBlockAndUpdate(p, paintedState);
+                    ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+                });
+                break;
+            }
+            case 2: {
+                targetPositions.forEach(p -> {
+                    BlockState toReplace = world.getBlockState(p);
+                    if (TerrainTools.isReplaceable(toReplace)) {
+                        return;
+                    }
+                    world.setBlockAndUpdate(p, paintedState);
+                    ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+                });
+            }
+        }
+    }
+
+    public static boolean isReplaceable(BlockState toReplace) {
+        return toReplace.canBeReplaced();
+    }
+
+    static {
+        CODEC = StringRepresentable.fromValues(TerrainTools::values);
+        STREAM_CODEC = CatnipStreamCodecBuilders.ofEnum(TerrainTools.class);
+    }
+}

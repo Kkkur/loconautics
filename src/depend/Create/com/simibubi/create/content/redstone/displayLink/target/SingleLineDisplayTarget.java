@@ -1,0 +1,38 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.network.chat.Component
+ *  net.minecraft.network.chat.MutableComponent
+ */
+package com.simibubi.create.content.redstone.displayLink.target;
+
+import com.simibubi.create.api.behaviour.display.DisplayTarget;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
+import com.simibubi.create.foundation.utility.CreateLang;
+import java.util.List;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+
+public abstract class SingleLineDisplayTarget
+extends DisplayTarget {
+    @Override
+    public final void acceptText(int line, List<MutableComponent> text, DisplayLinkContext context) {
+        this.acceptLine(text.get(0), context);
+    }
+
+    protected abstract void acceptLine(MutableComponent var1, DisplayLinkContext var2);
+
+    @Override
+    public final DisplayTargetStats provideStats(DisplayLinkContext context) {
+        return new DisplayTargetStats(1, this.getWidth(context), this);
+    }
+
+    @Override
+    public Component getLineOptionText(int line) {
+        return CreateLang.translateDirect("display_target.single_line", new Object[0]);
+    }
+
+    protected abstract int getWidth(DisplayLinkContext var1);
+}

@@ -1,0 +1,34 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.simibubi.create.content.equipment.hats.EntityHats
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.world.entity.Entity
+ *  net.minecraft.world.entity.LivingEntity
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.injection.At
+ *  org.spongepowered.asm.mixin.injection.Redirect
+ */
+package dev.ryanhcode.sable.neoforge.mixin.compatibility.create.stock_ticker;
+
+import com.simibubi.create.content.equipment.hats.EntityHats;
+import dev.ryanhcode.sable.Sable;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+@Mixin(value={EntityHats.class})
+public class EntityHatsMixin {
+    @Redirect(method={"getLogisticsHatFor"}, at=@At(value="INVOKE", target="Lnet/minecraft/world/entity/LivingEntity;blockPosition()Lnet/minecraft/core/BlockPos;"))
+    private static BlockPos sable$getStockTickerPosition(LivingEntity instance) {
+        Entity vehicle = instance.getRootVehicle();
+        if (Sable.HELPER.getContaining(vehicle) != null) {
+            return vehicle.blockPosition();
+        }
+        return instance.blockPosition();
+    }
+}

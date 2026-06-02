@@ -1,0 +1,39 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.google.common.collect.HashBiMap
+ *  net.minecraft.core.Holder
+ *  net.minecraft.world.level.block.Block
+ *  org.jetbrains.annotations.ApiStatus$Internal
+ */
+package com.simibubi.create.foundation.block;
+
+import com.google.common.collect.HashBiMap;
+import java.util.Collections;
+import java.util.Map;
+import net.minecraft.core.Holder;
+import net.minecraft.world.level.block.Block;
+import org.jetbrains.annotations.ApiStatus;
+
+@ApiStatus.Internal
+public class CopperRegistries {
+    private static final Map<Holder<Block>, Holder<Block>> WEATHERING = HashBiMap.create();
+    private static final Map<Holder<Block>, Holder<Block>> WAXABLE = HashBiMap.create();
+
+    public static Map<Holder<Block>, Holder<Block>> getWeatheringView() {
+        return Collections.unmodifiableMap(WEATHERING);
+    }
+
+    public static Map<Holder<Block>, Holder<Block>> getWaxableView() {
+        return Collections.unmodifiableMap(WAXABLE);
+    }
+
+    public static synchronized void addWeathering(Holder<Block> original, Holder<Block> weathered) {
+        WEATHERING.put(original, weathered);
+    }
+
+    public static synchronized void addWaxable(Holder<Block> original, Holder<Block> waxed) {
+        WAXABLE.put(original, waxed);
+    }
+}

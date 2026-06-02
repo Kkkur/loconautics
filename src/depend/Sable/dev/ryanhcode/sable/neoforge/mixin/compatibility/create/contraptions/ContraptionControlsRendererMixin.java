@@ -1,0 +1,37 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.blaze3d.vertex.PoseStack
+ *  com.simibubi.create.content.contraptions.actors.contraptionControls.ContraptionControlsRenderer
+ *  com.simibubi.create.content.contraptions.behaviour.MovementContext
+ *  com.simibubi.create.content.contraptions.render.ContraptionMatrices
+ *  net.minecraft.world.phys.Vec3
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.injection.At
+ *  org.spongepowered.asm.mixin.injection.Redirect
+ */
+package dev.ryanhcode.sable.neoforge.mixin.compatibility.create.contraptions;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.content.contraptions.actors.contraptionControls.ContraptionControlsRenderer;
+import com.simibubi.create.content.contraptions.behaviour.MovementContext;
+import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
+import dev.ryanhcode.sable.Sable;
+import net.minecraft.world.phys.Vec3;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+@Mixin(value={ContraptionControlsRenderer.class}, remap=false)
+public class ContraptionControlsRendererMixin {
+    @Redirect(method={"renderInContraption"}, at=@At(value="FIELD", target="Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;position:Lnet/minecraft/world/phys/Vec3;", ordinal=1))
+    private static Vec3 sable$distanceRemix(MovementContext instance) {
+        return Sable.HELPER.projectOutOfSubLevel(instance.world, instance.position);
+    }
+
+    @Redirect(method={"renderInContraption"}, at=@At(value="INVOKE", target="Lcom/simibubi/create/content/contraptions/render/ContraptionMatrices;getViewProjection()Lcom/mojang/blaze3d/vertex/PoseStack;"))
+    private static PoseStack sable$getViewProjection(ContraptionMatrices instance) {
+        return instance.getModelViewProjection();
+    }
+}

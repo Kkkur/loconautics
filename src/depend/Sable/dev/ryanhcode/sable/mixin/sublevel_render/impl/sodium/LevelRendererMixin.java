@@ -1,0 +1,59 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer
+ *  net.caffeinemc.mods.sodium.client.world.LevelRendererExtension
+ *  net.minecraft.client.multiplayer.ClientLevel
+ *  net.minecraft.client.renderer.LevelRenderer
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.SectionPos
+ *  net.minecraft.core.Vec3i
+ *  net.minecraft.world.level.Level
+ *  org.jetbrains.annotations.Nullable
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.Overwrite
+ *  org.spongepowered.asm.mixin.Shadow
+ */
+package dev.ryanhcode.sable.mixin.sublevel_render.impl.sodium;
+
+import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.api.sublevel.ClientSubLevelContainer;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.sublevel.ClientSubLevel;
+import dev.ryanhcode.sable.sublevel.render.SubLevelRenderData;
+import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
+import net.caffeinemc.mods.sodium.client.world.LevelRendererExtension;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.Level;
+import org.jetbrains.annotations.Nullable;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Shadow;
+
+@Mixin(value={LevelRenderer.class}, priority=1002)
+public class LevelRendererMixin {
+    @Shadow
+    @Nullable
+    private ClientLevel level;
+
+    @Overwrite
+    public boolean isSectionCompiled(BlockPos pos) {
+        ClientSubLevelContainer container = SubLevelContainer.getContainer(this.level);
+        if (container != null && container.inBounds(pos)) {
+            ClientSubLevel subLevel = (ClientSubLevel)Sable.HELPER.getContaining((Level)this.level, (Vec3i)pos);
+            if (subLevel == null) {
+                return false;
+            }
+            SubLevelRenderData renderData = subLevel.getRenderData();
+            SectionPos sectionPos = SectionPos.of((BlockPos)pos);
+            return renderData.isSectionCompiled(sectionPos.x(), sectionPos.y(), sectionPos.z());
+        }
+        SodiumWorldRenderer sodiumRenderer = ((LevelRendererExtension)this).sodium$getWorldRenderer();
+        return sodiumRenderer.isSectionReady(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4);
+    }
+}

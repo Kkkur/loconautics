@@ -1,0 +1,66 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.client.renderer.texture.TextureAtlasSprite
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.Direction
+ *  net.minecraft.world.level.BlockAndTintGetter
+ *  net.minecraft.world.level.block.entity.BlockEntity
+ *  net.minecraft.world.level.block.state.BlockState
+ *  org.jetbrains.annotations.Nullable
+ */
+package com.simibubi.create.content.logistics.tunnel;
+
+import com.simibubi.create.AllSpriteShifts;
+import com.simibubi.create.content.logistics.tunnel.BrassTunnelBlockEntity;
+import com.simibubi.create.foundation.block.connected.CTSpriteShiftEntry;
+import com.simibubi.create.foundation.block.connected.CTType;
+import com.simibubi.create.foundation.block.connected.ConnectedTextureBehaviour;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.Nullable;
+
+public class BrassTunnelCTBehaviour
+extends ConnectedTextureBehaviour.Base {
+    @Override
+    @Nullable
+    public CTType getDataType(BlockAndTintGetter world, BlockPos pos, BlockState state, Direction direction) {
+        BrassTunnelBlockEntity tunnelBE;
+        BlockEntity blockEntity = world.getBlockEntity(pos);
+        if (!(blockEntity instanceof BrassTunnelBlockEntity) || !(tunnelBE = (BrassTunnelBlockEntity)blockEntity).hasDistributionBehaviour()) {
+            return null;
+        }
+        return super.getDataType(world, pos, state, direction);
+    }
+
+    @Override
+    public CTSpriteShiftEntry getShift(BlockState state, Direction direction, @Nullable TextureAtlasSprite sprite) {
+        return direction == Direction.UP ? AllSpriteShifts.BRASS_TUNNEL_TOP : null;
+    }
+
+    @Override
+    protected boolean reverseUVs(BlockState state, Direction face) {
+        return true;
+    }
+
+    @Override
+    public boolean connectsTo(BlockState state, BlockState other, BlockAndTintGetter reader, BlockPos pos, BlockPos otherPos, Direction face) {
+        int yDiff = otherPos.getY() - pos.getY();
+        int zDiff = otherPos.getZ() - pos.getZ();
+        if (yDiff != 0) {
+            return false;
+        }
+        BlockEntity blockEntity = reader.getBlockEntity(pos);
+        if (!(blockEntity instanceof BrassTunnelBlockEntity)) {
+            return false;
+        }
+        BrassTunnelBlockEntity tunnelBE = (BrassTunnelBlockEntity)blockEntity;
+        boolean leftSide = zDiff > 0;
+        return tunnelBE.isConnected(leftSide);
+    }
+}

@@ -1,0 +1,57 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.createmod.catnip.lang.LangBuilder
+ *  net.minecraft.ChatFormatting
+ *  net.minecraft.network.chat.Component
+ *  net.neoforged.neoforge.fluids.FluidStack
+ *  net.neoforged.neoforge.fluids.capability.IFluidHandler
+ */
+package com.simibubi.create.api.equipment.goggles;
+
+import com.simibubi.create.api.equipment.goggles.IHaveCustomOverlayIcon;
+import com.simibubi.create.foundation.utility.CreateLang;
+import java.util.List;
+import net.createmod.catnip.lang.LangBuilder;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+
+public non-sealed interface IHaveGoggleInformation
+extends IHaveCustomOverlayIcon {
+    default public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
+        return false;
+    }
+
+    default public boolean containedFluidTooltip(List<Component> tooltip, boolean isPlayerSneaking, IFluidHandler handler) {
+        if (handler == null) {
+            return false;
+        }
+        if (handler.getTanks() == 0) {
+            return false;
+        }
+        LangBuilder mb = CreateLang.translate("generic.unit.millibuckets", new Object[0]);
+        CreateLang.translate("gui.goggles.fluid_container", new Object[0]).forGoggles(tooltip);
+        boolean isEmpty = true;
+        for (int i = 0; i < handler.getTanks(); ++i) {
+            FluidStack fluidStack = handler.getFluidInTank(i);
+            if (fluidStack.isEmpty()) continue;
+            CreateLang.fluidName(fluidStack).style(ChatFormatting.GRAY).forGoggles(tooltip, 1);
+            CreateLang.builder().add(CreateLang.number(fluidStack.getAmount()).add(mb).style(ChatFormatting.GOLD)).text(ChatFormatting.GRAY, " / ").add(CreateLang.number(handler.getTankCapacity(i)).add(mb).style(ChatFormatting.DARK_GRAY)).forGoggles(tooltip, 1);
+            isEmpty = false;
+        }
+        if (handler.getTanks() > 1) {
+            if (isEmpty) {
+                tooltip.remove(tooltip.size() - 1);
+            }
+            return true;
+        }
+        if (!isEmpty) {
+            return true;
+        }
+        CreateLang.translate("gui.goggles.fluid_container.capacity", new Object[0]).add(CreateLang.number(handler.getTankCapacity(0)).add(mb).style(ChatFormatting.GOLD)).style(ChatFormatting.GRAY).forGoggles(tooltip, 1);
+        return true;
+    }
+}

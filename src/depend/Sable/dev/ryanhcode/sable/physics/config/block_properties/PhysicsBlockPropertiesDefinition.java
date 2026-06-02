@@ -1,0 +1,47 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.datafixers.kinds.App
+ *  com.mojang.datafixers.kinds.Applicative
+ *  com.mojang.serialization.Codec
+ *  com.mojang.serialization.codecs.RecordCodecBuilder
+ *  io.netty.buffer.ByteBuf
+ *  net.minecraft.network.codec.ByteBufCodecs
+ *  net.minecraft.network.codec.StreamCodec
+ *  net.minecraft.resources.ResourceLocation
+ *  net.minecraft.util.ExtraCodecs
+ *  net.minecraft.util.ExtraCodecs$TagOrElementLocation
+ */
+package dev.ryanhcode.sable.physics.config.block_properties;
+
+import com.mojang.datafixers.kinds.App;
+import com.mojang.datafixers.kinds.Applicative;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import dev.ryanhcode.sable.physics.config.block_properties.BlockStateConditionSet;
+import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertyTypes;
+import io.netty.buffer.ByteBuf;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.ExtraCodecs;
+
+public record PhysicsBlockPropertiesDefinition(ExtraCodecs.TagOrElementLocation selector, int priority, Map<ResourceLocation, Object> properties, Optional<Map<BlockStateConditionSet, Map<ResourceLocation, Object>>> overrides) {
+    public static final Codec<Map<ResourceLocation, Object>> PROPERTIES_CODEC = Codec.dispatchedMap((Codec)ResourceLocation.CODEC, PhysicsBlockPropertyTypes::getPropertyCodec);
+    public static final Codec<PhysicsBlockPropertiesDefinition> CODEC = RecordCodecBuilder.create(i -> i.group((App)ExtraCodecs.TAG_OR_ELEMENT_ID.fieldOf("selector").forGetter(PhysicsBlockPropertiesDefinition::selector), (App)Codec.intRange((int)0, (int)Integer.MAX_VALUE).optionalFieldOf("priority", (Object)1000).forGetter(PhysicsBlockPropertiesDefinition::priority), (App)PROPERTIES_CODEC.fieldOf("properties").forGetter(PhysicsBlockPropertiesDefinition::properties), (App)Codec.dispatchedMap(BlockStateConditionSet.CODEC, ignored -> PROPERTIES_CODEC).optionalFieldOf("overrides").forGetter(PhysicsBlockPropertiesDefinition::overrides)).apply((Applicative)i, PhysicsBlockPropertiesDefinition::new));
+    public static final StreamCodec<ByteBuf, PhysicsBlockPropertiesDefinition> STREAM_CODEC = ByteBufCodecs.fromCodec(CODEC);
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(this.selector);
+    }
+
+    @Override
+    public String toString() {
+        return "PhysicsBlockPropertiesDefinition{selector=%s, properties=%s}".formatted(this.selector, this.properties);
+    }
+}

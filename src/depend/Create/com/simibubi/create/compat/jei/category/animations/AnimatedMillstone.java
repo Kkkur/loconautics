@@ -1,0 +1,30 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.blaze3d.vertex.PoseStack
+ *  net.minecraft.client.gui.GuiGraphics
+ */
+package com.simibubi.create.compat.jei.category.animations;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.AllBlocks;
+import com.simibubi.create.AllPartialModels;
+import com.simibubi.create.compat.jei.category.animations.AnimatedKinetics;
+import com.simibubi.create.foundation.gui.AllGuiTextures;
+import net.minecraft.client.gui.GuiGraphics;
+
+public class AnimatedMillstone
+extends AnimatedKinetics {
+    public void draw(GuiGraphics graphics, int xOffset, int yOffset) {
+        PoseStack matrixStack = graphics.pose();
+        matrixStack.pushPose();
+        matrixStack.translate((float)xOffset, (float)yOffset, 0.0f);
+        AllGuiTextures.JEI_SHADOW.render(graphics, -16, 13);
+        matrixStack.translate(-2.0f, 18.0f, 0.0f);
+        int scale = 22;
+        this.blockElement(AllPartialModels.MILLSTONE_COG).rotateBlock(22.5, (double)(AnimatedMillstone.getCurrentAngle() * 2.0f), 0.0).scale((double)scale).render(graphics);
+        this.blockElement(AllBlocks.MILLSTONE.getDefaultState()).rotateBlock(22.5, 22.5, 0.0).scale((double)scale).render(graphics);
+        matrixStack.popPose();
+    }
+}

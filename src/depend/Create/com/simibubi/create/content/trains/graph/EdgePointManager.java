@@ -1,0 +1,47 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.createmod.catnip.data.Couple
+ *  net.createmod.catnip.data.Iterate
+ */
+package com.simibubi.create.content.trains.graph;
+
+import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.graph.EdgePointType;
+import com.simibubi.create.content.trains.graph.TrackEdge;
+import com.simibubi.create.content.trains.graph.TrackGraph;
+import com.simibubi.create.content.trains.graph.TrackNode;
+import com.simibubi.create.content.trains.graph.TrackNodeLocation;
+import com.simibubi.create.content.trains.signal.TrackEdgePoint;
+import net.createmod.catnip.data.Couple;
+import net.createmod.catnip.data.Iterate;
+
+public class EdgePointManager {
+    public static <T extends TrackEdgePoint> void onEdgePointAdded(TrackGraph graph, T point, EdgePointType<T> type) {
+        Couple<TrackNodeLocation> edgeLocation = point.edgeLocation;
+        Couple startNodes = edgeLocation.map(graph::locateNode);
+        Couple startEdges = startNodes.mapWithParams((l1, l2) -> graph.getConnectionsFrom((TrackNode)l1).get(l2), startNodes.swap());
+        for (boolean front : Iterate.trueAndFalse) {
+            TrackNode node1 = (TrackNode)startNodes.get(front);
+            TrackNode node2 = (TrackNode)startNodes.get(!front);
+            TrackEdge startEdge = (TrackEdge)startEdges.get(front);
+            startEdge.getEdgeData().addPoint(graph, point);
+            Create.RAILWAYS.sync.edgeDataChanged(graph, node1, node2, startEdge);
+        }
+    }
+
+    public static <T extends TrackEdgePoint> void onEdgePointRemoved(TrackGraph graph, T point, EdgePointType<T> type) {
+        point.onRemoved(graph);
+        Couple<TrackNodeLocation> edgeLocation = point.edgeLocation;
+        Couple startNodes = edgeLocation.map(graph::locateNode);
+        startNodes.forEachWithParams((l1, l2) -> {
+            TrackEdge trackEdge = graph.getConnectionsFrom((TrackNode)l1).get(l2);
+            if (trackEdge == null) {
+                return;
+            }
+            trackEdge.getEdgeData().removePoint(graph, point);
+            Create.RAILWAYS.sync.edgeDataChanged(graph, (TrackNode)l1, (TrackNode)l2, trackEdge);
+        }, startNodes.swap());
+    }
+}

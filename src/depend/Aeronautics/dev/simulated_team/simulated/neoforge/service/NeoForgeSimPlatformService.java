@@ -1,0 +1,18 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.neoforged.fml.ModList
+ */
+package dev.simulated_team.simulated.neoforge.service;
+
+import dev.simulated_team.simulated.service.SimPlatformService;
+import net.neoforged.fml.ModList;
+
+public class NeoForgeSimPlatformService
+implements SimPlatformService {
+    @Override
+    public boolean isLoaded(String modId) {
+        return ModList.get().isLoaded(modId);
+    }
+}

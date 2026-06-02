@@ -1,0 +1,198 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.mojang.datafixers.kinds.App
+ *  com.mojang.datafixers.kinds.Applicative
+ *  com.mojang.serialization.Codec
+ *  com.mojang.serialization.codecs.RecordCodecBuilder
+ *  io.netty.buffer.ByteBuf
+ *  net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders
+ *  net.createmod.catnip.data.Couple
+ *  net.createmod.catnip.data.IntAttached
+ *  net.minecraft.ChatFormatting
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.UUIDUtil
+ *  net.minecraft.network.chat.Component
+ *  net.minecraft.network.codec.StreamCodec
+ *  net.minecraft.sounds.SoundEvents
+ *  net.minecraft.world.InteractionHand
+ *  net.minecraft.world.InteractionResult
+ *  net.minecraft.world.InteractionResultHolder
+ *  net.minecraft.world.entity.player.Player
+ *  net.minecraft.world.item.Item
+ *  net.minecraft.world.item.Item$Properties
+ *  net.minecraft.world.item.Item$TooltipContext
+ *  net.minecraft.world.item.ItemStack
+ *  net.minecraft.world.item.TooltipFlag
+ *  net.minecraft.world.item.context.UseOnContext
+ *  net.minecraft.world.level.Level
+ *  net.minecraft.world.level.LevelAccessor
+ *  org.jetbrains.annotations.Nullable
+ *  org.jetbrains.annotations.Unmodifiable
+ */
+package com.simibubi.create.content.logistics.tableCloth;
+
+import com.mojang.datafixers.kinds.App;
+import com.mojang.datafixers.kinds.Applicative;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.simibubi.create.AllDataComponents;
+import com.simibubi.create.content.logistics.BigItemStack;
+import com.simibubi.create.content.logistics.packager.InventorySummary;
+import com.simibubi.create.content.logistics.tableCloth.TableClothBlockEntity;
+import com.simibubi.create.foundation.utility.CreateLang;
+import io.netty.buffer.ByteBuf;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
+import net.createmod.catnip.data.Couple;
+import net.createmod.catnip.data.IntAttached;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.UUIDUtil;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
+public class ShoppingListItem
+extends Item {
+    public ShoppingListItem(Item.Properties pProperties) {
+        super(pProperties);
+    }
+
+    public static ShoppingList getList(ItemStack stack) {
+        return (ShoppingList)stack.get(AllDataComponents.SHOPPING_LIST);
+    }
+
+    public static ItemStack saveList(ItemStack stack, ShoppingList list, String address) {
+        stack.set(AllDataComponents.SHOPPING_LIST, (Object)list);
+        stack.set(AllDataComponents.SHOPPING_LIST_ADDRESS, (Object)address);
+        return stack;
+    }
+
+    public static String getAddress(ItemStack stack) {
+        return (String)stack.getOrDefault(AllDataComponents.SHOPPING_LIST_ADDRESS, (Object)"");
+    }
+
+    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
+        Couple<InventorySummary> lists;
+        ShoppingList list = ShoppingListItem.getList(stack);
+        if (list != null && (lists = list.bakeEntries((LevelAccessor)context.level(), null)) != null) {
+            for (InventorySummary items : lists) {
+                boolean cost;
+                List<BigItemStack> entries = items.getStacksByCount();
+                boolean bl = cost = items == lists.getSecond();
+                if (cost) {
+                    tooltipComponents.add((Component)Component.empty());
+                }
+                if (entries.size() == 1) {
+                    BigItemStack entry = entries.get(0);
+                    (cost ? CreateLang.translate("table_cloth.total_cost", new Object[0]) : CreateLang.text("")).style(ChatFormatting.GOLD).add(CreateLang.builder().add(entry.stack.getHoverName().plainCopy()).text(" x").text(String.valueOf(entry.count)).style(cost ? ChatFormatting.YELLOW : ChatFormatting.GRAY)).addTo(tooltipComponents);
+                    continue;
+                }
+                if (cost) {
+                    CreateLang.translate("table_cloth.total_cost", new Object[0]).style(ChatFormatting.GOLD).addTo(tooltipComponents);
+                }
+                for (BigItemStack entry : entries) {
+                    CreateLang.builder().add(entry.stack.getHoverName().plainCopy()).text(" x").text(String.valueOf(entry.count)).style(cost ? ChatFormatting.YELLOW : ChatFormatting.GRAY).addTo(tooltipComponents);
+                }
+            }
+        }
+        CreateLang.translate("table_cloth.hand_to_shop_keeper", new Object[0]).style(ChatFormatting.GRAY).addTo(tooltipComponents);
+        CreateLang.translate("table_cloth.sneak_click_discard", new Object[0]).style(ChatFormatting.DARK_GRAY).addTo(tooltipComponents);
+    }
+
+    public InteractionResultHolder<ItemStack> use(Level pLevel, Player pPlayer, InteractionHand pUsedHand) {
+        if (pUsedHand == InteractionHand.OFF_HAND || pPlayer == null || !pPlayer.isShiftKeyDown()) {
+            return new InteractionResultHolder(InteractionResult.PASS, (Object)pPlayer.getItemInHand(pUsedHand));
+        }
+        CreateLang.translate("table_cloth.shopping_list_discarded", new Object[0]).sendStatus(pPlayer);
+        pPlayer.playSound(SoundEvents.BOOK_PAGE_TURN);
+        return new InteractionResultHolder(InteractionResult.SUCCESS, (Object)ItemStack.EMPTY);
+    }
+
+    public InteractionResult useOn(UseOnContext pContext) {
+        InteractionHand pUsedHand = pContext.getHand();
+        Player pPlayer = pContext.getPlayer();
+        if (pUsedHand == InteractionHand.OFF_HAND || pPlayer == null || !pPlayer.isShiftKeyDown()) {
+            return InteractionResult.PASS;
+        }
+        pPlayer.setItemInHand(pUsedHand, ItemStack.EMPTY);
+        CreateLang.translate("table_cloth.shopping_list_discarded", new Object[0]).sendStatus(pPlayer);
+        pPlayer.playSound(SoundEvents.BOOK_PAGE_TURN);
+        return InteractionResult.SUCCESS;
+    }
+
+    public record ShoppingList(@Unmodifiable List<IntAttached<BlockPos>> purchases, UUID shopOwner, UUID shopNetwork) {
+        public static final Codec<ShoppingList> CODEC = RecordCodecBuilder.create(instance -> instance.group((App)Codec.list((Codec)IntAttached.codec((Codec)BlockPos.CODEC)).fieldOf("purchases").forGetter(ShoppingList::purchases), (App)UUIDUtil.CODEC.fieldOf("shop_owner").forGetter(ShoppingList::shopOwner), (App)UUIDUtil.CODEC.fieldOf("shop_network").forGetter(ShoppingList::shopNetwork)).apply((Applicative)instance, ShoppingList::new));
+        public static final StreamCodec<ByteBuf, ShoppingList> STREAM_CODEC = StreamCodec.composite((StreamCodec)CatnipStreamCodecBuilders.list((StreamCodec)IntAttached.streamCodec((StreamCodec)BlockPos.STREAM_CODEC)), ShoppingList::purchases, (StreamCodec)UUIDUtil.STREAM_CODEC, ShoppingList::shopOwner, (StreamCodec)UUIDUtil.STREAM_CODEC, ShoppingList::shopNetwork, ShoppingList::new);
+
+        public ShoppingList duplicate() {
+            return new ShoppingList(new ArrayList<IntAttached<BlockPos>>(this.purchases.stream().map(ia -> IntAttached.with((int)((Integer)ia.getFirst()), (Object)((BlockPos)ia.getSecond()))).toList()), this.shopOwner, this.shopNetwork);
+        }
+
+        public int getPurchases(BlockPos clothPos) {
+            for (IntAttached<BlockPos> entry : this.purchases) {
+                if (!clothPos.equals(entry.getValue())) continue;
+                return (Integer)entry.getFirst();
+            }
+            return 0;
+        }
+
+        public Couple<InventorySummary> bakeEntries(LevelAccessor level, @Nullable BlockPos clothPosToIgnore) {
+            InventorySummary input = new InventorySummary();
+            InventorySummary output = new InventorySummary();
+            for (IntAttached<BlockPos> entry : this.purchases) {
+                Object object;
+                if (clothPosToIgnore != null && clothPosToIgnore.equals(entry.getValue()) || !((object = level.getBlockEntity((BlockPos)entry.getValue())) instanceof TableClothBlockEntity)) continue;
+                TableClothBlockEntity dcbe = (TableClothBlockEntity)object;
+                input.add(dcbe.getPaymentItem(), dcbe.getPaymentAmount() * (Integer)entry.getFirst());
+                object = dcbe.requestData.encodedRequest().stacks().iterator();
+                while (object.hasNext()) {
+                    BigItemStack stackEntry = (BigItemStack)object.next();
+                    output.add(stackEntry.stack, stackEntry.count * (Integer)entry.getFirst());
+                }
+            }
+            return Couple.create((Object)output, (Object)input);
+        }
+
+        public static class Mutable {
+            private final List<IntAttached<BlockPos>> purchases = new ArrayList<IntAttached<BlockPos>>();
+            private final UUID shopOwner;
+            private final UUID shopNetwork;
+
+            public Mutable(ShoppingList list) {
+                this.purchases.addAll(list.purchases);
+                this.shopOwner = list.shopOwner;
+                this.shopNetwork = list.shopNetwork;
+            }
+
+            public void addPurchases(BlockPos clothPos, int amount) {
+                for (IntAttached<BlockPos> entry : this.purchases) {
+                    if (!clothPos.equals(entry.getValue())) continue;
+                    entry.setFirst((Object)((Integer)entry.getFirst() + amount));
+                    return;
+                }
+                this.purchases.add((IntAttached<BlockPos>)IntAttached.with((int)amount, (Object)clothPos));
+            }
+
+            public ShoppingList toImmutable() {
+                return new ShoppingList(this.purchases, this.shopOwner, this.shopNetwork);
+            }
+        }
+    }
+}

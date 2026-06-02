@@ -1,0 +1,58 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  javax.annotation.ParametersAreNonnullByDefault
+ *  net.minecraft.resources.ResourceLocation
+ *  net.minecraft.world.item.ItemStack
+ *  net.minecraft.world.item.crafting.Ingredient
+ *  net.minecraft.world.item.crafting.Recipe
+ *  net.minecraft.world.item.crafting.RecipeHolder
+ *  net.minecraft.world.level.Level
+ *  net.neoforged.neoforge.items.wrapper.RecipeWrapper
+ */
+package com.simibubi.create.compat.jei;
+
+import com.simibubi.create.AllRecipeTypes;
+import com.simibubi.create.Create;
+import com.simibubi.create.content.processing.recipe.ProcessingRecipeParams;
+import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe;
+import com.simibubi.create.foundation.recipe.IRecipeTypeInfo;
+import javax.annotation.ParametersAreNonnullByDefault;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.Level;
+import net.neoforged.neoforge.items.wrapper.RecipeWrapper;
+
+@ParametersAreNonnullByDefault
+public class ConversionRecipe
+extends StandardProcessingRecipe<RecipeWrapper> {
+    static int counter = 0;
+
+    public static RecipeHolder<ConversionRecipe> create(ItemStack from, ItemStack to) {
+        ResourceLocation recipeId = Create.asResource("conversion_" + counter++);
+        ConversionRecipe recipe = (ConversionRecipe)((StandardProcessingRecipe.Builder)((StandardProcessingRecipe.Builder)new StandardProcessingRecipe.Builder<ConversionRecipe>(ConversionRecipe::new, recipeId).withItemIngredients(Ingredient.of((ItemStack[])new ItemStack[]{from}))).withSingleItemOutput(to)).build();
+        return new RecipeHolder(recipeId, (Recipe)recipe);
+    }
+
+    public ConversionRecipe(ProcessingRecipeParams params) {
+        super((IRecipeTypeInfo)AllRecipeTypes.CONVERSION, params);
+    }
+
+    public boolean matches(RecipeWrapper inv, Level worldIn) {
+        return false;
+    }
+
+    @Override
+    protected int getMaxInputCount() {
+        return 1;
+    }
+
+    @Override
+    protected int getMaxOutputCount() {
+        return 1;
+    }
+}

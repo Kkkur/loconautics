@@ -1,0 +1,32 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.llamalad7.mixinextras.injector.wrapoperation.Operation
+ *  com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation
+ *  dev.ryanhcode.sable.sublevel.render.dispatcher.VanillaSubLevelRenderDispatcher
+ *  net.minecraft.client.renderer.ShaderInstance
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.injection.At
+ */
+package dev.simulated_team.simulated.mixin.diagram;
+
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import dev.ryanhcode.sable.sublevel.render.dispatcher.VanillaSubLevelRenderDispatcher;
+import dev.simulated_team.simulated.util.SimpleSubLevelGroupRenderer;
+import net.minecraft.client.renderer.ShaderInstance;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+
+@Mixin(value={VanillaSubLevelRenderDispatcher.class})
+public class VanillaSubLevelRenderDispatcherMixin {
+    @WrapOperation(method={"renderSectionLayer"}, at={@At(value="INVOKE", target="Ldev/ryanhcode/sable/sublevel/render/dispatcher/VanillaSubLevelRenderDispatcher;setupDynamicEffects(Lnet/minecraft/client/renderer/ShaderInstance;ZZ)V", ordinal=0)})
+    private void simulated$overrideNormalLighting(ShaderInstance shader, boolean onSubLevel, boolean upload, Operation<Void> original) {
+        if (SimpleSubLevelGroupRenderer.RENDERING_SIMPLE) {
+            original.call(new Object[]{shader, false, upload});
+            return;
+        }
+        original.call(new Object[]{shader, onSubLevel, upload});
+    }
+}

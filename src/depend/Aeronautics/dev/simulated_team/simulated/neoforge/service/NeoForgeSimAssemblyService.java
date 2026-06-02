@@ -1,0 +1,18 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.world.level.block.state.BlockState
+ */
+package dev.simulated_team.simulated.neoforge.service;
+
+import dev.simulated_team.simulated.service.SimAssemblyService;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class NeoForgeSimAssemblyService
+implements SimAssemblyService {
+    @Override
+    public boolean canStickTo(BlockState stateA, BlockState stateB) {
+        return stateA.canStickTo(stateB);
+    }
+}

@@ -1,0 +1,89 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  foundry.veil.api.client.render.VeilRenderSystem
+ *  it.unimi.dsi.fastutil.objects.ObjectArraySet
+ *  net.minecraft.client.Camera
+ *  net.minecraft.client.Minecraft
+ *  net.minecraft.client.multiplayer.ClientLevel
+ *  net.minecraft.client.renderer.chunk.SectionRenderDispatcher$RenderSection
+ *  net.minecraft.core.Position
+ *  net.minecraft.world.level.Level
+ *  net.minecraft.world.phys.AABB
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.Overwrite
+ *  org.spongepowered.asm.mixin.Shadow
+ *  org.spongepowered.asm.mixin.Unique
+ *  org.spongepowered.asm.mixin.injection.At
+ *  org.spongepowered.asm.mixin.injection.Inject
+ *  org.spongepowered.asm.mixin.injection.callback.CallbackInfo
+ */
+package dev.ryanhcode.sable.mixin.sublevel_render;
+
+import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.mixinterface.sublevel_render.vanilla.RenderSectionExtension;
+import foundry.veil.api.client.render.VeilRenderSystem;
+import it.unimi.dsi.fastutil.objects.ObjectArraySet;
+import java.util.Set;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
+import net.minecraft.core.Position;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(value={SectionRenderDispatcher.RenderSection.class})
+public class RenderSectionMixin
+implements RenderSectionExtension {
+    @Shadow
+    private AABB bb;
+    @Shadow
+    private boolean dirty;
+    @Unique
+    private Set<RenderSectionExtension.DirtyListener> sable$listeners;
+    @Unique
+    private boolean sable$listening = true;
+
+    @Inject(method={"setDirty"}, at={@At(value="HEAD")})
+    public void setDirty(boolean playerChanged, CallbackInfo ci) {
+        if (this.sable$listening && !this.dirty && this.sable$listeners != null) {
+            VeilRenderSystem.renderThreadExecutor().execute(() -> {
+                for (RenderSectionExtension.DirtyListener listener : this.sable$listeners) {
+                    listener.markDirty((SectionRenderDispatcher.RenderSection)this);
+                }
+            });
+        }
+    }
+
+    @Overwrite
+    public double getDistToPlayerSqr() {
+        ClientLevel level = Minecraft.getInstance().level;
+        Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
+        double x = this.bb.minX + 8.0;
+        double y = this.bb.minY + 8.0;
+        double z = this.bb.minZ + 8.0;
+        return Sable.HELPER.distanceSquaredWithSubLevels((Level)level, (Position)camera.getPosition(), x, y, z);
+    }
+
+    @Override
+    public void sable$addDirtyListener(RenderSectionExtension.DirtyListener listener) {
+        if (this.sable$listeners == null) {
+            this.sable$listeners = new ObjectArraySet();
+        }
+        this.sable$listeners.add(listener);
+    }
+
+    @Override
+    public void sable$setListening(boolean listening) {
+        this.sable$listening = listening;
+    }
+}

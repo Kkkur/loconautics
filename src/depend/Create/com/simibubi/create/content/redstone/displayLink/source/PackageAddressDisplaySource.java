@@ -1,0 +1,77 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.network.chat.Component
+ *  net.minecraft.network.chat.MutableComponent
+ *  net.minecraft.world.item.ItemStack
+ *  net.minecraft.world.level.block.entity.BlockEntity
+ *  net.neoforged.neoforge.items.IItemHandler
+ */
+package com.simibubi.create.content.redstone.displayLink.source;
+
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity;
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorPackage;
+import com.simibubi.create.content.logistics.box.PackageItem;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import com.simibubi.create.content.redstone.displayLink.source.SingleLineDisplaySource;
+import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
+import com.simibubi.create.content.redstone.smartObserver.SmartObserverBlock;
+import com.simibubi.create.content.redstone.smartObserver.SmartObserverBlockEntity;
+import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.inventory.InvManipulationBehaviour;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.neoforged.neoforge.items.IItemHandler;
+
+public class PackageAddressDisplaySource
+extends SingleLineDisplaySource {
+    @Override
+    protected MutableComponent provideLine(DisplayLinkContext context, DisplayTargetStats stats) {
+        BlockEntity sourceBE = context.getSourceBlockEntity();
+        if (!(sourceBE instanceof SmartObserverBlockEntity)) {
+            return EMPTY_LINE;
+        }
+        SmartObserverBlockEntity cobe = (SmartObserverBlockEntity)sourceBE;
+        InvManipulationBehaviour invManipulationBehaviour = cobe.getBehaviour(InvManipulationBehaviour.TYPE);
+        FilteringBehaviour filteringBehaviour = cobe.getBehaviour(FilteringBehaviour.TYPE);
+        IItemHandler handler = (IItemHandler)invManipulationBehaviour.getInventory();
+        if (handler == null) {
+            BlockPos targetPos = cobe.getBlockPos().relative(SmartObserverBlock.getTargetDirection(cobe.getBlockState()));
+            BlockEntity blockEntity = context.level().getBlockEntity(targetPos);
+            if (blockEntity instanceof ChainConveyorBlockEntity) {
+                ChainConveyorBlockEntity ccbe = (ChainConveyorBlockEntity)blockEntity;
+                for (ChainConveyorPackage box : ccbe.getLoopingPackages()) {
+                    if (!filteringBehaviour.test(box.item)) continue;
+                    return Component.literal((String)PackageItem.getAddress(box.item));
+                }
+            }
+            return EMPTY_LINE;
+        }
+        for (int i = 0; i < handler.getSlots(); ++i) {
+            ItemStack stack = handler.getStackInSlot(i);
+            if (!PackageItem.isPackage(stack) || !filteringBehaviour.test(stack)) continue;
+            return Component.literal((String)PackageItem.getAddress(stack));
+        }
+        return EMPTY_LINE;
+    }
+
+    @Override
+    protected String getTranslationKey() {
+        return "read_package_address";
+    }
+
+    @Override
+    protected boolean allowsLabeling(DisplayLinkContext context) {
+        return true;
+    }
+
+    @Override
+    protected String getFlapDisplayLayoutName(DisplayLinkContext context) {
+        return "Default";
+    }
+}

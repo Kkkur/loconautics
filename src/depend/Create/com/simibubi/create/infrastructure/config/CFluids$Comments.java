@@ -1,0 +1,22 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
+package com.simibubi.create.infrastructure.config;
+
+private static class CFluids.Comments {
+    static String blocks = "[in Blocks]";
+    static String buckets = "[in Buckets]";
+    static String toDisable = "[-1 to disable this behaviour]";
+    static String fluidTankCapacity = "The amount of liquid a tank can hold per block.";
+    static String fluidTankMaxHeight = "The maximum height a fluid tank can reach.";
+    static String mechanicalPumpRange = "The maximum distance a mechanical pump can push or pull liquids on either side.";
+    static String hosePulleyRange = "The maximum distance a hose pulley can draw fluid blocks from.";
+    static String hosePulleyBlockThreshold = "The minimum amount of fluid blocks the hose pulley needs to find before deeming it an infinite source.";
+    static String fillInfinite = "Whether hose pulleys should continue filling up above-threshold sources.";
+    static String bottomlessFluidMode = "Configure which fluids can be drained infinitely.";
+    static String fluidFillPlaceFluidSourceBlocks = "Whether hose pulleys should be allowed to place fluid sources.";
+    static String pipesPlaceFluidSourceBlocks = "Whether open-ended pipes should be allowed to place fluid sources.";
+
+    private CFluids.Comments() {
+    }
+}

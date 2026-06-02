@@ -1,0 +1,31 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.world.InteractionResult
+ *  net.minecraft.world.item.context.UseOnContext
+ *  net.minecraft.world.level.block.Block
+ *  net.minecraft.world.level.block.state.BlockBehaviour$Properties
+ *  net.minecraft.world.level.block.state.BlockState
+ */
+package com.simibubi.create.content.decoration.encasing;
+
+import com.simibubi.create.content.equipment.wrench.IWrenchable;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class CasingBlock
+extends Block
+implements IWrenchable {
+    public CasingBlock(BlockBehaviour.Properties p_i48440_1_) {
+        super(p_i48440_1_);
+    }
+
+    @Override
+    public InteractionResult onWrenched(BlockState state, UseOnContext context) {
+        return InteractionResult.FAIL;
+    }
+}

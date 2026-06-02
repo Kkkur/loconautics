@@ -1,0 +1,25 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.google.common.collect.ImmutableMap
+ *  net.minecraft.core.BlockPos
+ *  net.neoforged.neoforge.fluids.capability.IFluidHandler
+ */
+package com.simibubi.create.api.contraption.storage.fluid;
+
+import com.google.common.collect.ImmutableMap;
+import com.simibubi.create.api.contraption.storage.fluid.MountedFluidStorage;
+import com.simibubi.create.foundation.fluid.CombinedTankWrapper;
+import net.minecraft.core.BlockPos;
+import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+
+public class MountedFluidStorageWrapper
+extends CombinedTankWrapper {
+    public final ImmutableMap<BlockPos, MountedFluidStorage> storages;
+
+    public MountedFluidStorageWrapper(ImmutableMap<BlockPos, MountedFluidStorage> storages) {
+        super((IFluidHandler[])storages.values().toArray(IFluidHandler[]::new));
+        this.storages = storages;
+    }
+}

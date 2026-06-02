@@ -1,0 +1,154 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.core.Holder
+ *  net.minecraft.core.HolderLookup$Provider
+ *  net.minecraft.gametest.framework.GameTest
+ *  net.minecraft.gametest.framework.GameTestAssertException
+ *  net.minecraft.world.item.Item
+ *  net.minecraft.world.item.ItemStack
+ *  net.minecraft.world.item.Items
+ *  net.minecraft.world.item.alchemy.PotionContents
+ *  net.minecraft.world.item.alchemy.Potions
+ *  net.minecraft.world.item.crafting.RecipeHolder
+ *  net.minecraft.world.level.ItemLike
+ *  net.neoforged.neoforge.items.IItemHandler
+ */
+package com.simibubi.create.infrastructure.gametest.tests;
+
+import com.simibubi.create.AllBlocks;
+import com.simibubi.create.AllItems;
+import com.simibubi.create.Create;
+import com.simibubi.create.content.processing.recipe.ProcessingOutput;
+import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
+import com.simibubi.create.foundation.item.ItemHelper;
+import com.simibubi.create.infrastructure.gametest.CreateGameTestHelper;
+import com.simibubi.create.infrastructure.gametest.GameTestGroup;
+import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestAssertException;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.alchemy.Potions;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.level.ItemLike;
+import net.neoforged.neoforge.items.IItemHandler;
+
+@GameTestGroup(path="processing")
+public class TestProcessing {
+    @GameTest(template="brass_mixing", timeoutTicks=200)
+    public static void brassMixing(CreateGameTestHelper helper) {
+        BlockPos lever = new BlockPos(2, 3, 2);
+        BlockPos chest = new BlockPos(7, 3, 1);
+        helper.pullLever(lever);
+        helper.succeedWhen(() -> helper.assertContainerContains(chest, (Item)AllItems.BRASS_INGOT.get()));
+    }
+
+    @GameTest(template="brass_mixing_2", timeoutTicks=400)
+    public static void brassMixing2(CreateGameTestHelper helper) {
+        BlockPos basinLever = new BlockPos(3, 3, 1);
+        BlockPos armLever = new BlockPos(3, 3, 5);
+        BlockPos output = new BlockPos(1, 2, 3);
+        helper.pullLever(armLever);
+        helper.whenSecondsPassed(7, () -> helper.pullLever(armLever));
+        helper.whenSecondsPassed(10, () -> helper.pullLever(basinLever));
+        helper.succeedWhen(() -> helper.assertContainerContains(output, (Item)AllItems.BRASS_INGOT.get()));
+    }
+
+    @GameTest(template="potion_brewing", timeoutTicks=600)
+    public static void potionBrewing(CreateGameTestHelper helper) {
+        BlockPos chest = new BlockPos(8, 3, 5);
+        BlockPos potionLever = new BlockPos(2, 3, 4);
+        BlockPos bottleLever = new BlockPos(7, 3, 2);
+        ItemStack expected = PotionContents.createItemStack((Item)Items.POTION, (Holder)Potions.HEALING);
+        helper.pullLever(potionLever);
+        helper.whenSecondsPassed(15, () -> helper.pullLever(bottleLever));
+        helper.succeedWhen(() -> helper.assertContainerContains(chest, expected));
+    }
+
+    @GameTest(template="spout_crafting", timeoutTicks=200)
+    public static void spoutCrafting(CreateGameTestHelper helper) {
+        BlockPos chest = new BlockPos(5, 3, 1);
+        helper.pullLever(2, 3, 2);
+        helper.succeedWhen(() -> helper.assertContainerContains(chest, Items.REDSTONE));
+    }
+
+    @GameTest(template="crushing_wheel_crafting", timeoutTicks=200)
+    public static void crushingWheelCrafting(CreateGameTestHelper helper) {
+        BlockPos chest = new BlockPos(1, 4, 3);
+        List<BlockPos> levers = List.of(new BlockPos(2, 3, 2), new BlockPos(6, 3, 2), new BlockPos(3, 7, 3));
+        levers.forEach(arg_0 -> ((CreateGameTestHelper)helper).pullLever(arg_0));
+        ItemStack expected = new ItemStack((ItemLike)AllBlocks.CRUSHING_WHEEL.get(), 2);
+        helper.succeedWhen(() -> helper.assertContainerContains(chest, expected));
+    }
+
+    @GameTest(template="precision_mechanism_crafting", timeoutTicks=400)
+    public static void precisionMechanismCrafting(CreateGameTestHelper helper) {
+        BlockPos lever = new BlockPos(6, 3, 6);
+        BlockPos output = new BlockPos(11, 3, 1);
+        helper.pullLever(lever);
+        SequencedAssemblyRecipe recipe = (SequencedAssemblyRecipe)((RecipeHolder)helper.getLevel().getRecipeManager().byKey(Create.asResource("sequenced_assembly/precision_mechanism")).orElseThrow(() -> new GameTestAssertException("Precision Mechanism recipe not found"))).value();
+        Item result = recipe.getResultItem((HolderLookup.Provider)helper.getLevel().registryAccess()).getItem();
+        Item[] possibleResults = (Item[])recipe.resultPool.stream().map(ProcessingOutput::getStack).map(ItemStack::getItem).filter(item -> item != result).toArray(Item[]::new);
+        helper.succeedWhen(() -> {
+            helper.assertContainerContains(output, result);
+            helper.assertAnyContained(output, possibleResults);
+        });
+    }
+
+    @GameTest(template="sand_washing", timeoutTicks=200)
+    public static void sandWashing(CreateGameTestHelper helper) {
+        BlockPos leverPos = new BlockPos(5, 3, 1);
+        helper.pullLever(leverPos);
+        BlockPos chestPos = new BlockPos(8, 3, 2);
+        helper.succeedWhen(() -> helper.assertContainerContains(chestPos, Items.CLAY_BALL));
+    }
+
+    @GameTest(template="stone_cobble_sand_crushing", timeoutTicks=200)
+    public static void stoneCobbleSandCrushing(CreateGameTestHelper helper) {
+        BlockPos chest = new BlockPos(1, 6, 2);
+        BlockPos lever = new BlockPos(2, 3, 1);
+        helper.pullLever(lever);
+        ItemStack expected = new ItemStack((ItemLike)Items.SAND, 5);
+        helper.succeedWhen(() -> helper.assertContainerContains(chest, expected));
+    }
+
+    @GameTest(template="track_crafting", timeoutTicks=200)
+    public static void trackCrafting(CreateGameTestHelper helper) {
+        BlockPos output = new BlockPos(7, 3, 2);
+        BlockPos lever = new BlockPos(2, 3, 1);
+        helper.pullLever(lever);
+        ItemStack expected = new ItemStack((ItemLike)AllBlocks.TRACK.get(), 6);
+        helper.succeedWhen(() -> {
+            helper.assertContainerContains(output, expected);
+            IItemHandler handler = helper.itemStorageAt(output);
+            ItemHelper.extract(handler, ItemHelper.sameItemPredicate(expected), 6, false);
+            helper.assertContainerEmpty(output);
+        });
+    }
+
+    @GameTest(template="water_filling_bottle")
+    public static void waterFillingBottle(CreateGameTestHelper helper) {
+        BlockPos lever = new BlockPos(3, 3, 3);
+        BlockPos output = new BlockPos(2, 2, 4);
+        ItemStack expected = PotionContents.createItemStack((Item)Items.POTION, (Holder)Potions.WATER);
+        helper.pullLever(lever);
+        helper.succeedWhen(() -> helper.assertContainerContains(output, expected));
+    }
+
+    @GameTest(template="wheat_milling")
+    public static void wheatMilling(CreateGameTestHelper helper) {
+        BlockPos output = new BlockPos(1, 2, 1);
+        BlockPos lever = new BlockPos(1, 7, 1);
+        helper.pullLever(lever);
+        ItemStack expected = new ItemStack((ItemLike)AllItems.WHEAT_FLOUR.get(), 3);
+        helper.succeedWhen(() -> helper.assertContainerContains(output, expected));
+    }
+}

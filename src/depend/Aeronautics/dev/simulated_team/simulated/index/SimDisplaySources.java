@@ -1,0 +1,41 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  com.simibubi.create.api.behaviour.display.DisplaySource
+ *  com.simibubi.create.content.redstone.displayLink.source.ItemThroughputDisplaySource
+ *  com.tterrag.registrate.util.entry.RegistryEntry
+ */
+package dev.simulated_team.simulated.index;
+
+import com.simibubi.create.api.behaviour.display.DisplaySource;
+import com.simibubi.create.content.redstone.displayLink.source.ItemThroughputDisplaySource;
+import com.tterrag.registrate.util.entry.RegistryEntry;
+import dev.simulated_team.simulated.Simulated;
+import dev.simulated_team.simulated.content.display_sources.AltitudeSensorDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.DockingConnectorDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.GimbalSensorDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.LaserSensorDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.LinkedTypewriterDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.NavigationTableDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.OpticalSensorDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.PortableEngineDisplaySource;
+import dev.simulated_team.simulated.content.display_sources.VelocitySensorDisplaySource;
+import java.util.function.Supplier;
+
+public class SimDisplaySources {
+    public static final RegistryEntry<DisplaySource, ItemThroughputDisplaySource> AUGER_DISPLAY = SimDisplaySources.simple("auger_throughput", ItemThroughputDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, VelocitySensorDisplaySource> VELO_DISPLAY = SimDisplaySources.simple("velocity_display", VelocitySensorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, GimbalSensorDisplaySource> GIMBAL_DISPLAY = SimDisplaySources.simple("gimbal_display", GimbalSensorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, OpticalSensorDisplaySource> OPTICAL_SENSOR_DISPLAY = SimDisplaySources.simple("optical_sensor_display", OpticalSensorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, LaserSensorDisplaySource> LASER_SENSOR_DISPLAY = SimDisplaySources.simple("laser_sensor_display", LaserSensorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, AltitudeSensorDisplaySource> ALTITUDE_SENSOR_DISPLAY = SimDisplaySources.simple("altitude_sensor_display", AltitudeSensorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, PortableEngineDisplaySource> PORTABLE_ENGINE_DISPLAY = SimDisplaySources.simple("portable_engine_display", PortableEngineDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, DockingConnectorDisplaySource> DOCKING_CONNECTOR_DISPLAY = SimDisplaySources.simple("docking_connector_display", DockingConnectorDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, LinkedTypewriterDisplaySource> LINKED_TYPEWRITER__DISPLAY = SimDisplaySources.simple("linked_typewriter_display", LinkedTypewriterDisplaySource::new);
+    public static final RegistryEntry<DisplaySource, NavigationTableDisplaySource> NAV_TABLE_DISPLAY = SimDisplaySources.simple("nav_table_display", NavigationTableDisplaySource::new);
+
+    private static <T extends DisplaySource> RegistryEntry<DisplaySource, T> simple(String name, Supplier<T> supplier) {
+        return Simulated.getRegistrate().displaySource(name, supplier).register();
+    }
+}

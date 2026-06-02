@@ -1,0 +1,35 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.createmod.ponder.foundation.PonderScene
+ *  net.createmod.ponder.foundation.instruction.PonderInstruction
+ *  net.minecraft.core.Vec3i
+ *  net.minecraft.world.phys.Vec3
+ */
+package dev.simulated_team.simulated.ponder.instructions;
+
+import dev.simulated_team.simulated.ponder.SmoothMovementUtils;
+import dev.simulated_team.simulated.ponder.instructions.CustomAnimateWorldSectionInstruction;
+import dev.simulated_team.simulated.ponder.records.ScrollingSceneRecord;
+import net.createmod.ponder.foundation.PonderScene;
+import net.createmod.ponder.foundation.instruction.PonderInstruction;
+import net.minecraft.core.Vec3i;
+import net.minecraft.world.phys.Vec3;
+
+public class ScrollingSceneInstruction
+extends PonderInstruction {
+    public ScrollingSceneInstruction(ScrollingSceneRecord scrollingScene, boolean moveCloseToFar) {
+        Vec3 movement = Vec3.atLowerCornerOf((Vec3i)scrollingScene.directionTravelling().getNormal().multiply(scrollingScene.groundLength()));
+        scrollingScene.scene().addInstruction((PonderInstruction)CustomAnimateWorldSectionInstruction.move(moveCloseToFar ? scrollingScene.groundClose() : scrollingScene.groundFar(), movement.scale(-2.0), 0, SmoothMovementUtils.linear()));
+        scrollingScene.scene().addInstruction((PonderInstruction)CustomAnimateWorldSectionInstruction.move(scrollingScene.groundClose(), movement, scrollingScene.ticksPerCycle(), SmoothMovementUtils.linear()));
+        scrollingScene.scene().addInstruction((PonderInstruction)CustomAnimateWorldSectionInstruction.move(scrollingScene.groundFar(), movement, scrollingScene.ticksPerCycle(), SmoothMovementUtils.linear()));
+    }
+
+    public boolean isComplete() {
+        return true;
+    }
+
+    public void tick(PonderScene scene) {
+    }
+}

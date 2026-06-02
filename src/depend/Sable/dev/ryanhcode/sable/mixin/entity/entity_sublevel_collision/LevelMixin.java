@@ -1,0 +1,27 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.world.level.Level
+ *  org.spongepowered.asm.mixin.Mixin
+ *  org.spongepowered.asm.mixin.Unique
+ */
+package dev.ryanhcode.sable.mixin.entity.entity_sublevel_collision;
+
+import dev.ryanhcode.sable.api.math.LevelReusedVectors;
+import dev.ryanhcode.sable.mixinterface.entity.entity_sublevel_collision.LevelExtension;
+import net.minecraft.world.level.Level;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
+
+@Mixin(value={Level.class})
+public class LevelMixin
+implements LevelExtension {
+    @Unique
+    private final LevelReusedVectors sable$reusedVectors = new LevelReusedVectors();
+
+    @Override
+    public LevelReusedVectors sable$getJOMLSink() {
+        return this.sable$reusedVectors;
+    }
+}

@@ -1,0 +1,28 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.core.BlockPos
+ *  net.minecraft.world.level.block.entity.BlockEntityType
+ *  net.minecraft.world.level.block.state.BlockState
+ */
+package com.simibubi.create.content.trains.bogey;
+
+import com.simibubi.create.AllBogeyStyles;
+import com.simibubi.create.content.trains.bogey.AbstractBogeyBlockEntity;
+import com.simibubi.create.content.trains.bogey.BogeyStyle;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class StandardBogeyBlockEntity
+extends AbstractBogeyBlockEntity {
+    public StandardBogeyBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
+    }
+
+    @Override
+    public BogeyStyle getDefaultStyle() {
+        return AllBogeyStyles.STANDARD;
+    }
+}

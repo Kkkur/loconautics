@@ -1,0 +1,34 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.world.item.ItemStack
+ *  org.apache.commons.lang3.mutable.MutableBoolean
+ *  org.apache.commons.lang3.mutable.MutableInt
+ *  org.jetbrains.annotations.Nullable
+ */
+package com.simibubi.create.content.logistics.packager;
+
+import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
+import net.minecraft.world.item.ItemStack;
+import org.apache.commons.lang3.mutable.MutableBoolean;
+import org.apache.commons.lang3.mutable.MutableInt;
+import org.jetbrains.annotations.Nullable;
+
+public record PackagingRequest(ItemStack item, MutableInt count, String address, int linkIndex, MutableBoolean finalLink, MutableInt packageCounter, int orderId, @Nullable PackageOrderWithCrafts context) {
+    public static PackagingRequest create(ItemStack item, int count, String address, int linkIndex, MutableBoolean finalLink, int packageCount, int orderId, @Nullable PackageOrderWithCrafts context) {
+        return new PackagingRequest(item, new MutableInt(count), address, linkIndex, finalLink, new MutableInt(packageCount), orderId, context);
+    }
+
+    public int getCount() {
+        return this.count.intValue();
+    }
+
+    public void subtract(int toSubtract) {
+        this.count.setValue(this.getCount() - toSubtract);
+    }
+
+    public boolean isEmpty() {
+        return this.getCount() == 0;
+    }
+}

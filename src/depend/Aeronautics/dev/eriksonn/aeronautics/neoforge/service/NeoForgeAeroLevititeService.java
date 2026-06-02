@@ -1,0 +1,26 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.minecraft.world.item.Item
+ *  net.minecraft.world.level.material.Fluid
+ */
+package dev.eriksonn.aeronautics.neoforge.service;
+
+import dev.eriksonn.aeronautics.neoforge.index.AeroFluidsNeoForge;
+import dev.eriksonn.aeronautics.service.AeroLevititeService;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.material.Fluid;
+
+public class NeoForgeAeroLevititeService
+implements AeroLevititeService {
+    @Override
+    public Item getBucket() {
+        return (Item)AeroFluidsNeoForge.LEVITITE_BLEND.getBucket().orElseThrow();
+    }
+
+    @Override
+    public Fluid getFluid() {
+        return AeroFluidsNeoForge.LEVITITE_BLEND.getSource();
+    }
+}

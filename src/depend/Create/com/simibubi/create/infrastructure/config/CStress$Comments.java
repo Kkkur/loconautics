@@ -1,0 +1,13 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
+package com.simibubi.create.infrastructure.config;
+
+private static class CStress.Comments {
+    static String su = "[in Stress Units]";
+    static String impact = "Configure the individual stress impact of mechanical blocks. Note that this cost is doubled for every speed increase it receives.";
+    static String capacity = "Configure how much stress a source can accommodate for.";
+
+    private CStress.Comments() {
+    }
+}
