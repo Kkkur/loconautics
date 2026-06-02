@@ -6,6 +6,10 @@
 >
 > **Léelo entero antes de tocar código.** Complementa a `PLAN_IMPLEMENTACION.md` (spec técnica
 > original) y `PLAN_EQUIPO.md` (reparto humano). Este HANDOFF es la fuente de verdad más reciente.
+>
+> **⚡ ORDEN DE LECTURA recomendado:** §14 (lo MÁS reciente: tarea abierta de COLISIÓN + hallazgos
+> definitivos) → §13 (sesión de RENDER, ya resuelta) → el resto para contexto. Último commit: **`cc781d8`**.
+> El render del cuerpo y el bogey fantasma están RESUELTOS; lo abierto es la **colisión** del tren físico (§14).
 
 ---
 
@@ -401,17 +405,21 @@ tick handler limpia el registro (huérfano).
 
 ## 11. Estado de git
 
-- Rama `master`, último commit relevante: **`d1a78b0`** (merge + Sable disassembly + render fix).
-- SSH configurado, push a master autorizado. Commit/push SOLO cuando el usuario lo pida.
-- Jar desplegado en la instancia de pruebas con `d1a78b0`.
+- Rama `master` (historia lineal), **último commit: `cc781d8`**. Hitos recientes:
+  - `cc781d8` — wip(collision): desactiva colisión del contraption de Create + documenta §14 (ESTE).
+  - `1b57c1d` — fix(render): oculta el bogey viajero fantasma de Create (§13.5 resuelto).
+  - `cf956b8` — lock del cuerpo físico al vagón (render clavado, sin jitter).
+- SSH configurado, push a master autorizado. **Commit/push SOLO cuando el usuario lo pida.**
 - `.gitignore`: `libs/`, `deps/`, `.claude/`, `run/`, `build/`, etc.
 
 ---
 
-**Siguiente acción recomendada para el próximo Claude:** pedir al usuario que pruebe el jar actual
-(commit `d1a78b0`) y reporte: (1) ¿no crashea?, (2) ¿desaparece el vagón de Create?, (3) ¿el
-disassembly mantiene cofres + bloques rotos? Según el resultado, afinar (rotación del disassembly,
-race del render, sonidos). Leer el `latest.log` directamente para diagnosticar.
+**Siguiente acción recomendada para el próximo Claude / el compa:** la tarea abierta es la **COLISIÓN**
+del tren físico (no el render, ya resuelto). Leer **§14** entero: la interacción funciona, la física de
+Sable ya está en el cuerpo visible, y el problema es el modelo de movimiento **teleport-por-tick**
+(stutter + empuje lateral). Dirección: reemplazarlo por movimiento cinemático continuo (estudiar
+`KinematicContraption` de Sable, el `transformProvider` de CI, y cómo Aeronautics mueve sus sub-levels).
+Leer el `latest.log` directamente para diagnosticar.
 
 ---
 
@@ -494,7 +502,7 @@ SÍ lo puede leer Claude directamente (la prueba debe hacerse en ESA máquina, n
 
 ---
 
-## 13. SESIÓN DE RENDER (2026-06-01) — LA MÁS RECIENTE Y FUENTE DE VERDAD ⭐
+## 13. SESIÓN DE RENDER (2026-06-01) — FUENTE DE VERDAD PARA RENDER (ya resuelto; lo MÁS reciente es §14) ⭐
 
 > **Léela ANTES de tocar render.** Todo lo aprendido haciendo que el tren físico SE VEA bien.
 > Complementa `ANALISIS_CREATE_INTERACTIVE.md`. Donde haya conflicto con secciones anteriores sobre
