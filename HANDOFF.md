@@ -7,9 +7,10 @@
 > **Léelo entero antes de tocar código.** Complementa a `PLAN_IMPLEMENTACION.md` (spec técnica
 > original) y `PLAN_EQUIPO.md` (reparto humano). Este HANDOFF es la fuente de verdad más reciente.
 >
-> **⚡ ORDEN DE LECTURA recomendado:** §14 (lo MÁS reciente: tarea abierta de COLISIÓN + hallazgos
-> definitivos) → §13 (sesión de RENDER, ya resuelta) → el resto para contexto. Último commit: **`cc781d8`**.
-> El render del cuerpo y el bogey fantasma están RESUELTOS; lo abierto es la **colisión** del tren físico (§14).
+> **⚡ ORDEN DE LECTURA recomendado:** §14 (lo MÁS reciente: COLISIÓN del tren físico — **la SOLUCIÓN
+> concreta está en §14.6**, encontrada en el fuente de Aeronautics) → §13 (RENDER, ya resuelto) → resto
+> para contexto. El render del cuerpo y el bogey fantasma están RESUELTOS; lo abierto es la **colisión**:
+> hay que cambiar el `teleport`-por-tick por un **constraint con motores en el physics tick** (§14.6).
 
 ---
 
@@ -734,3 +735,59 @@ cada tick.** El teletransporte discreto choca con el modelo de interpolación/co
 - `getRotationState()` de `OrientedContraptionEntity` (verificado javap): `zRotation=pitch`,
   `yRotation=-yaw+getYawOffset()` (yawOffset=`getInitialYaw()`), y el campo `yawOffset` del state se queda en
   0 (no se setea). En servidor `yaw` (animado) ya = facing real, así que `yRotation≈0` cuando `yaw=initYaw`.
+
+### 14.6 ⭐ SOLUCIÓN ENCONTRADA (2026-06-02, tras subir el FUENTE COMPLETO de Aeronautics) ⭐
+El compa subió el código fuente completo de Aeronautics/Sable a `src/depend/Aeronautics/`. **Ahí está
+cómo se DEBE mover un sub-level: NO con `teleport`, sino con un CONSTRAINT con MOTORES (spring-damper)
+en el PHYSICS tick.** Referencia exacta: `dev.simulated_team.simulated.content.physics_staff.
+PhysicsStaffServerHandler` (la "physics staff" arrastra un sub-level a donde apunta el jugador =
+seguimiento de objetivo móvil, NUESTRO caso).
+
+**Receta (copiar el patrón, NO el código literal):**
+1. **Engancha el PHYSICS tick** (no el game tick): `SableEventPlatform.INSTANCE.onPhysicsTick((physicsSystem,
+   timeStep) -> ...)`. Corre a la frecuencia de substeps de física (suave) y da `physicsSystem.
+   getPartialPhysicsTick()` para interpolar. (Aeronautics lo registra en `Simulated.java:87` →
+   `SimulatedCommonEvents.onPhysicsTick`.)
+2. **Crea UN constraint** entre el mundo y el sub-level (una vez, al ensamblar o lazy):
+   `PhysicsConstraintHandle c = pipeline.addConstraint(null /*bodyA=mundo*/, serverSub /*bodyB*/,
+   new FreeConstraintConfiguration(JOMLConversion.ZERO /*anchor en mundo*/, plotAnchorLocal /*anchor en
+   sub-level*/, orientationRef));` (`PhysicsPipeline pipeline = container.physicsSystem().getPipeline()`).
+   - Alternativa rígida: `FixedConstraintConfiguration(pos, rotationPoint, orientation)` (es lo que usa el
+     "lock" del staff — pin rígido a una pose; ver `PhysicsStaffServerHandler.addConstraint`).
+3. **Cada physics tick, mueve los motores hacia la pose del vagón** (en vez de teleport):
+   ```
+   for (ConstraintJointAxis ax : ConstraintJointAxis.ANGULAR)
+       c.setMotor(ax, targetAngle, angularStiffness, angularDamping, false, 0.0);
+   c.setMotor(ConstraintJointAxis.LINEAR_X, goalLocal.x, linStiffness, linDamping, false, 0.0);
+   c.setMotor(ConstraintJointAxis.LINEAR_Y, goalLocal.y, ...);
+   c.setMotor(ConstraintJointAxis.LINEAR_Z, goalLocal.z, ...);
+   ```
+   donde `goalLocal` = la pose objetivo del vagón (posición + orientación que YA calculamos en
+   `PhysicsTrainTickHandler.targetPosition`/`PhysicsTrainPose.orientationOf`) transformada al marco del
+   constraint (ver `DragSession.physicsTick`: `orientation.transformInverse(localGoal)`).
+   - Con **stiffness alto + damping** el cuerpo sigue el objetivo MUY pegado pero de forma **física y
+     continua** → arrastra al jugador, **sin stutter**, y la colisión se resuelve natural (es un cuerpo
+     físico tirado por un muelle, no teletransportado).
+4. **Limpieza:** `c.remove()` al desensamblar / cuando el tren desaparece (como `DragSession.onRemoved`).
+
+**Por qué esto arregla TODO lo de §14.2:**
+- No hay teleport discreto → no hay stutter (el cuerpo se integra continuo entre substeps).
+- El cuerpo es un rigid body de verdad tirado hacia el objetivo → **arrastra entidades** encima.
+- La colisión la resuelve la física de Sable normalmente → no más empuje lateral raro.
+
+**Archivos del fuente a estudiar (todos en `src/depend/Aeronautics/dev/simulated_team/...`):**
+- `content/physics_staff/PhysicsStaffServerHandler(.java + $DragSession)` — EL patrón (drag por motores + lock fijo).
+- `events/SimulatedCommonEvents.onPhysicsTick` + `Simulated.java:87` — cómo engancha el physics tick.
+- `content/blocks/handle/HandleBlockEntity`, `docking_connector/DockingConnectorBlockEntity` — más ejemplos
+  de constraints/motores en `sable$physicsTick(subLevel, RigidBodyHandle, timeStep)`.
+- `content/entities/launched_plunger/LaunchedPlungerEntity.physicsTick(...)` — patrón alternativo:
+  `RigidBodyHandle` + aplicar fuerzas/impulsos directos (por si se prefiere control por fuerzas).
+- API Sable (en `src/depend/Sable/`): `FreeConstraintConfiguration`, `FixedConstraintConfiguration`,
+  `PhysicsConstraintHandle`, `ConstraintJointAxis`, `PhysicsPipeline.addConstraint(...)`, `RigidBodyHandle`.
+
+**Plan de implementación sugerido:** reescribir `PhysicsTrainTickHandler` para: (a) crear el constraint
+por carriage al registrar el tren físico, (b) suscribirse a `SableEventPlatform.onPhysicsTick` y ahí
+poner los motores hacia la pose del vagón (reutilizando `targetPosition` + `orientationOf`), (c) quitar el
+`teleport`+`resetVelocity`, (d) remover el constraint al desensamblar. Empezar con stiffness/damping altos
+y tunear. El render (ClientSubLevelRenderMixin) y el bogey (§13) se quedan IGUAL — solo cambia el motor del
+cuerpo físico.
