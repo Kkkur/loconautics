@@ -15,7 +15,6 @@ import com.lycoris.loconautics.server.PhysicsTrainRegistry;
 import com.lycoris.loconautics.server.assembly.PhysicsTrainDisassembler;
 
 import com.simibubi.create.Create;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
@@ -23,8 +22,11 @@ import com.simibubi.create.content.trains.entity.Train;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.math.Pose3d;
+import dev.ryanhcode.sable.platform.SableEventPlatform;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -35,12 +37,20 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
- * Phase 4a driver. Each server tick, drives every physics train's carriage sub-levels to follow the
- * pose Create already computed for that carriage (rail-following stays 100% Create's job).
+ * Drives every physics train's carriage sub-level so its {@code logicalPose} follows the pose Create
+ * computed for the carriage.
  *
- * <p>Option B (kinematic / deterministic): we don't simulate rigid-body forces; we teleport each
- * {@link ServerSubLevel} to the carriage pose via {@link PhysicsPipeline#teleport} and cancel its
- * velocity so gravity doesn't drag it down between ticks.
+ * <p><b>Why the physics tick (the 2026-06-03 fix):</b> reading the Sable source settled where collision
+ * actually lives. Player↔sub-level collision ({@code SubLevelEntityCollision.collide}) and raytracing
+ * ({@code clip_overwrite.BlockGetterMixin.clip}) both transform the sub-level's plot blocks by
+ * {@code subLevel.logicalPose()} — so {@code logicalPose} is the single authoritative pose for both, while
+ * the visual uses {@code renderPose} (coupled to the carriage). The old driver teleported logicalPose in
+ * {@link ServerTickEvent.Post} (AFTER the physics tick); the dynamic body then sagged under gravity and
+ * collision read the sagged pose (~0.64 below the render → the "gray box below the body"). We now pin
+ * logicalPose to the carriage pose <b>inside</b> the physics tick — teleport+resetVelocity in
+ * {@link #onPhysicsTick} (keeps the Rapier body consistent) and re-pin in {@link #onPostPhysicsTick}
+ * (removes the per-substep sag) — so logicalPose is un-sagged whenever collision/raytrace read it, and the
+ * collision surface coincides with the visible body.
  */
 @EventBusSubscriber(modid = LoconauticsConstants.MOD_ID)
 public final class PhysicsTrainTickHandler {
@@ -52,6 +62,92 @@ public final class PhysicsTrainTickHandler {
     private PhysicsTrainTickHandler() {
     }
 
+    /** Wires the physics-tick pose pinning onto Sable's pre/post substep events. Call once during setup. */
+    public static void register() {
+        SableEventPlatform.INSTANCE.onPhysicsTick(PhysicsTrainTickHandler::onPhysicsTick);
+        SableEventPlatform.INSTANCE.onPostPhysicsTick(PhysicsTrainTickHandler::onPostPhysicsTick);
+        LoconauticsConstants.LOGGER.info("Loconautics: registered physics-tick pose pinning");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Physics tick: pin logicalPose to the carriage pose so collision/raytrace read it un-sagged.
+    // ---------------------------------------------------------------------------------------------
+
+    /** Pre-step: teleport the body (Rapier + logicalPose) to the carriage pose and kill its velocity. */
+    public static void onPhysicsTick(SubLevelPhysicsSystem physicsSystem, double timeStep) {
+        forEachCarriageBody(physicsSystem, (pipeline, serverSub, entity) -> {
+            Quaterniond orientation = PhysicsTrainPose.orientationOf(entity);
+            Vector3d target = targetPosition(entity, serverSub, orientation);
+            pipeline.teleport(serverSub, target, orientation);
+            pipeline.resetVelocity(serverSub);
+        });
+    }
+
+    /** Post-step: re-pin logicalPose (only) to the carriage pose, removing the tiny gravity sag. */
+    public static void onPostPhysicsTick(SubLevelPhysicsSystem physicsSystem, double timeStep) {
+        forEachCarriageBody(physicsSystem, (pipeline, serverSub, entity) -> {
+            Quaterniond orientation = PhysicsTrainPose.orientationOf(entity);
+            Vector3d target = targetPosition(entity, serverSub, orientation);
+            Pose3d pose = serverSub.logicalPose();
+            pose.position().set(target);
+            pose.orientation().set(orientation);
+        });
+    }
+
+    /** Runs {@code action} for every physics-train carriage body living in this physics system's level. */
+    private static void forEachCarriageBody(SubLevelPhysicsSystem physicsSystem, CarriageBodyAction action) {
+        ServerLevel level = physicsSystem.getLevel();
+        MinecraftServer server = level.getServer();
+        if (server == null) {
+            return;
+        }
+        PhysicsTrainRegistry registry = PhysicsTrainRegistry.get(server);
+        if (registry.all().isEmpty()) {
+            return;
+        }
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return;
+        }
+        PhysicsPipeline pipeline = physicsSystem.getPipeline();
+
+        for (PhysicsTrainTag tag : new ArrayList<>(registry.all())) {
+            Train train = Create.RAILWAYS.trains.get(tag.trainId());
+            if (train == null) {
+                continue; // lifecycle (game tick) tears it down
+            }
+            List<Carriage> carriages = train.carriages;
+            int count = Math.min(carriages.size(), tag.subLevelIds().size());
+            for (int i = 0; i < count; i++) {
+                UUID subLevelId = tag.subLevelIds().get(i);
+                if (subLevelId == null) {
+                    continue;
+                }
+                CarriageContraptionEntity entity = carriages.get(i).anyAvailableEntity();
+                if (entity == null || entity.level() != level) {
+                    continue;
+                }
+                if (!(container.getSubLevel(subLevelId) instanceof ServerSubLevel serverSub) || serverSub.isRemoved()) {
+                    continue;
+                }
+                try {
+                    action.run(pipeline, serverSub, entity);
+                } catch (Throwable t) {
+                    LoconauticsConstants.LOGGER.error("Error pinning physics-train sub-level {}", subLevelId, t);
+                }
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface CarriageBodyAction {
+        void run(PhysicsPipeline pipeline, ServerSubLevel serverSub, CarriageContraptionEntity entity);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Game tick: lifecycle (orphan/teardown detection) + diagnostic logging only. No driving here.
+    // ---------------------------------------------------------------------------------------------
+
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
@@ -62,98 +158,72 @@ public final class PhysicsTrainTickHandler {
         boolean log = (tickCounter++ % LOG_INTERVAL) == 0;
         for (PhysicsTrainTag tag : new ArrayList<>(registry.all())) {
             try {
-                driveTrain(server, tag, log);
+                tickLifecycle(server, tag, log);
             } catch (Throwable t) {
-                LoconauticsConstants.LOGGER.error("Error driving physics train {}", tag.trainId(), t);
+                LoconauticsConstants.LOGGER.error("Error in lifecycle for physics train {}", tag.trainId(), t);
             }
         }
     }
 
-    private static void driveTrain(MinecraftServer server, PhysicsTrainTag tag, boolean log) {
+    private static void tickLifecycle(MinecraftServer server, PhysicsTrainTag tag, boolean log) {
         Train train = Create.RAILWAYS.trains.get(tag.trainId());
         if (train == null) {
-            // Orphan: the Create train is gone (disassembled / removed). Tear down the sub-levels.
             PhysicsTrainDisassembler.disassemble(server, tag.trainId());
             return;
         }
 
         List<Carriage> carriages = train.carriages;
         int count = Math.min(carriages.size(), tag.subLevelIds().size());
-        int driven = 0;
         boolean sawContainer = false;
+        int alive = 0;
 
         for (int i = 0; i < count; i++) {
-            Carriage carriage = carriages.get(i);
             UUID subLevelId = tag.subLevelIds().get(i);
             if (subLevelId == null) {
                 continue;
             }
-
-            CarriageContraptionEntity entity = carriage.anyAvailableEntity();
+            CarriageContraptionEntity entity = carriages.get(i).anyAvailableEntity();
             if (entity == null || !(entity.level() instanceof ServerLevel level)) {
                 continue;
             }
-
             ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
             if (container == null) {
                 continue;
             }
             sawContainer = true;
-            SubLevel sub = container.getSubLevel(subLevelId);
-            if (!(sub instanceof ServerSubLevel serverSub)) {
-                continue;
-            }
-
-            PhysicsPipeline pipeline = container.physicsSystem().getPipeline();
-
-            Quaterniond orientation = PhysicsTrainPose.orientationOf(entity);
-            Vector3d target = targetPosition(entity, serverSub, orientation);
-
-            // Capture the inputs BEFORE teleport so the log reflects what fed into targetPosition.
-            Vector3dc rpBefore = serverSub.logicalPose().rotationPoint();
-            BlockPos plotAnchor = serverSub.getPlot().getCenterBlock();
-            Vector3dc com = serverSub.getMassTracker().getCenterOfMass();
-
-            // Pin the sub-level EXACTLY to the pose Create computed for the carriage this tick, with no
-            // velocity/extrapolation (which made the body drift/jitter ahead of the bogeys). Sable still
-            // interpolates between server poses on the client.
-            pipeline.teleport(serverSub, target, orientation);
-            pipeline.resetVelocity(serverSub);
-            driven++;
-
-            if (log && i == 0) {
-                Vector3dc after = serverSub.logicalPose().position();
-                AbstractContraptionEntity.ContraptionRotationState rs = entity.getRotationState();
-                LoconauticsConstants.LOGGER.info(
-                        "[drive] c0: entityPos={} yaw={} pitch={} initYaw={} rotState=(x{},y{},z{},yawOff{}) | plotAnchor={} rotationPoint=({},{},{}) com={} "
-                        + "| orient=({},{},{},{}) -> target=({},{},{}) | poseAfter=({},{},{})",
-                        entity.position(), fmt(entity.yaw), fmt(entity.pitch), fmt(entity.getInitialYaw()),
-                        fmt(rs.xRotation), fmt(rs.yRotation), fmt(rs.zRotation), fmt(rs.getYawOffset()), plotAnchor,
-                        fmt(rpBefore.x()), fmt(rpBefore.y()), fmt(rpBefore.z()),
-                        com == null ? "null" : ("(" + fmt(com.x()) + "," + fmt(com.y()) + "," + fmt(com.z()) + ")"),
-                        fmt(orientation.x), fmt(orientation.y), fmt(orientation.z), fmt(orientation.w),
-                        fmt(target.x), fmt(target.y), fmt(target.z),
-                        fmt(after.x()), fmt(after.y()), fmt(after.z()));
+            if (container.getSubLevel(subLevelId) instanceof ServerSubLevel serverSub) {
+                alive++;
+                if (log && i == 0) {
+                    logPose(entity, serverSub);
+                }
             }
         }
 
         // Train exists but its sub-levels are gone (e.g. removed after a reload): drop the binding.
-        if (driven == 0 && sawContainer && count > 0) {
+        if (alive == 0 && sawContainer && count > 0) {
             PhysicsTrainDisassembler.disassemble(server, tag.trainId());
         }
     }
 
+    /** Verifies the pin held: {@code poseNow} should equal {@code target} every tick (no gravity sag). */
+    private static void logPose(CarriageContraptionEntity entity, ServerSubLevel serverSub) {
+        Quaterniond orientation = PhysicsTrainPose.orientationOf(entity);
+        Vector3d target = targetPosition(entity, serverSub, orientation);
+        Vector3dc poseNow = serverSub.logicalPose().position();
+        LoconauticsConstants.LOGGER.info(
+                "[poses] c0: entityPos={} | target=({},{},{}) poseNow=({},{},{}) err=({},{},{})",
+                entity.position(),
+                fmt(target.x), fmt(target.y), fmt(target.z),
+                fmt(poseNow.x()), fmt(poseNow.y()), fmt(poseNow.z()),
+                fmt(poseNow.x() - target.x), fmt(poseNow.y() - target.y), fmt(poseNow.z() - target.z));
+    }
+
     /**
-     * The world position to teleport the sub-level to so its blocks line up with where Create
-     * renders the carriage.
-     *
-     * <p>Teleport moves the sub-level's rotation point. A block at local position {@code bp} renders
-     * at {@code position + rotate(bp - rotationPoint, Q)}. We want the bogey block (at the plot's
-     * anchor) to land at {@code entity.position()}, which solves to:
-     * {@code position = entityPos + rotate(rotationPoint - plotAnchor, Q)}.
-     *
-     * <p>We read the sub-level's actual {@code rotationPoint} (not the center of mass, which can be
-     * null right after assembly), so the lift is always consistent with how the sub-level was built.
+     * The world position the sub-level's rotation point must reach so its blocks line up with where
+     * Create renders the carriage. {@code position = entityPos + rotate(rotationPoint - plotAnchor, Q)};
+     * only x/z are re-centred on the anchor block (Create's carriage sits at the anchor's horizontal
+     * centre but its y bottom — the rail height). Identical to the render coupling in
+     * {@code ClientSubLevelRenderMixin}, so logicalPose (collision) == renderPose (visual).
      */
     private static Vector3d targetPosition(CarriageContraptionEntity entity, ServerSubLevel sub, Quaterniond orientation) {
         Vec3 pos = entity.position();
@@ -161,10 +231,6 @@ public final class PhysicsTrainTickHandler {
 
         Vector3dc rotationPoint = sub.logicalPose().rotationPoint();
         BlockPos plotAnchor = sub.getPlot().getCenterBlock();
-        // Create's carriage entity sits at the anchor block's horizontal CENTER (x/z + 0.5) but at the
-        // anchor's BOTTOM (y, no +0.5 — that's the rail height). So we only re-center on x/z; adding
-        // +0.5 on y would sink the sub-level half a block into the ground. Verified empirically: the
-        // sub-level's resting pose.y matches (rotationPoint.y - plotAnchor.y) above entity.y.
         Vector3d offset = new Vector3d(
                 rotationPoint.x() - (plotAnchor.getX() + 0.5),
                 rotationPoint.y() - plotAnchor.getY(),

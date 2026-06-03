@@ -2,6 +2,7 @@ package com.lycoris.loconautics;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
+import com.lycoris.loconautics.server.tick.PhysicsTrainTickHandler;
 
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -32,5 +33,8 @@ public final class Loconautics {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
+        // Pin each physics-train sub-level's logicalPose to the carriage pose inside the physics tick,
+        // so collision/raytrace (which read logicalPose) coincide with the visible body.
+        PhysicsTrainTickHandler.register();
     }
 }
