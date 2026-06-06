@@ -73,6 +73,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     /** Current redstone power (0-15). */
     private int currentPower = 0;
 
+    /** Maximum allowed power — set by scroll wheel, shown as the throttle cap. */
+    private int maxPower = MAX_POWER;
+
     // ------------------------------------------------------------------ frequency
 
     /**
@@ -127,7 +130,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
         // --- apply held keys (sent by AnalogControllerInputPacket) ---
         if (raisingSignal) {
-            currentPower = Math.min(currentPower + 1, MAX_POWER);
+            currentPower = Math.min(currentPower + 1, maxPower); // respect cap
             decayTimer = DECAY_TICKS; // reset decay whenever player actively pushes
         } else if (loweringSignal) {
             currentPower = Math.max(currentPower - 1, 0);
@@ -175,12 +178,13 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         decayTimer = DECAY_TICKS;
         updateBlockState(level, getBlockState());
         setChanged();
-        sendData();
+        sendData(); // always send so client HUD gets initial power+locked state
         if (!level.isClientSide && player instanceof ServerPlayer sp) {
             sp.displayClientMessage(
                     Component.translatable("block.loconautics.analog_controller.start"),
                     true
             );
+            com.lycoris.loconautics.network.LoconauticsNetwork.sendMount(sp, true, worldPosition);
         }
     }
 
@@ -192,6 +196,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                         Component.translatable("block.loconautics.analog_controller.stop"),
                         true
                 );
+                com.lycoris.loconautics.network.LoconauticsNetwork.sendMount(
+                        sp, false, net.minecraft.core.BlockPos.ZERO);
             }
         }
         currentUser = null;
@@ -325,6 +331,22 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     @Nullable
     public UUID getCurrentUser() { return currentUser; }
 
+    public int getMaxPower() { return maxPower; }
+
+    /** Called when the player scrolls while mounted. Delta: +1 or -1. */
+    public void onScroll(UUID user, int delta) {
+        if (!user.equals(currentUser)) return;
+        maxPower = Math.max(0, Math.min(MAX_POWER, maxPower + delta));
+        // clamp current power to new cap immediately
+        if (currentPower > maxPower) {
+            currentPower = maxPower;
+            updateNetwork(level);
+            updateBlockState(level, getBlockState());
+        }
+        setChanged();
+        sendData();
+    }
+
     private boolean playerInRange(Player player) {
         double range = player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE) * 2.0;
         return player.blockPosition().distSqr(worldPosition) < range * range;
@@ -349,6 +371,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         super.write(tag, registries, clientPacket);
         tag.putInt("Power", currentPower);
         tag.putBoolean("Locked", locked);
+        tag.putInt("MaxPower", maxPower);
         if (currentUser != null) {
             tag.putUUID("User", currentUser);
         }
@@ -364,6 +387,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         super.read(tag, registries, clientPacket);
         currentPower = tag.getInt("Power");
         locked = tag.getBoolean("Locked");
+        maxPower = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
         currentUser = tag.contains("User") ? tag.getUUID("User") : null;
 
         if (tag.contains("Frequency")) {

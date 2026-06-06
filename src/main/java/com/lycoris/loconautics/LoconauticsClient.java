@@ -2,11 +2,14 @@ package com.lycoris.loconautics;
 
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHandler;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -55,6 +58,14 @@ public final class LoconauticsClient {
         event.register(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(),
                 AnalogControllerScreen::new);
     }
+
+    /** Register the Analog Controller HUD overlay. */
+    @SubscribeEvent
+    static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
+        event.registerAbove(VanillaGuiLayers.EXPERIENCE_BAR,
+                LoconauticsConstants.id("analog_controller_hud"),
+                AnalogControllerHUD.OVERLAY);
+    }
 }
 
 /**
@@ -69,5 +80,16 @@ final class LoconauticsClientGameEvents {
     @SubscribeEvent
     static void onClientTick(ClientTickEvent.Pre event) {
         AnalogControllerClientHandler.tick();
+    }
+
+    @SubscribeEvent
+    static void onMouseScroll(net.neoforged.neoforge.client.event.InputEvent.MouseScrollingEvent event) {
+        if (!AnalogControllerClientHandler.isControlling()) return;
+        if (net.minecraft.client.Minecraft.getInstance().screen != null) return;
+        int delta = event.getScrollDeltaY() > 0 ? 1 : -1;
+        net.createmod.catnip.platform.CatnipServices.NETWORK.sendToServer(
+                new com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket(
+                        delta, AnalogControllerClientHandler.getMountedPos()));
+        event.setCanceled(true);
     }
 }
