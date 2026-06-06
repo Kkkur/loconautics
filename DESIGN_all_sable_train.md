@@ -100,13 +100,18 @@ nuestros `TravellingPoint` en vez de por la entidad de Create.
 
 > Filosofía: que CADA fase arranque y se pueda probar; no un big-bang.
 
-- **Fase 0 (este doc + esqueleto).** Crear paquete `allsable/` con las clases vacías y el plan. ← AQUÍ.
-- **Fase 1 — Prueba de concepto del seguimiento de carril.** Un solo `TravellingPoint` colocado en una vía,
-  que avanza a velocidad constante, y un sub-level (o un marcador/AABB de debug) que se mueve a
-  `point.getPosition()`. Objetivo: **ver un cuerpo de Sable recorrer la vía** (recta y curva). Esto valida lo
-  más incierto sin tocar el ensamblaje de trenes.
-- **Fase 2 — Pose completa del vagón.** Dos `TravellingPoint` (bogeys) → pos + orientación del vagón →
-  mover el sub-level real con esa pose (cinemático con velocidad). Caminar encima en movimiento.
+- **Fase 0 (este doc + esqueleto).** Crear paquete `allsable/` con las clases vacías y el plan. ✅ HECHO.
+- **Fase 1 — Prueba de concepto del seguimiento de carril.** ✅ HECHO (sin confirmar in-game aún). Un solo
+  `TravellingPoint` (`allsable/RailFollower`) que avanza a velocidad constante; marcador de partículas END_ROD
+  que se mueve a `point.getPosition()`, rebotando en topes. Comando `/loconautics railtest [speed]`
+  (`allsable/RailDebug`). Objetivo: **ver un cuerpo recorrer la vía** (recta y curva).
+- **Fase 2a — Pose completa del vagón (sin sub-level).** ✅ HECHO (sin confirmar in-game). Dos
+  `TravellingPoint` (bogeys) con espaciado rígido (`allsable/RailCarriage`) → pos + orientación vía
+  `RailPose`. Comando `/loconautics railtest2 [spacing] [speed]`: dibuja bogey delantero (FLAME), trasero
+  (SOUL_FIRE_FLAME), centro (END_ROD) y una flecha de orientación (CRIT). Valida la matemática de pose en
+  aislamiento.
+- **Fase 2b — Mover el sub-level real con esa pose** (cinemático con velocidad). Caminar encima en
+  movimiento. Depende de tener un sub-level (integración con el ensamblaje, Fase 3).
 - **Fase 3 — Integración con el ensamblaje (Opción A).** Al ensamblar en la estación: crear el sub-level
   (ya lo hacemos) PERO alimentar su pose desde los `TravellingPoint`/`Carriage` de Create, y ocultar/neutralizar
   la `CarriageContraptionEntity` (o no spawnearla). Reutilizar el `Train` de Create para velocidad/navegación.
@@ -117,14 +122,14 @@ nuestros `TravellingPoint` en vez de por la entidad de Create.
 
 ## 5. Decisión pendiente para Lycoris/usuario
 
-**¿Opción A o B?** (§3.2)
-- **A (reusar el `Train` de Create, solo cambiar la representación a sub-level):** mucho menos trabajo,
-  heredamos navegación/señales/acoplamiento. Riesgo: seguir algo atados a Create internamente, pero SIN la
-  entidad de contraption problemática. **Mi recomendación para no reescribir medio Create.**
-- **B (tren 100% propio sobre `TravellingPoint`):** independencia total, pero hay que reimplementar
-  navegación/señales/estaciones/acoplamiento — meses de trabajo y bugs.
+**RESUELTO (2026-06-06): el usuario eligió la Opción B (tren 100% propio).**
+- **B (tren 100% propio sobre `TravellingPoint`):** independencia total de Create (sin reusar su `Train`).
+  Implica reimplementar navegación/señales/estaciones/acoplamiento (Fases 3-4 = mucho trabajo), pero el
+  usuario prioriza no depender de las internals de Create.
+- (Descartada) A (reusar el `Train` de Create): era mi recomendación por menor trabajo, pero el usuario
+  optó por la independencia total.
 
-La Fase 1 (prueba de concepto del carril) es **igual** en A y B, así que empezamos por ahí mientras decidís.
+Las Fases 1 y 2a (carril + pose) son **iguales** en A y B y ya están construidas.
 
 ---
 
