@@ -46,14 +46,14 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     // ------------------------------------------------------------------ constants
 
-    /** Ticks between each W raise step (~1 second). */
-    private static final int RAISE_TICKS  = 20;
+    /** Ticks between each W raise step (~0.5 seconds). */
+    private static final int RAISE_TICKS  = 10;
 
-    /** Ticks between each S lower step (~1.5 seconds). */
-    private static final int LOWER_TICKS  = 30;
+    /** Ticks between each S lower step (~0.5 seconds). */
+    private static final int LOWER_TICKS  = 10;
 
-    /** Ticks between automatic signal decay steps (~2 seconds). */
-    private static final int DECAY_TICKS  = 40;
+    /** Ticks between automatic signal decay steps (~1 second). */
+    private static final int DECAY_TICKS  = 20;
 
     /** Maximum redstone signal value. */
     private static final int MAX_POWER = 15;
@@ -163,12 +163,17 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             decayTimer = DECAY_TICKS;
         }
 
-        // --- decay always runs when unlocked and not actively raising ---
-        if (!locked && !raisingSignal) {
-            decayTimer--;
-            if (decayTimer <= 0) {
-                decayTimer = DECAY_TICKS;
-                currentPower = Math.max(currentPower - 1, 0);
+        // --- decay runs when not actively controlling ---
+        // When locked: decays down to maxPower (the throttle cap), not to 0.
+        // When unlocked: decays all the way to 0.
+        if (!raisingSignal && !loweringSignal) {
+            int decayFloor = locked ? maxPower : 0;
+            if (currentPower > decayFloor) {
+                decayTimer--;
+                if (decayTimer <= 0) {
+                    decayTimer = DECAY_TICKS;
+                    currentPower = Math.max(currentPower - 1, decayFloor);
+                }
             }
         }
 
@@ -201,8 +206,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         // locked intentionally NOT reset — player may have locked before dismounting
         raisingSignal = false;
         loweringSignal = false;
-        raiseTimer = RAISE_TICKS;
-        lowerTimer = LOWER_TICKS;
+        raiseTimer = 0;
+        lowerTimer = 0;
         decayTimer = DECAY_TICKS;
         updateBlockState(level, getBlockState());
         setChanged();
@@ -254,12 +259,13 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             case 0 -> { // W → raise
                 raisingSignal = pressed;
                 if (pressed) loweringSignal = false;
-                else raiseTimer = RAISE_TICKS; // reset on release so next press fires immediately
+                // raiseTimer intentionally NOT reset on release — keeps counting so
+                // spamming W cannot bypass the rate limit
             }
             case 1 -> { // S → lower
                 loweringSignal = pressed;
                 if (pressed) raisingSignal = false;
-                else lowerTimer = LOWER_TICKS;
+                // lowerTimer intentionally NOT reset on release
             }
             case 5 -> { // Shift → toggle lock on key-down only
                 if (pressed) {
@@ -367,8 +373,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     public void onScroll(UUID user, int delta) {
         if (!user.equals(currentUser)) return;
         maxPower = Math.max(0, Math.min(MAX_POWER, maxPower + delta));
-        // clamp current power to new cap immediately
-        if (currentPower > maxPower) {
+        // Only snap currentPower down immediately when NOT locked.
+        // When locked, decay will bring it down to the new maxPower gradually.
+        if (!locked && currentPower > maxPower) {
             currentPower = maxPower;
             updateNetwork(level);
             updateBlockState(level, getBlockState());

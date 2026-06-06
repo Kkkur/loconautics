@@ -2,8 +2,7 @@ package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.mojang.blaze3d.vertex.PoseStack;
-import dev.engine_room.flywheel.lib.transform.PoseTransformStack;
-import dev.engine_room.flywheel.lib.transform.TransformStack;
+import net.createmod.catnip.animation.LerpedFloat;
 import net.createmod.catnip.math.AngleHelper;
 import net.createmod.catnip.render.CachedBuffers;
 import net.createmod.catnip.render.SuperByteBuffer;
@@ -17,15 +16,31 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Renders the Create cover and lever partial models on top of the static
- * Analog Controller block, matching the visual behaviour of Create's own
- * train controls (ControlsRenderer) but for a world-placed block entity.
+ * Renders the Create cover and two lever partial models on top of the static
+ * Analog Controller block.
  *
- * The lever angle is driven by the block entity's current power (0–15):
- *   - power 0  → lever fully back  (-45°)
- *   - power 15 → lever fully forward (+45°)
+ * Left lever  (first)  → current power (0–15): firstLever  * 70 - 25  clamped [-45, 45]
+ * Right lever (second) → throttle cap  (0–15): secondLever * 15        clamped [-45, 45]
+ *
+ * All transforms use pure SuperByteBuffer methods (rotateCentered / rotate / translate).
+ * The ms.pushPose + TransformStack + transform(ms) chain from ControlsRenderer is
+ * contraption-specific and does not work for world-placed block entity renderers.
+ *
+ * Lever pivot chain derived from ControlsRenderer (after expanding center/uncenter):
+ *   rotateCentered(hAngle, UP)           — face the right direction
+ *   translate(0, 0.25, 0.25)            — move to lever hinge in rotated block space
+ *   rotate(vAngle - 45°, EAST)          — tilt part 1 (around current origin)
+ *   translate(0, yOffset, 0)            — equip slide (up when mounted, down when not)
+ *   rotate(45°, EAST)                   — tilt part 2  (net rotation = vAngle)
+ *   translate(0, -0.375, -0.1875)      — net position correction (uncenter + offset)
+ *   translate(xOffset, 0, 0)            — left lever (0) vs right lever (0.375)
  */
 public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogControllerBlockEntity> {
+
+    // Per-renderer-instance animated values (one renderer per BE in the view frustum)
+    private final LerpedFloat speedLever = LerpedFloat.linear();
+    private final LerpedFloat steerLever = LerpedFloat.linear();
+    private final LerpedFloat equipAnim  = LerpedFloat.linear();
 
     public AnalogControllerRenderer(BlockEntityRendererProvider.Context context) {}
 
@@ -36,40 +51,52 @@ public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogContr
 
         BlockState state = be.getBlockState();
         Direction facing = state.getValue(AnalogControllerBlock.FACING);
-        float hAngle = 180.0f + AngleHelper.horizontalAngle(facing);
+        // Controls face opposite to the FACING property — same +180 offset as Create.
+        float hAngleRad = (float) Math.toRadians(180.0f + AngleHelper.horizontalAngle(facing));
         int light = LevelRenderer.getLightColor(be.getLevel(), be.getBlockPos());
 
-        // --- Cover ---
-        SuperByteBuffer cover = CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_COVER, state);
-        cover.transform(ms)
-                .center()
-                .rotateYDegrees(hAngle)
-                .uncenter()
+        // ---- Chase animated targets each render frame ----
+        speedLever.chase(be.getCurrentPower() / 15.0, 0.2, LerpedFloat.Chaser.EXP);
+        steerLever.chase(be.getMaxPower()     / 15.0, 0.2, LerpedFloat.Chaser.EXP);
+        equipAnim .chase(be.hasUser() ? 1.0 : 0.0,   0.2, LerpedFloat.Chaser.EXP);
+
+        speedLever.tickChaser();
+        steerLever.tickChaser();
+        equipAnim .tickChaser();
+
+        float animSpeed = speedLever.getValue(partialTick);
+        float animSteer = steerLever.getValue(partialTick);
+        float animEquip = equipAnim .getValue(partialTick);
+
+        // yOffset: -0.15 when unmounted (holstered), +0.05 when mounted (equipped)
+        float yOffset = Mth.lerp(animEquip * animEquip, -0.15f, 0.05f);
+
+        // ---- Cover (only needs facing rotation) ----
+        CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_COVER, state)
+                .rotateCentered(hAngleRad, Direction.UP)
                 .light(light)
-                .useLevelLight(be.getLevel())
                 .renderInto(ms, buffers.getBuffer(RenderType.cutoutMipped()));
 
-        // --- Lever ---
-        // Map power 0-15 linearly to the same range Create uses for firstLever (0.0-1.0).
-        float leverT = be.getCurrentPower() / 15.0f;
-        // Replicate Create's formula: firstLever * 70 - 25, clamped to [-45, 45]
-        float vAngle = Mth.clamp(leverT * 70.0f - 25.0f, -45.0f, 45.0f);
+        // ---- Two levers ----
+        for (boolean first : new boolean[]{true, false}) {
+            float leverVal = first ? animSpeed : animSteer;
+            float vAngle   = Mth.clamp(
+                    first ? leverVal * 70.0f - 25.0f
+                            : leverVal * 15.0f,
+                    -45.0f, 45.0f);
+            float xOff = first ? 0.0f : 0.375f;
 
-        SuperByteBuffer lever = CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_LEVER, state);
-        ms.pushPose();
-        ((PoseTransformStack) TransformStack.of(ms)
-                .center()
-                .rotateYDegrees(hAngle)
-                .translate(0.0f, 0.25f, 0.25f)
-                .rotateXDegrees(vAngle - 45.0f)
-                .rotateXDegrees(45.0f)
-                .uncenter())
-                .translate(0.0f, -0.375f, -0.1875f);
-        lever.transform(ms)
-                .light(light)
-                .useLevelLight(be.getLevel())
-                .renderInto(ms, buffers.getBuffer(RenderType.solid()));
-        ms.popPose();
+            CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_LEVER, state)
+                    .rotateCentered(hAngleRad, Direction.UP)
+                    .translate(0.0f, 0.25f, 0.25f)
+                    .rotate((float) Math.toRadians(vAngle - 45.0f), Direction.EAST)
+                    .translate(0.0f, yOffset, 0.0f)
+                    .rotate((float) Math.toRadians(45.0f), Direction.EAST)
+                    .translate(0.0f, -0.375f, -0.1875f)
+                    .translate(xOff, 0.0f, 0.0f)
+                    .light(light)
+                    .renderInto(ms, buffers.getBuffer(RenderType.solid()));
+        }
     }
 
     @Override

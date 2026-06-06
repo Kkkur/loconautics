@@ -43,33 +43,19 @@ public class AnalogControllerHUD {
     private static final LerpedFloat displayedSpeed    = LerpedFloat.linear();
     private static final LerpedFloat displayedThrottle = LerpedFloat.linear();
 
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("AnalogControllerHUD");
-    private static int logThrottle = 0;
-
     private static void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
 
-        boolean shouldLog = (logThrottle++ % 60) == 0; // log once per second
+        if (mc.options.hideGui) return;
 
-        if (mc.options.hideGui) { if (shouldLog) LOGGER.info("HUD skip: hideGui"); return; }
-
-        if (!AnalogControllerClientHandler.isControlling()) {
-            if (shouldLog) LOGGER.info("HUD skip: not controlling");
-            return;
-        }
+        if (!AnalogControllerClientHandler.isControlling()) return;
 
         BlockPos pos = AnalogControllerClientHandler.getMountedPos();
-        if (pos == null) { if (shouldLog) LOGGER.info("HUD skip: pos null"); return; }
-        if (mc.level == null) { if (shouldLog) LOGGER.info("HUD skip: level null"); return; }
+        if (pos == null) return;
+        if (mc.level == null) return;
 
         BlockEntity be = mc.level.getBlockEntity(pos);
-        if (shouldLog) LOGGER.info("HUD: pos={} be={}", pos, be);
-        if (!(be instanceof AnalogControllerBlockEntity ace)) {
-            if (shouldLog) LOGGER.info("HUD skip: BE wrong type or null");
-            return;
-        }
-
-        if (shouldLog) LOGGER.info("HUD RENDERING: power={} locked={}", ace.getCurrentPower(), ace.isLocked());
+        if (!(be instanceof AnalogControllerBlockEntity ace)) return;
 
         int power    = ace.getCurrentPower();
         boolean locked   = ace.isLocked();
