@@ -2,12 +2,15 @@ package com.lycoris.loconautics.content.analogcontroller;
 
 import com.mojang.serialization.MapCodec;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
+import com.simibubi.create.AllShapes;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -110,6 +113,16 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
         return state.getValue(POWER);
     }
 
+    @Override
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return AllShapes.CONTROLS.get(state.getValue(FACING));
+    }
+
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return AllShapes.CONTROLS_COLLISION.get(state.getValue(FACING));
+    }
+
     // ------------------------------------------------------------------ interaction
 
     /**
@@ -124,15 +137,7 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
             if (!level.isClientSide && player instanceof ServerPlayer sp) {
                 BlockEntity be = level.getBlockEntity(pos);
                 if (be instanceof AnalogControllerBlockEntity ace) {
-                    sp.openMenu(ace, buf -> {
-                        buf.writeBlockPos(pos);
-                        ItemStack.OPTIONAL_STREAM_CODEC.encode(
-                                (net.minecraft.network.RegistryFriendlyByteBuf) buf,
-                                ace.getFrequencyFirst());
-                        ItemStack.OPTIONAL_STREAM_CODEC.encode(
-                                (net.minecraft.network.RegistryFriendlyByteBuf) buf,
-                                ace.getFrequencySecond());
-                    });
+                    sp.openMenu(ace, ace::sendToMenu);
                 }
             }
             return InteractionResult.sidedSuccess(level.isClientSide);
@@ -160,8 +165,7 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
             Level level, BlockState state, BlockEntityType<T> type) {
         if (type == LoconauticsRegistries.ANALOG_CONTROLLER_BE.get()) {
             //noinspection unchecked
-            return (BlockEntityTicker<T>) (BlockEntityTicker<AnalogControllerBlockEntity>)
-                    AnalogControllerBlockEntity::tick;
+            return (BlockEntityTicker<T>) (BlockEntityTicker<AnalogControllerBlockEntity>) AnalogControllerBlockEntity::tick;
         }
         return null;
     }

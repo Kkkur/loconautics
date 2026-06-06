@@ -1,9 +1,12 @@
 package com.lycoris.loconautics;
 
+import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHandler;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -34,6 +37,16 @@ public final class LoconauticsClient {
     @SubscribeEvent
     static void onClientSetup(FMLClientSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics client setup");
+        LoconauticsPartialModels.init();
+    }
+
+    /** Register the Analog Controller block entity renderer. */
+    @SubscribeEvent
+    static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(
+                LoconauticsRegistries.ANALOG_CONTROLLER_BE.get(),
+                AnalogControllerRenderer::new
+        );
     }
 
     /** Register the Analog Controller screen against its menu type. */

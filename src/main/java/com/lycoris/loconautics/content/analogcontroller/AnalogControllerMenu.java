@@ -1,156 +1,132 @@
 package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.Container;
-import net.minecraft.world.SimpleContainer;
+import com.simibubi.create.foundation.gui.menu.GhostItemMenu;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.network.FriendlyByteBuf;
-import org.jetbrains.annotations.NotNull;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.neoforged.neoforge.items.IItemHandler;
+import net.neoforged.neoforge.items.ItemStackHandler;
+import net.neoforged.neoforge.items.SlotItemHandler;
 
 /**
- * Container/menu for the Analog Controller frequency screen.
+ * Frequency-selection menu for the Analog Controller.
  *
- * Layout: 2 ghost slots (frequency first, frequency second) + no player inventory
- * displayed (we open this via shift-right-click, player inventory is not needed).
+ * Extends {@link GhostItemMenu} so we get Create's ghost-slot click handling for free.
+ * Two ghost slots (frequency first + second), no player inventory displayed.
  *
- * The frequency items are stored in the block entity, not in the container's inventory.
- * On close, changes are sent to the server via a packet.
+ * Slot layout inside the menu (GhostItemMenu.clicked uses slotId - 36):
+ *   Slots 0-35  : player inventory (added but not shown — needed for GhostItemMenu arithmetic)
+ *   Slot 36     : frequency first  (ghost)
+ *   Slot 37     : frequency second (ghost)
  */
-public class AnalogControllerMenu extends AbstractContainerMenu {
+public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEntity> {
 
-    // Slot indices
-    public static final int SLOT_FREQ_FIRST = 0;
-    public static final int SLOT_FREQ_SECOND = 1;
+    // ------------------------------------------------------------------ constructors
 
-    // The underlying 2-slot inventory (ghost items — never consumed)
-    private final SimpleContainer frequencyInv;
-
-    // Server side: direct reference to the block entity
-    private final AnalogControllerBlockEntity blockEntity;
-
-    // Position, used by the screen for the "display block" render
-    public final BlockPos blockPos;
-
-    // ------------------------------------------------------------------ server constructor
-
-    /** Called on the server when the player opens the menu. */
-    public AnalogControllerMenu(int containerId, Inventory playerInventory,
-                                AnalogControllerBlockEntity be) {
-        super(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), containerId);
-        this.blockEntity = be;
-        this.blockPos = be.getBlockPos();
-
-        frequencyInv = new SimpleContainer(2);
-        frequencyInv.setItem(0, be.getFrequencyFirst().copy());
-        frequencyInv.setItem(1, be.getFrequencySecond().copy());
-
-        addFrequencySlots();
+    /** Network / client-side constructor (called by IMenuTypeExtension). */
+    public AnalogControllerMenu(MenuType<?> type, int id, Inventory inv, RegistryFriendlyByteBuf extraData) {
+        super(type, id, inv, extraData);
     }
 
-    // ------------------------------------------------------------------ client constructor (network)
-
-    /** Called on the client side when the server opens the screen (via network). */
-    public AnalogControllerMenu(int containerId, Inventory playerInventory,
-                                FriendlyByteBuf buf) {
-        super(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), containerId);
-        this.blockEntity = null;
-        this.blockPos = buf.readBlockPos();
-
-        frequencyInv = new SimpleContainer(2);
-        frequencyInv.setItem(0, ItemStack.OPTIONAL_STREAM_CODEC
-                .decode((net.minecraft.network.RegistryFriendlyByteBuf) buf));
-        frequencyInv.setItem(1, ItemStack.OPTIONAL_STREAM_CODEC
-                .decode((net.minecraft.network.RegistryFriendlyByteBuf) buf));
-
-        addFrequencySlots();
+    /** Server-side constructor. */
+    public AnalogControllerMenu(MenuType<?> type, int id, Inventory inv, AnalogControllerBlockEntity be) {
+        super(type, id, inv, be);
     }
 
-    private void addFrequencySlots() {
-        // Two frequency slots — ghost items (don't consume from inventory)
-        addSlot(new GhostSlot(frequencyInv, SLOT_FREQ_FIRST, 44, 35));
-        addSlot(new GhostSlot(frequencyInv, SLOT_FREQ_SECOND, 80, 35));
+    public static AnalogControllerMenu create(int id, Inventory inv, AnalogControllerBlockEntity be) {
+        return new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inv, be);
     }
 
-    // ------------------------------------------------------------------ slot getters
+    // ------------------------------------------------------------------ GhostItemMenu impl
 
-    public ItemStack getFrequencyFirst() {
-        return frequencyInv.getItem(SLOT_FREQ_FIRST);
-    }
-
-    public ItemStack getFrequencySecond() {
-        return frequencyInv.getItem(SLOT_FREQ_SECOND);
-    }
-
-    // ------------------------------------------------------------------ AbstractContainerMenu
-
+    /**
+     * Reconstruct the BE reference on the client from what the server wrote in
+     * {@link AnalogControllerBlock#useWithoutItem} via {@code sp.openMenu(ace, buf -> ...)}.
+     *
+     * Server writes: blockPos, then a CompoundTag produced by
+     * {@link AnalogControllerBlockEntity#sendToMenu}.
+     */
     @Override
-    public boolean stillValid(@NotNull Player player) {
-        if (blockEntity == null) return true; // client side
-        return blockEntity.getLevel() != null
-                && blockEntity.getLevel().getBlockEntity(blockPos) == blockEntity
-                && player.distanceToSqr(blockPos.getX() + 0.5,
-                blockPos.getY() + 0.5,
-                blockPos.getZ() + 0.5) < 64;
+    protected AnalogControllerBlockEntity createOnClient(RegistryFriendlyByteBuf extraData) {
+        BlockEntity be = Minecraft.getInstance().level.getBlockEntity(extraData.readBlockPos());
+        if (be instanceof AnalogControllerBlockEntity ace) {
+            ace.readClient(extraData.readNbt(), extraData.registryAccess());
+            return ace;
+        }
+        return null;
     }
 
     /**
-     * On close (server side), push the frequency items back to the block entity.
+     * Create the 2-slot ghost inventory, pre-populated from the BE's current frequency.
+     * {@code contentHolder} is non-null on the server; may be null on the client before
+     * the BE is resolved (handled gracefully by ItemStack.EMPTY defaults).
      */
     @Override
-    public void removed(@NotNull Player player) {
-        super.removed(player);
-        if (!player.level().isClientSide && blockEntity != null) {
-            blockEntity.setFrequency(
-                    frequencyInv.getItem(SLOT_FREQ_FIRST),
-                    frequencyInv.getItem(SLOT_FREQ_SECOND)
-            );
+    protected ItemStackHandler createGhostInventory() {
+        ItemStackHandler handler = new ItemStackHandler(2);
+        if (contentHolder != null) {
+            handler.setStackInSlot(0, contentHolder.getFrequencyFirst().copy());
+            handler.setStackInSlot(1, contentHolder.getFrequencySecond().copy());
         }
+        return handler;
+    }
+
+    /**
+     * Add slots.  GhostItemMenu.clicked() subtracts 36 to get the ghost slot index,
+     * so we MUST add the 36 player inventory slots first even though they're never shown.
+     *
+     * Ghost slots follow at indices 36 + 0 and 36 + 1.
+     * Their panel-relative positions (x=4,y=6 and x=22,y=6) match the texture atlas.
+     */
+    @Override
+    protected void addSlots() {
+        // Add the 36 player slots (off-screen at a position that won't interfere).
+        // The -1000 offset means they are never rendered by the vanilla slot renderer.
+        addPlayerSlots(-1000, -1000);
+
+        // Ghost slots — positions are panel-relative (leftPos/topPos added by the screen).
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 4, 6));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 22, 6));
+    }
+
+    /**
+     * Called by {@link com.simibubi.create.foundation.gui.menu.MenuBase#removed} on the
+     * server when the player closes the screen.  Push frequency back to the BE.
+     */
+    @Override
+    protected void saveData(AnalogControllerBlockEntity be) {
+        if (be == null) return;
+        be.setFrequency(
+                ghostInventory.getStackInSlot(0),
+                ghostInventory.getStackInSlot(1)
+        );
     }
 
     @Override
-    public @NotNull ItemStack quickMoveStack(@NotNull Player player, int index) {
-        // Ghost slots: return empty, no shift-click transfers
-        return ItemStack.EMPTY;
+    protected boolean allowRepeats() {
+        // Allow the same item in both frequency slots (matches Create's Redstone Link behaviour).
+        return true;
     }
 
     // ------------------------------------------------------------------ ghost slot
 
     /**
-     * A slot that accepts any item stack but never removes it from the player's inventory —
-     * it copies it as a "frequency token" (same behaviour as Create's ghost slots).
+     * Slim SlotItemHandler that marks itself as a ghost slot so Create's renderer
+     * draws the translucent overlay instead of a real item.
      */
-    private static class GhostSlot extends Slot {
-
-        public GhostSlot(Container container, int slot, int x, int y) {
-            super(container, slot, x, y);
+    private static class GhostSlot extends SlotItemHandler {
+        public GhostSlot(IItemHandler itemHandler, int index, int x, int y) {
+            super(itemHandler, index, x, y);
         }
 
         @Override
-        public boolean mayPickup(@NotNull Player player) {
-            return false; // can't take the ghost item out
-        }
-
-        @Override
-        public boolean mayPlace(@NotNull ItemStack stack) {
+        public boolean isFake() {
             return true;
-        }
-
-        @Override
-        public void set(@NotNull ItemStack stack) {
-            // Copy one item as the "token"; don't consume stack
-            ItemStack copy = stack.copy();
-            copy.setCount(1);
-            super.set(copy);
-        }
-
-        @Override
-        public int getMaxStackSize() {
-            return 1;
         }
     }
 }

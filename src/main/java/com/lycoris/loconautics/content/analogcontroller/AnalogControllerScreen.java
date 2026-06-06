@@ -1,139 +1,66 @@
 package com.lycoris.loconautics.content.analogcontroller;
 
+import com.simibubi.create.foundation.gui.AllIcons;
+import com.simibubi.create.foundation.gui.menu.AbstractSimiContainerScreen;
+import com.simibubi.create.foundation.gui.widget.IconButton;
+import com.lycoris.loconautics.core.LoconauticsConstants;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.ItemStack;
-import com.lycoris.loconautics.core.LoconauticsConstants;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Tooltip;
-import org.jetbrains.annotations.NotNull;
 
 /**
- * Client-side frequency selection screen for the Analog Controller.
+ * Client-side frequency screen for the Analog Controller.
  *
- * Layout (176 × 96 window):
+ * Renders an 81×31 px panel from the mod texture atlas.  The panel contains:
+ *   - A red ghost slot  at panel (2, 6)  — frequency first
+ *   - A blue ghost slot at panel (20, 6) — frequency second
+ *   - A confirm button  at panel (47, 6)
  *
- *   ┌──────────────────────────────────┐
- *   │   Analog Controller              │
- *   │                                  │
- *   │   [FREQ 1]   [FREQ 2]            │
- *   │  ┌──────┐   ┌──────┐            │
- *   │  │  ░░  │   │  ░░  │            │
- *   │  └──────┘   └──────┘            │
- *   │       Frequency Slots            │
- *   │                          [DONE] │
- *   └──────────────────────────────────┘
- *
- * Players drag items into the two ghost slots to set the two-part frequency,
- * matching Create's Redstone Link frequency convention (pair of items).
- * Clicking DONE closes the screen and fires the saved packet.
+ * No player inventory is shown (this is a tiny "quick config" overlay).
  */
-public class AnalogControllerScreen extends AbstractContainerScreen<AnalogControllerMenu> {
+public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogControllerMenu> {
 
-    // Placeholder: we'd normally have a real texture atlas sheet.
-    // Since this is a code stub (assets are separate), we use a simple coloured panel.
-    private static final ResourceLocation BG_TEXTURE =
+    private static final ResourceLocation TEXTURE =
             LoconauticsConstants.id("textures/gui/analog_controller.png");
 
-    private static final int BG_WIDTH = 176;
-    private static final int BG_HEIGHT = 96;
+    /** Panel dimensions as laid out in the 256×256 atlas. */
+    private static final int PANEL_W = 81;
+    private static final int PANEL_H = 31;
+
+    private IconButton confirmButton;
 
     public AnalogControllerScreen(AnalogControllerMenu menu, Inventory inv, Component title) {
         super(menu, inv, title);
-        this.imageWidth = BG_WIDTH;
-        this.imageHeight = BG_HEIGHT;
-        // Suppress default "Inventory" label
-        this.inventoryLabelY = Integer.MIN_VALUE;
     }
+
+    // ------------------------------------------------------------------ lifecycle
 
     @Override
     protected void init() {
+        setWindowSize(PANEL_W, PANEL_H);
         super.init();
 
-        // Done / confirm button
-        addRenderableWidget(
-                Button.builder(Component.translatable("gui.done"), btn -> onClose())
-                        .pos(leftPos + BG_WIDTH - 54, topPos + BG_HEIGHT - 24)
-                        .size(50, 18)
-                        .tooltip(Tooltip.create(Component.translatable(
-                                "block.loconautics.analog_controller.gui.done_tooltip")))
-                        .build()
-        );
-
-        // Clear frequency button
-        addRenderableWidget(
-                Button.builder(Component.literal("✕"), btn -> clearFrequency())
-                        .pos(leftPos + 8, topPos + BG_HEIGHT - 24)
-                        .size(18, 18)
-                        .tooltip(Tooltip.create(Component.translatable(
-                                "block.loconautics.analog_controller.gui.clear_tooltip")))
-                        .build()
-        );
+        // Confirm button — uses Create's standard confirm icon, positioned over the
+        // grey square at panel-relative (47, 6).
+        confirmButton = new IconButton(leftPos + 47, topPos + 6, AllIcons.I_CONFIRM);
+        confirmButton.withCallback(() -> minecraft.player.closeContainer());
+        addRenderableWidget(confirmButton);
     }
 
-    private void clearFrequency() {
-        menu.getSlot(AnalogControllerMenu.SLOT_FREQ_FIRST).set(ItemStack.EMPTY);
-        menu.getSlot(AnalogControllerMenu.SLOT_FREQ_SECOND).set(ItemStack.EMPTY);
-    }
+    // ------------------------------------------------------------------ rendering
 
     @Override
-    protected void renderBg(@NotNull GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
-        // --- Background panel (drawn as solid colours until the texture is made) ---
-        int x = leftPos;
-        int y = topPos;
-
-        // Draw dark panel background
-        graphics.fill(x, y, x + BG_WIDTH, y + BG_HEIGHT, 0xFF3D3D3D);
-        // Inner lighter border
-        graphics.fill(x + 1, y + 1, x + BG_WIDTH - 1, y + BG_HEIGHT - 1, 0xFF595959);
-        // Top title bar
-        graphics.fill(x + 1, y + 1, x + BG_WIDTH - 1, y + 14, 0xFF2A2A2A);
-
-        // --- Frequency slot backgrounds ---
-        drawSlotBackground(graphics, x + 43, y + 34);
-        drawSlotBackground(graphics, x + 79, y + 34);
-
-        // --- Labels ---
-        graphics.drawString(font,
-                Component.translatable("block.loconautics.analog_controller.gui.slot1"),
-                x + 43, y + 22, 0xFFAAAAAA, false);
-        graphics.drawString(font,
-                Component.translatable("block.loconautics.analog_controller.gui.slot2"),
-                x + 79, y + 22, 0xFFAAAAAA, false);
+    protected void renderBg(GuiGraphics graphics, float partialTicks, int mouseX, int mouseY) {
+        // Blit the 81×31 panel from the top-left corner of the 256×256 atlas.
+        graphics.blit(TEXTURE, leftPos, topPos, 0, 0, PANEL_W, PANEL_H, 256, 256);
     }
 
-    private void drawSlotBackground(GuiGraphics graphics, int x, int y) {
-        // Standard slot background (dark inset square)
-        graphics.fill(x - 1, y - 1, x + 17, y + 17, 0xFF1A1A1A);
-        graphics.fill(x, y, x + 16, y + 16, 0xFF333333);
-    }
-
+    /**
+     * Suppress all label rendering — the panel has no room for title / inventory text.
+     */
     @Override
-    public void render(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        renderBackground(graphics, mouseX, mouseY, partialTick);
-        super.render(graphics, mouseX, mouseY, partialTick);
-        renderTooltip(graphics, mouseX, mouseY);
-
-        // Title
-        graphics.drawString(font, title,
-                leftPos + (BG_WIDTH / 2) - (font.width(title) / 2),
-                topPos + 4,
-                0xFFDDDDDD, false);
-
-        // Hint text
-        Component hint = Component.translatable("block.loconautics.analog_controller.gui.hint");
-        graphics.drawString(font, hint,
-                leftPos + (BG_WIDTH / 2) - (font.width(hint) / 2),
-                topPos + 60,
-                0xFF888888, false);
-    }
-
-    @Override
-    public void onClose() {
-        // Screen close triggers menu.removed() on the server → saves frequency.
-        super.onClose();
+    protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
+        // intentionally empty
     }
 }

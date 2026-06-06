@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
+import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.redstone.link.IRedstoneLinkable;
 import com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler;
@@ -338,7 +339,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     @Override
     public @Nullable AbstractContainerMenu createMenu(int id, Inventory inventory, Player player) {
-        return new AnalogControllerMenu(id, inventory, this);
+        return new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inventory, this);
     }
 
     // ------------------------------------------------------------------ NBT
