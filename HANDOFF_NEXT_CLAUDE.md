@@ -1,0 +1,247 @@
+# HANDOFF para la próxima Claude — Loconautics (sesión 2026-06-04 → 06)
+
+> **Léeme ENTERO antes de tocar nada.** Comprime TODO lo de esta sesión: colisión (RESUELTA), controles
+> (WIP medio-funcional), mecanismos internos de Sable, investigación web, el mod "bearing", y el **pivote
+> en curso a "todo Sable"**. Complementa (y CORRIGE) a `HANDOFF.md` (§14.6 era un callejón) y
+> `HANDOFF_2026-06-04_collision-controls.md`. Memoria persistente:
+> `memory/loconautics-sable-collision-pathways.md`.
+
+---
+
+## 0. Qué es el proyecto (recordatorio de 1 párrafo)
+Addon NeoForge 1.21.1 que convierte trenes de Create en **sub-levels físicos de Sable** que siguen las vías
+de Create. Autores: Lycoris (usuario) + MDLOP. Repo `github.com:Kkkur/loconautics`. Carpeta local
+`C:\Users\User\Desktop\Mod Aeronautics`. Fuente de referencia descompilado en `src/depend/{Sable,Aeronautics,Create}`.
+
+## 1. WORKFLOW (idéntico, sin hot-reload)
+- Build: `./gradlew build` (o `compileJava`). Jar en `build/libs/loconautics-1.0.0.jar`.
+- Deploy: `cp build/libs/loconautics-1.0.0.jar "/c/Users/User/curseforge/minecraft/Instances/Skybound SMP/mods/"`
+  y **verificar md5** (compilado == desplegado).
+- Test: el usuario **reinicia Minecraft** (no hay hot-reload; los mixins se aplican al cargar; **pregunté y
+  confirmé que NO se puede hot-reload** lo nuestro porque casi todo son mixins). Claude lee el log directo:
+  `…/Skybound SMP/logs/latest.log` (servidor integrado = cliente+servidor en el mismo log).
+- Commit/push: SOLO cuando el usuario lo diga. Acabar mensajes de commit con
+  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. SSH ya configurado, push directo autorizado.
+- El usuario está MUY cansado de reiniciar → **acertar a la primera**, batch de cambios, e instrumentar con
+  logs (`[poses]`, `[ctrl]`, …) cuando no estés seguro: la AUSENCIA de un log también es dato.
+
+## 2. ESTADO DE RAMAS (todo en origin)
+| Rama | Commit | Qué es |
+|---|---|---|
+| `master` | `e7696e5` | **Fix de colisión, CONFIRMADO bueno.** Base estable. |
+| `backup/collision-fix-stable` | `e7696e5` | Copia de seguridad del estado bueno. |
+| `feature/sable-train-controls` | `2430d2a` | Enfoque **híbrido** de controles (WIP, medio-funciona — ver §4). |
+| `feature/all-sable-physics-train` | `6b0e58b` | **AQUÍ AHORA.** Pivote a "todo Sable" (ver §7). Parte de master. |
+| `new-main` | — | preexistente del compa. |
+
+---
+
+## 3. ✅ LA COLISIÓN (RESUELTA — master `e7696e5`) — corrige §14.6 de HANDOFF.md
+
+**§14.6 (constraint-motores) era FALSO/callejón.** La solución real:
+
+**Mecanismo (leído del fuente de Sable, no teoría):**
+- Colisión jugador↔sub-level = `SubLevelEntityCollision.collide` (CPU) → transforma los **bloques del plot**
+  por **`subLevel.logicalPose()`**, interpolando `lastPose → logicalPose` por substeps
+  (`mixin/entity/entity_sublevel_collision/EntityMixin` redirige `Entity.collide`).
+- Raytrace (`mixin/clip_overwrite/BlockGetterMixin.clip`) **también** usa `logicalPose()`.
+- → **`logicalPose` es la pose autoritativa de colisión Y raytrace.** El render usa `renderPose` (acoplado
+  al vagón en `ClientSubLevelRenderMixin`). Las desacoplamos.
+
+**Causa raíz del desfase ("caja gris ~0.64 abajo"):** el sub-level es cuerpo **dinámico**. El driver viejo
+hacía `teleport` del logicalPose en `ServerTickEvent.Post` (DESPUÉS del physics tick) → la **gravedad lo
+hundía** y la colisión leía la pose hundida.
+
+**Fix (`server/tick/PhysicsTrainTickHandler`, registrado en `Loconautics.commonSetup`):** fijar logicalPose
+a la pose del vagón **DENTRO del physics tick**: `SableEventPlatform.onPhysicsTick` (teleport + resetVelocity)
+y `onPostPhysicsTick` (re-fija, quita el hundimiento del substep). Game tick = solo lifecycle. Log `[poses]`
+con `err=(dx,dy,dz)` debe salir ≈(0,0,0). **Confirmado in-game: caminas EXACTO sobre el cuerpo visible.**
+
+**Limitación pendiente (curvas):** `PhysicsTrainPose.orientationOf` usa `getRotationState()`, que es
+**identidad en servidor** → en curvas el cuerpo de colisión queda axis-aligned (recto perfecto). FIX
+documentado en §6.
+
+---
+
+## 4. 🟡 LOS CONTROLES (híbrido, rama `feature/sable-train-controls`) — medio-funciona, SIN cerrar
+
+**Objetivo:** conducir clicando el bloque de **Train Controls que se VE** (cuerpo Sable), no la hitbox
+invisible de la contraption de Create (que está dentro/desfasada).
+
+**Por qué es difícil (confirmado por issues de VS, ver §5):** la `CarriageContraptionEntity` coexiste con
+nuestro sub-level, con su propia interacción/colisión desfasada. Create conduce vía un **raycast cliente
+propio** (`ContraptionHandlerClient.rightClickingOnContraptionsGetsHandledLocally`) contra los bloques de la
+contraption (en el raíl), que `event.setCanceled(true)` al acertar cualquier bloque.
+
+**Intentos (en orden, todos en la rama de controles):**
+1. **Ray-shift** del raycast de Create por `-bodyOffset` → funcionó para apuntar, PERO Create cancela TODA
+   interacción al acertar → **rompió cofres/colocar bloques** (= VS Create-Interactive issue #2). Revertido.
+2. **Handler de `InteractionKeyMappingTriggered`** → no se registraba con `@EventBusSubscriber` → no disparaba.
+3. **Handler de `PlayerInteractEvent.RightClickBlock`** (patrón swivel bearing, registrado explícito en
+   `LoconauticsClient`): detecta el `ControlsBlock` en la pos del plot y reenvía a Create
+   (`carriage.handlePlayerInteraction` + `ContraptionInteractionPacket`). Hallazgos al depurar con logs `[ctrl]`:
+   - `getContaining(level, x, z)` (búsqueda por chunk del plot) **devuelve null en CLIENTE** → cambiado a
+     buscar el sub-level físico cuyo **plot más cercano** a la pos (`physicsSubLevelIds()` +
+     `container.getSubLevel(uuid)`). **Funcionó** (`sub=… dist2=9`, `carriage=idx0`, `handled=true`).
+   - `RightClickBlock` dispara **dos veces** (mano principal + secundaria) → `handlePlayerInteraction`
+     **alterna** (start/stop) → arrancaba y paraba. Filtrado a `InteractionHand.MAIN_HAND`.
+   - Tras eso: arranca ("Now controlling") pero **se para al instante de nuevo**. Causa encontrada:
+     `CarriageContraptionEntity.control()` (servidor) hace `if (!canInteractWithBlock(player, controles, 8)) return false`
+     → `ControlsServerHandler` llama `stopControlling`. Ese chequeo mide distancia en **espacio-contraption**
+     (raíl) y el jugador está en el cuerpo Sable. **Último intento: `ContraptionInteractRangeMixin` bypasea
+     `canInteractWithBlock` para trenes físicos.** **EL USUARIO DIJO "no funciona" — SIN CONFIRMAR si ese
+     bypass arregla o no (no llegó a pasar log tras ese build antes del pivote).**
+4. **Mixins de apoyo creados en la rama de controles:**
+   - `CarriageNoKinematicCollisionMixin`: `sable$shouldCollide()=false` para trenes físicos → **mata el
+     collider cinemático REDUNDANTE de la contraption** (el "cuerpo invisible" / **partículas de choque en
+     curvas** que reportó el usuario; venían de que el sub-level y el collider cinemático de la contraption
+     ocupan el mismo espacio y Rapier los choca — visto en `RapierPhysicsPipeline.processCollisionEffects`).
+   - `ContraptionHandlerClientSkipMixin`: el raycast de Create devuelve `null` para trenes físicos (no cancela
+     → deja correr nuestro handler / interacción normal de cofres).
+
+**Resumen del estado de controles:** muy cerca pero NO cerrado; el último corte conocido es
+`canInteractWithBlock` (bypass aplicado, sin confirmar). **Si se retoma el híbrido**, el siguiente paso es
+pasar log `[ctrl]` tras el bypass y, si sigue, buscar otro `return false` en `control()` o un doble-toggle
+servidor. PERO ojo: **el usuario y Lycoris decidieron PIVOTAR a "todo Sable" (§7)**, que elimina la
+contraption y por tanto TODO este problema de raíz.
+
+---
+
+## 5. MECANISMOS DE SABLE / CREATE (lo aprendido leyendo fuente + web)
+
+- **Sable convierte TODA contraption de Create en physics body**: mixin
+  `compatibility.create.contraptions.AbstractContraptionEntityMixin` la hace `KinematicContraption` y la
+  auto-añade al pipeline (`sable$addToPipeline`). `sable$getPosition(partialTick)` = `anchor + rotate(centerOfMass)`.
+  Sube sus bloques como collider cinemático SOLO si `sable$shouldCollide()` (de ahí el §4.4a).
+  `ContraptionColliderMixin` (de Sable) redirige `collideEntities` por `logicalPose`.
+- **`getContaining(level, x, z)` es por CHUNK del plot** (los bloques se almacenan en ~20481032). La
+  contraption está en el chunk del raíl → `getContaining(contraption)` = null → los redirects de Sable son
+  no-op para nuestra contraption-en-el-raíl. La colisión/clip usan `getAllIntersecting` (por bounds), no
+  getContaining; por eso funcionan y getContaining no.
+- **Interacción idiomática de bloques en sub-levels (Aeronautics):** NO usan la interacción de contraption de
+  Create. Cada bloque interactivo (steering wheel, throttle, **swivel bearing**) responde a su `useItemOn`/
+  `useWithoutItem` **normal**; Sable entrega el click al bloque del plot (cliente+servidor, red vanilla).
+  También tienen `SimClickInteractions`/`InteractCallback` (handler de input cliente) que mira el bloque en
+  `mc.hitResult.getBlockPos()` (coords del plot). Nuestro handler `RightClickBlock` es ese mismo patrón.
+- **Conducir un tren de Create (flujo):** `ControlsInteractionBehaviour.handlePlayerInteraction` →
+  `startControlling(localPos, player)` (TOGGLE: si ya controla, para) + cliente `ControlsHandler` (solo
+  reenvía teclas con `ControlsInputPacket`; NO fija posición). El jugador conduce de pie (va montado por la
+  colisión Sable). Servidor `ControlsServerHandler.tick` → `entity.control()`; si false → `stopControlling`.
+- **Mapeo plot→contraption-local:** `localPos = plotPos - plot.getCenterBlock()` (el plotAnchor ↔ anchor de
+  la contraption; verificado en `SubLevelBridge`: `worldBlock = anchor.offset(localPos)`).
+- **Pasajeros/montar:** Sable arrastra al jugador que está encima vía `trackingSubLevel`/`inheritedMotion`
+  (mixins `entity/entities_stick_sublevels` y `entity/entity_sublevel_collision`). Ya funciona (gracias al fix
+  de colisión).
+- **Desensamblar:** `TrainDisassembleMixin` redirige `entity.disassemble()` → `SubLevelDisassembler` mueve
+  los bloques vivos del sub-level al mundo (aterriza el plotAnchor en `entity.position()`). Independiente del
+  offset de render.
+- **CURVAS (orientación) — método canónico:** para el RENDER usar `entity.getRotationState().asMatrix()` (la
+  `Matrix3d` que Create usa para rotar bloques) → cuaternión JOML (la "verdad absoluta", sin riesgo de signos).
+  Es **solo cliente** (identidad en servidor); para la COLISIÓN server-side, construir desde `entity.yaw`/`pitch`,
+  que SÍ se fijan en servidor en `Carriage$DimensionalCarriageEntity.alignEntity` (Carriage.java ~L804):
+  `yaw=atan2(diffZ,diffX)*180/π+180`, `pitch=-atan2(diffY,√(diffX²+diffZ²))*180/π`.
+
+**Issues que confirman que esto es difícil hasta en VS maduro:** VS-2 #1500 (raycast desalineado en
+estructuras físicas, sin resolver), Create-Interactive-Issues #2 (la bounding box de la contraption bloquea
+la interacción de bloques — = nuestra rotura de cofres), Create #5868 (controles del tren pierden prioridad
+vs el bloque detrás). DeepWiki útil: `deepwiki.com/ryanhcode/sable`,
+`deepwiki.com/Creators-of-Aeronautics/Simulated-Project`.
+
+## 5b. EL MOD "bearing" (linearbearing) que descargó el usuario — qué es y qué sirve
+RAR extraído (era `C:\Users\User\Downloads\bearing.rar`; paquete `com.bearing.linearbearing`). **NO es un
+tren siguiendo vías.** Es un addon Create+Sable+Aeronautics para **transmitir energía cinética (rotación)
+entre el mundo y sub-levels físicos**: `MagneticPort` (raycast `level.clip` que atraviesa sub-levels y
+transmite velocidad cinética a otro puerto), `TorsionalAnchor` (transmite rotación a través de un
+`SpringBlockEntity` de Aeronautics, leído por **reflexión**), `LinearBearing` (al clicarlo con `useWithoutItem`
+ensambla un bloque en un sub-level vía **reflexión** a `SimAssemblyHelper.assembleFromSingleBlock`, y activa
+**CCD** `setCcdMotionThreshold`). Todo con reflexión porque no compilan contra Aeronautics; **nosotros SÍ
+tenemos el source**, no necesitamos esos hacks. **Útil de ahí:** (1) `SimAssemblyHelper.assembleFromSingleBlock(level, pos, frontPos, …)`
+= API limpia de Aeronautics para hacer un sub-level físico (devuelve `.subLevel()`/`.offset()`); (2) **CCD**
+si el tren va rápido (no atravesar suelo/vías); (3) reconfirma el patrón `useWithoutItem`; (4) `SpringBlockEntity`
+de Aeronautics = primitivo de constraint por fuerzas.
+
+---
+
+## 6. PENDIENTES del enfoque híbrido (por si se vuelve a él)
+1. Cerrar controles (confirmar el bypass de `canInteractWithBlock`; ver §4).
+2. Curvas: aplicar orientación real (§5, último bullet) en el pin del physics tick (servidor) y/o render.
+3. Asientos de pasajeros (mismo patrón `RightClickBlock`/`useItemOn`).
+4. Optimización (de Create-Interactive): guardar `subLevelId` como duck en `CarriageContraptionEntity` en vez
+   de lookups por registro.
+5. Verificar desensamblado tras todos los mixins.
+6. Actualizar `HANDOFF.md` §14.6 (es FALSO).
+
+---
+
+## 7. 🚧 EL PIVOTE EN CURSO: "TODO SABLE" (rama `feature/all-sable-physics-train`, AQUÍ)
+
+**Decisión de Lycoris+usuario (literal):** cambiar el sistema a "todo Sable" para que el tren **sea un
+physics object que sigue las vías**, eliminando la `CarriageContraptionEntity` (origen de TODOS los
+conflictos). Hacerlo AHORA como base, antes de añadir más cosas (luego costaría reconstruir). En rama aparte
+para no perder nada.
+
+**Lo ya hecho en esta rama (commit `6b0e58b`):**
+- **`DESIGN_all_sable_train.md`** — diseño completo. LÉELO.
+- **`allsable/RailPose.java`** — núcleo: calcula la pose del vagón (pos + orientación) desde dos
+  `TravellingPoint` (bogeys), espejando `Carriage.alignEntity`. **Compila contra la API de vías de Create →
+  viabilidad validada.**
+
+**Hallazgo de viabilidad (clave):** la matemática de seguir vías está en utilidades de Create **independientes
+de la contraption**: `TravellingPoint.travel(graph, distancia, ITrackSelector, …)` avanza por el carril
+(curvas/agujas/señales/portales) y `getPosition(graph)` da la pose. `TrackGraphHelper.getGraphLocationAt(level,
+pos, dir, axis)` localiza un punto en el grafo. `TrackEdge.getPosition(graph,t)`/`getNormal(graph,t)` para
+pose+banking. **Reutilizamos el motor de raíles de Create; solo cambia la REPRESENTACIÓN (contraption →
+sub-level físico).** ("Todo Sable" NO es reinventar las vías — siguen siendo de Create.)
+
+**DECISIÓN PENDIENTE (gate) — preguntada al usuario, SIN responder aún:**
+- **Opción A (recomendada):** reusar `Train`/`Carriage`/navegación/señales/acoplamiento de Create y SOLO
+  cambiar la representación a sub-level de Sable (sin la entidad de contraption). Mucho menos trabajo.
+- **Opción B:** tren 100% propio sobre `TravellingPoint` (independencia total, pero reimplementar
+  navegación/señales/estaciones/acoplamiento = enorme).
+
+**Plan por fases (en el DESIGN):** Fase 0 (doc+esqueleto, HECHO) → **Fase 1 = mover un cuerpo de debug por
+una vía a velocidad constante** (recta+curva; **igual en A y B**, así que se puede construir ya) → Fase 2
+(pose completa de dos bogeys → mover el sub-level real, cinemático con velocidad) → Fase 3 (integrar con el
+ensamblaje, ocultar/no-spawnear la contraption) → Fase 4 (controles + multi-vagón + desensamblar).
+
+**Para mover el sub-level (Fase 2+):** lo Sable-nativo es registrarlo como `KinematicContraption` y exponer
+`sable$getPosition/Orientation(partialTick)` desde los `TravellingPoint` → Sable calcula velocidad y arrastra
+suave (visto en `RapierPhysicsPipeline.updateContraptionPoses`). Alternativa de arranque: el pin del physics
+tick que YA funciona (master), alimentado por nuestros `TravellingPoint`.
+
+**SIGUIENTE ACCIÓN sugerida:** preguntar/confirmar A vs B; mientras, construir **Fase 1** (es independiente de
+A/B). Yo (Claude anterior) iba a construir la Fase 1 cuando se acabó el contexto.
+
+---
+
+## 8. MAPA DE ARCHIVOS (nuestro mod, `src/main/java/com/lycoris/loconautics/`)
+- `Loconautics.java` (@Mod; registra el driver de colisión en commonSetup), `LoconauticsClient.java`
+  (@Mod CLIENT; en la rama de controles registra el handler de controles).
+- `server/tick/PhysicsTrainTickHandler.java` — **el fix de colisión** (pin en physics tick). En master.
+- `core/PhysicsTrainPose.java` (`orientationOf`), `core/PhysicsTrainTag.java`, `core/LoconauticsConstants.java`.
+- `server/PhysicsTrainRegistry.java` (SavedData global), `client/ClientPhysicsTrainRegistry.java` (mirror).
+- `server/assembly/`: `StationBlockEntityAssembleMixin`(redirect removeBlocksFromWorld→captura),
+  `SubLevelBridge`(crea el sub-level), `PhysicsAssemblyOrchestrator/Context`, `SubLevelDisassembler`.
+- `mixin/`: `ContraptionColliderMixin`, `ContraptionColliderSkipMixin`, `EntityNoContraptionCollisionMixin`,
+  `MovingInteractionBehaviourMixin`, `TrainDisassembleMixin`, `StationBlockEntityAssembleMixin`.
+  CLIENT: `ClientSubLevelRenderMixin`(acopla render al vagón), `CarriageBogey*Mixin`(oculta bogey fantasma §13),
+  `ClientContraptionRenderMixin`, `AssemblyScreenMixin`(botón).
+- **Solo en rama controles:** `client/PhysicsTrainControlsInteraction`, `mixin/CarriageNoKinematicCollisionMixin`,
+  `mixin/ContraptionInteractRangeMixin`, `mixin/client/ContraptionHandlerClientSkipMixin`.
+- **Solo en rama all-sable:** `allsable/RailPose`, `DESIGN_all_sable_train.md`.
+- Mixins se registran en `src/main/resources/loconautics.mixins.json` (`required:true`, `defaultRequire:1`).
+
+## 9. ENTORNO (de HANDOFF.md §1, sin cambios)
+NeoForge 21.1.x / MC 1.21.1 / Java 21. Create 6.0.10-280 (slim, maven). Sable 1.2.2 (JAR local en run/mods).
+Aeronautics bundled 1.2.1 (JAR local). Flywheel 1.0.6. JARs con copyright en `run/mods/` (gitignored). El
+modpack real de test (Skybound SMP) tiene Sinytra Connector + 200 mods; por eso se prueba ahí y no en runClient.
+`javap` para verificar firmas sin adivinar (`/c/Program Files/Java/jdk-21/bin/javap.exe`, no está en PATH).
+Extraer RARs: `/c/Program Files/WinRAR/UnRAR.exe x`.
+
+---
+## 10. TL;DR para arrancar rápido
+1. Colisión: ✅ resuelta (master). 2. Controles híbridos: 🟡 casi, en su rama, bloqueados por
+`canInteractWithBlock` (bypass sin confirmar). 3. **Decisión tomada: PIVOTAR a "todo Sable"** (rama
+`feature/all-sable-physics-train`); el tren será sub-level físico movido por `TravellingPoint` de Create, sin
+`CarriageContraptionEntity`. 4. **Gate pendiente: Opción A (reusar Train de Create) vs B (todo propio)** —
+recomendé A. 5. Siguiente: construir **Fase 1** (cuerpo de debug recorriendo una vía; igual en A/B).
