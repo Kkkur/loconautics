@@ -101,20 +101,30 @@ public class AnalogControllerHUD {
                 0, 209, PTR_W, PTR_H, 256, 256);
 
         // HUD frame rail
-        graphics.blit(WIDGETS, originX - 2, barY + SPEED_BG_H - 1, 0,
+        graphics.blit(WIDGETS, originX - 2, barY + SPEED_BG_H - 4, 0,
                 0, 200, FRAME_W, FRAME_H, 256, 256);
 
-        // Power number centered in the direction zone
+        // Direction zone: Create draws at (77, -20) relative to the bar origin.
+        // In absolute coords that is originX + 77, barY - 20.
+        // The zone is 28px wide; we center our content within it.
+        int dirZoneAbsX = originX + DIR_ZONE_X;   // left edge of the 28px zone
+        int dirZoneCtrY = barY - 10;               // vertical center: zone is 20px tall starting at barY-20, center = barY-10
+
+        // Blit DIRECTION background (the brass circle) — same call Create makes
+        graphics.blit(WIDGETS, dirZoneAbsX, barY - 20, 0,
+                77, 165, 28, 20, 256, 256);
+
+        // Power number — centered over the background
         String powerText = String.valueOf(power);
-        int textW  = mc.font.width(powerText);
-        int textX  = originX + DIR_ZONE_X + (DIR_ZONE_W - textW) / 2;
-        int textY  = barY - mc.font.lineHeight - 3;
+        int textW = mc.font.width(powerText);
+        int textX = dirZoneAbsX + (DIR_ZONE_W - textW) / 2;
+        int textY = dirZoneCtrY - mc.font.lineHeight / 2 + 4;
         graphics.drawString(mc.font, powerText, textX, textY, 0xFFFFFF, true);
 
-        // Lock icon overlaid on number when locked
+        // Lock icon centered on the speed bar
         if (locked) {
-            int iconX = originX + DIR_ZONE_X + (DIR_ZONE_W - LOCK_W) / 2;
-            int iconY = textY + (mc.font.lineHeight - LOCK_H) / 2;
+            int iconX = originX + (SPEED_BG_W - LOCK_W) / 2;
+            int iconY = barY + (SPEED_BG_H - LOCK_H) / 2;
             graphics.blit(LOCK_ICON, iconX, iconY, 0, 0, LOCK_W, LOCK_H, LOCK_W, LOCK_H);
         }
     }
