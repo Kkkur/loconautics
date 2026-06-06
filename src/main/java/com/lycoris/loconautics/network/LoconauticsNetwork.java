@@ -1,7 +1,12 @@
 package com.lycoris.loconautics.network;
 
+import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
+import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
+import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
+import com.lycoris.loconautics.network.packets.AnalogControllerDismountPacket;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -30,6 +35,33 @@ public final class LoconauticsNetwork {
                 AssembleAsPhysicsTrainPacket::handle
         );
 
+        // Client -> Server: key event from a mounted Analog Controller.
+        registrar.playToServer(
+                AnalogControllerInputPacket.TYPE,
+                AnalogControllerInputPacket.STREAM_CODEC,
+                AnalogControllerInputPacket::handle
+        );
+
+        // Server -> Client: player mounted or dismounted an Analog Controller.
+        registrar.playToClient(
+                AnalogControllerMountPacket.TYPE,
+                AnalogControllerMountPacket.STREAM_CODEC,
+                AnalogControllerMountPacket::handle
+        );
+
+        // Client -> Server: scroll wheel adjusted the max-power cap.
+        registrar.playToServer(
+                AnalogControllerScrollPacket.TYPE,
+                AnalogControllerScrollPacket.STREAM_CODEC,
+                AnalogControllerScrollPacket::handle
+        );
+
+        // Client -> Server: player explicitly dismounted (ESC).
+        registrar.playToServer(
+                AnalogControllerDismountPacket.TYPE,
+                AnalogControllerDismountPacket.STREAM_CODEC,
+                AnalogControllerDismountPacket::handle
+        );
         // Server -> Client: a train entered/left physics mode.
         registrar.playToClient(
                 PhysicsTrainSyncPacket.TYPE,
@@ -48,5 +80,16 @@ public final class LoconauticsNetwork {
     /** Broadcasts a physics-train sync to every connected player. */
     public static void sendToAll(PhysicsTrainSyncPacket packet) {
         PacketDistributor.sendToAllPlayers(packet);
+    }
+
+    /** Tells a specific client player they have mounted/dismounted an Analog Controller. */
+    public static void sendMount(ServerPlayer player, boolean mounted, BlockPos pos) {
+        PacketDistributor.sendToPlayer(player, new AnalogControllerMountPacket(mounted, pos));
+    }
+
+    /** Sends a dismount request from client to server. */
+    public static void sendDismount(BlockPos pos) {
+        net.createmod.catnip.platform.CatnipServices.NETWORK.sendToServer(
+                new AnalogControllerDismountPacket(pos));
     }
 }

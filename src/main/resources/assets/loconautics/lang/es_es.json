@@ -1,0 +1,21 @@
+{
+  "block.loconautics.analog_controller": "Controlador Analógico",
+  "block.loconautics.analog_controller.start": "Controlando el Controlador Analógico",
+  "block.loconautics.analog_controller.stop": "Soltó el Controlador Analógico",
+  "block.loconautics.analog_controller.gui.slot1": "Frec 1",
+  "block.loconautics.analog_controller.gui.slot2": "Frec 2",
+  "block.loconautics.analog_controller.gui.hint": "Coloca objetos para establecer la frecuencia",
+  "block.loconautics.analog_controller.gui.done_tooltip": "Confirmar frecuencia y cerrar",
+  "block.loconautics.analog_controller.gui.clear_tooltip": "Limpiar ranuras de frecuencia",
+
+  "itemGroup.loconautics.main": "Loconautics",
+
+  "loconautics.station.assemble_physics_train": "Ensamblar como Tren Físico",
+
+  "loconautics.configuration.title": "Configuración de Loconautics",
+  "loconautics.configuration.section.loconautics.common.toml": "Configuración de Loconautics",
+  "loconautics.configuration.section.loconautics.common.toml.title": "Configuración de Loconautics",
+  "loconautics.configuration.enableSableMode": "Activar Modo de Física Sable",
+  "loconautics.configuration.physicsTrainMaxSpeed": "Velocidad Máxima del Tren Físico",
+  "loconautics.configuration.debugRender": "Renderizado de Depuración"
+}

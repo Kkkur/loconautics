@@ -1,4 +1,15 @@
 {
+  "block.loconautics.analog_controller": "Analog Controller",
+  "block.loconautics.analog_controller.start": "Controlling Analog Controller",
+  "block.loconautics.analog_controller.stop": "Released Analog Controller",
+  "block.loconautics.analog_controller.gui.slot1": "Freq 1",
+  "block.loconautics.analog_controller.gui.slot2": "Freq 2",
+  "block.loconautics.analog_controller.gui.hint": "Place items to set frequency",
+  "block.loconautics.analog_controller.gui.done_tooltip": "Confirm frequency and close",
+  "block.loconautics.analog_controller.gui.clear_tooltip": "Clear frequency slots",
+
+  "itemGroup.loconautics.main": "Loconautics",
+
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
 
   "loconautics.configuration.title": "Loconautics Config",
