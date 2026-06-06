@@ -329,7 +329,21 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     }
 
     public void onRemoved() {
-        if (level != null && linkEntry != null) {
+        if (level == null) return;
+        // Send the dismount packet directly -- do NOT call disconnectUser() here.
+        // disconnectUser() calls updateBlockState() -> level.setBlockAndUpdate(), which
+        // would re-place the block that was just destroyed, causing it to reappear.
+        // We only need to notify the mounted client; all other server-side state is
+        // already being discarded along with this block entity.
+        if (currentUser != null && !level.isClientSide) {
+            Player player = level.getPlayerByUUID(currentUser);
+            if (player instanceof ServerPlayer sp) {
+                com.lycoris.loconautics.network.LoconauticsNetwork.sendMount(
+                        sp, false, net.minecraft.core.BlockPos.ZERO);
+            }
+            currentUser = null;
+        }
+        if (linkEntry != null) {
             Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, linkEntry);
             linkEntry = null;
         }

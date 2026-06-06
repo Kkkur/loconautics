@@ -2,6 +2,7 @@ package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
 import net.createmod.catnip.animation.LerpedFloat;
 import net.createmod.catnip.math.AngleHelper;
 import net.createmod.catnip.render.CachedBuffers;
@@ -35,7 +36,7 @@ import net.minecraft.world.level.block.state.BlockState;
  *   translate(xOffset, 0, 0)            — left lever (0) vs right lever (0.375)
  */
 
- // TODO: fix the lever position, only graphical, not logical.
+// TODO: Fix that when multiple analog controllers are placed, the partial models flicker and move synchronously
 
 public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogControllerBlockEntity> {
 
@@ -74,12 +75,23 @@ public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogContr
         float yOffset = Mth.lerp(animEquip * animEquip, -0.15f, 0.05f);
 
         // ---- Cover (only needs facing rotation) ----
+        // Each call to CachedBuffers.partial() returns the SAME shared SuperByteBuffer
+        // instance for a given (PartialModel, BlockState) key. We must call renderInto
+        // immediately after applying transforms and never call partial() for the same
+        // model twice in one render pass — the second call returns an already-dirty buffer.
+        // Using ms.pushPose()/popPose() lets us express the transforms on the PoseStack
+        // and call partial() + renderInto() once per piece, keeping each piece isolated.
+        ms.pushPose();
+        // rotateCentered(hAngleRad, UP) expands to: translate(+0.5,+0.5,+0.5), rotateY, translate(-0.5,-0.5,-0.5)
+        ms.translate(0.5, 0.5, 0.5);
+        ms.mulPose(com.mojang.math.Axis.YP.rotation(hAngleRad));
+        ms.translate(-0.5, -0.5, -0.5);
         CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_COVER, state)
-                .rotateCentered(hAngleRad, Direction.UP)
                 .light(light)
                 .renderInto(ms, buffers.getBuffer(RenderType.cutoutMipped()));
+        ms.popPose();
 
-        // ---- Two levers ----
+        // ---- Two levers — each in its own pushPose so they don't share buffer state ----
         for (boolean first : new boolean[]{true, false}) {
             float leverVal = first ? animSpeed : animSteer;
             float vAngle   = Mth.clamp(
@@ -88,16 +100,29 @@ public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogContr
                     -45.0f, 45.0f);
             float xOff = first ? 0.0f : 0.375f;
 
+            ms.pushPose();
+            // rotateCentered(hAngleRad, UP)
+            ms.translate(0.5, 0.5, 0.5);
+            ms.mulPose(com.mojang.math.Axis.YP.rotation(hAngleRad));
+            ms.translate(-0.5, -0.5, -0.5);
+            // lever pivot chain
+            ms.translate(0.0, 0.25, 0.25);
+            ms.translate(0.5, 0.5, 0.5);
+            ms.mulPose(com.mojang.math.Axis.XP.rotationDegrees(vAngle - 45.0f));
+            ms.translate(-0.5, -0.5, -0.5);
+            ms.translate(0.0, yOffset, 0.0);
+            ms.translate(0.5, 0.5, 0.5);
+            ms.mulPose(com.mojang.math.Axis.XP.rotationDegrees(45.0f));
+            ms.translate(-0.5, -0.5, -0.5);
+            ms.translate(0.0, -0.375, -0.1875);
+            ms.translate(xOff, 0.0, 0.0);
+
+            // Obtain a fresh buffer each iteration — partial() is safe to call once per
+            // (model, state) pair per render call as long as renderInto follows immediately.
             CachedBuffers.partial(LoconauticsPartialModels.CONTROLS_LEVER, state)
-                    .rotateCentered(hAngleRad, Direction.UP)
-                    .translate(0.0f, 0.25f, 0.25f)
-                    .rotate((float) Math.toRadians(vAngle - 45.0f), Direction.EAST)
-                    .translate(0.0f, yOffset, 0.0f)
-                    .rotate((float) Math.toRadians(45.0f), Direction.EAST)
-                    .translate(0.0f, -0.375f, -0.1875f)
-                    .translate(xOff, 0.0f, 0.0f)
                     .light(light)
                     .renderInto(ms, buffers.getBuffer(RenderType.solid()));
+            ms.popPose();
         }
     }
 

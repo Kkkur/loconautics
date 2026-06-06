@@ -6,102 +6,96 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import net.neoforged.neoforge.client.event.EntityRenderersEvent;
-import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
-import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
-
+import net.createmod.catnip.platform.CatnipServices;
+import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
-import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 
 /**
  * Client-only entry point.
- * Registers:
- *  – The Analog Controller frequency screen.
- *  – The per-tick key-polling for mounted players.
+ *
+ * Uses the constructor-injection pattern (IEventBus modBus + NeoForge.EVENT_BUS) instead
+ * of @EventBusSubscriber, which was deprecated for removal in NeoForge 21.1.x.
+ *
+ * Mod bus  (modBus)          -- lifecycle events: setup, renderer registration, screen registration
+ * Game bus (NeoForge.EVENT_BUS) -- runtime events: client tick, key input, mouse scroll
  */
 @Mod(value = LoconauticsConstants.MOD_ID, dist = Dist.CLIENT)
-@EventBusSubscriber(modid = LoconauticsConstants.MOD_ID, value = Dist.CLIENT,
-        bus = EventBusSubscriber.Bus.MOD)
 public final class LoconauticsClient {
 
-    public LoconauticsClient(ModContainer container) {
+    public LoconauticsClient(ModContainer container, IEventBus modBus) {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
+
+        // ---- Mod bus listeners ----
+        modBus.addListener(this::onClientSetup);
+        modBus.addListener(this::onRegisterRenderers);
+        modBus.addListener(this::onRegisterScreens);
+        modBus.addListener(this::onRegisterGuiLayers);
+
+        // ---- Game bus listeners ----
+        NeoForge.EVENT_BUS.addListener(this::onClientTick);
+        NeoForge.EVENT_BUS.addListener(this::onKeyInput);
+        NeoForge.EVENT_BUS.addListener(this::onMouseScroll);
     }
 
-    @SubscribeEvent
-    static void onClientSetup(FMLClientSetupEvent event) {
+    private void onClientSetup(FMLClientSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics client setup");
         LoconauticsPartialModels.init();
     }
 
-    /** Register the Analog Controller block entity renderer. */
-    @SubscribeEvent
-    static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+    private void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(
                 LoconauticsRegistries.ANALOG_CONTROLLER_BE.get(),
                 AnalogControllerRenderer::new
         );
     }
 
-    /** Register the Analog Controller screen against its menu type. */
-    @SubscribeEvent
-    static void onRegisterScreens(RegisterMenuScreensEvent event) {
+    private void onRegisterScreens(RegisterMenuScreensEvent event) {
         event.register(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(),
                 AnalogControllerScreen::new);
     }
 
-    /** Register the Analog Controller HUD overlay. */
-    @SubscribeEvent
-    static void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
+    private void onRegisterGuiLayers(RegisterGuiLayersEvent event) {
         event.registerAbove(VanillaGuiLayers.EXPERIENCE_BAR,
                 LoconauticsConstants.id("analog_controller_hud"),
                 AnalogControllerHUD.OVERLAY);
     }
-}
 
-/**
- * Game event bus subscriber (separate class — must use GAME bus for ClientTickEvent).
- */
-@EventBusSubscriber(modid = LoconauticsConstants.MOD_ID, value = Dist.CLIENT,
-        bus = EventBusSubscriber.Bus.GAME)
-final class LoconauticsClientGameEvents {
-
-    private LoconauticsClientGameEvents() {}
-
-    @SubscribeEvent
-    static void onClientTick(ClientTickEvent.Pre event) {
+    private void onClientTick(ClientTickEvent.Pre event) {
         AnalogControllerClientHandler.tick();
     }
 
-    @SubscribeEvent
-    static void onKeyInput(net.neoforged.neoforge.client.event.InputEvent.Key event) {
+    private void onKeyInput(InputEvent.Key event) {
         if (!AnalogControllerClientHandler.isControlling()) return;
-        // ESC (256) key press — close any open screen and dismount.
+        // ESC (256) key press -- close any open screen and dismount.
         // InputEvent.Key is not cancellable, so ESC will still open the pause menu;
         // we immediately close it again and dismount.
         if (event.getKey() == 256 && event.getAction() == 1) {
             AnalogControllerClientHandler.stopControllingClient();
-            net.minecraft.client.Minecraft.getInstance().setScreen(null);
+            Minecraft.getInstance().setScreen(null);
         }
     }
 
-    @SubscribeEvent
-    static void onMouseScroll(net.neoforged.neoforge.client.event.InputEvent.MouseScrollingEvent event) {
+    private void onMouseScroll(InputEvent.MouseScrollingEvent event) {
         if (!AnalogControllerClientHandler.isControlling()) return;
-        if (net.minecraft.client.Minecraft.getInstance().screen != null) return;
+        if (Minecraft.getInstance().screen != null) return;
         int delta = event.getScrollDeltaY() > 0 ? 1 : -1;
-        net.createmod.catnip.platform.CatnipServices.NETWORK.sendToServer(
-                new com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket(
-                        delta, AnalogControllerClientHandler.getMountedPos()));
+        CatnipServices.NETWORK.sendToServer(
+                new AnalogControllerScrollPacket(delta, AnalogControllerClientHandler.getMountedPos()));
         event.setCanceled(true);
     }
 }

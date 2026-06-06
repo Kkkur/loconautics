@@ -121,7 +121,22 @@ public class AnalogControllerClientHandler {
     public static void tick() {
         if (mountedPos == null) return;
 
-        long window = Minecraft.getInstance().getWindow().getWindow();
+        Minecraft mc = Minecraft.getInstance();
+
+        // --- Guard: stop controlling if the block no longer exists at mountedPos.
+        // This covers the case where the block is broken while the player is mounted.
+        // The server will already have sent a dismount packet via onRemoved(), but we
+        // also check client-side so input is suppressed for at most one tick.
+        if (mc.level != null) {
+            net.minecraft.world.level.block.state.BlockState bs = mc.level.getBlockState(mountedPos);
+            if (!(bs.getBlock() instanceof com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock)) {
+                // Block is gone — stop without sending a packet (server already handled it)
+                stopControlling();
+                return;
+            }
+        }
+
+        long window = mc.getWindow().getWindow();
 
         // Poll W (0) and S (1) directly via GLFW — ControlsUtil.isActuallyPressed is
         // unreliable here because we call setDown(false) at the end of each tick, which
