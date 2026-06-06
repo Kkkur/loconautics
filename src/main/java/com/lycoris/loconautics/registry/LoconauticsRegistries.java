@@ -53,10 +53,17 @@ public final class LoconauticsRegistries {
                     new BlockItem(ANALOG_CONTROLLER.get(),
                             new Item.Properties().stacksTo(64)));
 
+    // Holder array breaks the self-reference: the lambda is called lazily after
+    // ANALOG_CONTROLLER_BE is assigned, so holder[0].get() is safe at that point.
+    @SuppressWarnings("unchecked")
+    private static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AnalogControllerBlockEntity>>[]
+            BE_HOLDER = new DeferredHolder[1];
+
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AnalogControllerBlockEntity>>
-            ANALOG_CONTROLLER_BE = BLOCK_ENTITIES.register("analog_controller", () ->
+            ANALOG_CONTROLLER_BE = BE_HOLDER[0] = BLOCK_ENTITIES.register("analog_controller", () ->
             BlockEntityType.Builder
-                    .of(AnalogControllerBlockEntity::new, ANALOG_CONTROLLER.get())
+                    .of((pos, state) -> new AnalogControllerBlockEntity(BE_HOLDER[0].get(), pos, state),
+                            ANALOG_CONTROLLER.get())
                     .build(null));
 
     public static final DeferredHolder<MenuType<?>, MenuType<AnalogControllerMenu>>

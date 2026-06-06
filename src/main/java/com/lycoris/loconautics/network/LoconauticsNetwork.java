@@ -36,7 +36,7 @@ public final class LoconauticsNetwork {
                 AnalogControllerInputPacket.TYPE,
                 AnalogControllerInputPacket.STREAM_CODEC,
                 AnalogControllerInputPacket::handle
-        )
+        );
         // Server -> Client: a train entered/left physics mode.
         registrar.playToClient(
                 PhysicsTrainSyncPacket.TYPE,
