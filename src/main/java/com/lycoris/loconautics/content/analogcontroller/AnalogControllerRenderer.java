@@ -5,7 +5,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import net.createmod.catnip.animation.LerpedFloat;
 import net.createmod.catnip.math.AngleHelper;
 import net.createmod.catnip.render.CachedBuffers;
-import net.createmod.catnip.render.SuperByteBuffer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -35,6 +34,9 @@ import net.minecraft.world.level.block.state.BlockState;
  *   translate(0, -0.375, -0.1875)      — net position correction (uncenter + offset)
  *   translate(xOffset, 0, 0)            — left lever (0) vs right lever (0.375)
  */
+
+ // TODO: fix the lever position, only graphical, not logical.
+
 public class AnalogControllerRenderer implements BlockEntityRenderer<AnalogControllerBlockEntity> {
 
     // Per-renderer-instance animated values (one renderer per BE in the view frustum)

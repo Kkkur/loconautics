@@ -3,8 +3,8 @@ package com.lycoris.loconautics.content.analogcontroller;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import com.simibubi.create.foundation.gui.menu.GhostItemMenu;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
@@ -16,24 +16,26 @@ import net.neoforged.neoforge.items.SlotItemHandler;
 /**
  * Frequency-selection menu for the Analog Controller.
  *
- * Extends {@link GhostItemMenu} so we get Create's ghost-slot click handling for free.
- * Two ghost slots (frequency first + second), no player inventory displayed.
+ * Mirrors LinkedTypewriterMenuCommon exactly:
+ *   - addPlayerSlots() adds real-coordinate slots gated by slotsActive
+ *   - Two ghost frequency slots follow at indices 36 and 37
  *
- * Slot layout inside the menu (GhostItemMenu.clicked uses slotId - 36):
- *   Slots 0-35  : player inventory (added but not shown — needed for GhostItemMenu arithmetic)
- *   Slot 36     : frequency first  (ghost)
- *   Slot 37     : frequency second (ghost)
+ * Slot layout:
+ *   Slots 0-35 : player inventory (PlayerSlot, visibility gated by slotsActive)
+ *   Slot 36    : frequency first  (ghost)
+ *   Slot 37    : frequency second (ghost)
  */
 public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEntity> {
 
+    /** Controls whether player slots respond to interaction. Set true by the screen on open. */
+    public boolean slotsActive = false;
+
     // ------------------------------------------------------------------ constructors
 
-    /** Network / client-side constructor (called by IMenuTypeExtension). */
     public AnalogControllerMenu(MenuType<?> type, int id, Inventory inv, RegistryFriendlyByteBuf extraData) {
         super(type, id, inv, extraData);
     }
 
-    /** Server-side constructor. */
     public AnalogControllerMenu(MenuType<?> type, int id, Inventory inv, AnalogControllerBlockEntity be) {
         super(type, id, inv, be);
     }
@@ -44,13 +46,6 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
 
     // ------------------------------------------------------------------ GhostItemMenu impl
 
-    /**
-     * Reconstruct the BE reference on the client from what the server wrote in
-     * {@link AnalogControllerBlock#useWithoutItem} via {@code sp.openMenu(ace, buf -> ...)}.
-     *
-     * Server writes: blockPos, then a CompoundTag produced by
-     * {@link AnalogControllerBlockEntity#sendToMenu}.
-     */
     @Override
     protected AnalogControllerBlockEntity createOnClient(RegistryFriendlyByteBuf extraData) {
         BlockEntity be = Minecraft.getInstance().level.getBlockEntity(extraData.readBlockPos());
@@ -61,11 +56,6 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
         return null;
     }
 
-    /**
-     * Create the 2-slot ghost inventory, pre-populated from the BE's current frequency.
-     * {@code contentHolder} is non-null on the server; may be null on the client before
-     * the BE is resolved (handled gracefully by ItemStack.EMPTY defaults).
-     */
     @Override
     protected ItemStackHandler createGhostInventory() {
         ItemStackHandler handler = new ItemStackHandler(2);
@@ -76,28 +66,36 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
         return handler;
     }
 
-    /**
-     * Add slots.  GhostItemMenu.clicked() subtracts 36 to get the ghost slot index,
-     * so we MUST add the 36 player inventory slots first even though they're never shown.
-     *
-     * Ghost slots follow at indices 36 + 0 and 36 + 1.
-     * Their panel-relative positions (x=4,y=6 and x=22,y=6) match the texture atlas.
-     */
     @Override
     protected void addSlots() {
-        // Add the 36 player slots (off-screen at a position that won't interfere).
-        // The -1000 offset means they are never rendered by the vanilla slot renderer.
-        addPlayerSlots(-1000, -1000);
+        // Player slots at real coordinates — screen passes the correct origin from renderPlayerInventory.
+        // Mirroring EntryModifierScreen: inventory rendered at centerX+19, centerY+72.
+        // We use 0,0 here; AbstractSimiContainerScreen offsets by leftPos/topPos automatically.
+        addPlayerSlots(0, 0);
 
-        // Ghost slots — positions are panel-relative (leftPos/topPos added by the screen).
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 4, 6));
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 22, 6));
+        // Ghost frequency slots — panel-relative positions inside the LINKED_TYPEWRITER_BIND panel.
+        // The two colored squares in the bind panel sit at roughly x=88,y=33 and x=106,y=33
+        // relative to the panel origin (empirically from the 212×89 layout in the screenshot).
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 88, 33));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 106, 33));
     }
 
     /**
-     * Called by {@link com.simibubi.create.foundation.gui.menu.MenuBase#removed} on the
-     * server when the player closes the screen.  Push frequency back to the BE.
+     * Mirrors LinkedTypewriterMenuCommon.addPlayerSlots exactly —
+     * hotbar first, then main inventory rows, with PlayerSlot gating isActive().
      */
+    @Override
+    protected void addPlayerSlots(int x, int y) {
+        for (int hotbarSlot = 0; hotbarSlot < 9; ++hotbarSlot) {
+            addSlot(new PlayerSlot(playerInventory, hotbarSlot, x + hotbarSlot * 18, y + 58));
+        }
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 9; ++col) {
+                addSlot(new PlayerSlot(playerInventory, col + row * 9 + 9, x + col * 18, y + row * 18));
+            }
+        }
+    }
+
     @Override
     protected void saveData(AnalogControllerBlockEntity be) {
         if (be == null) return;
@@ -109,16 +107,23 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
 
     @Override
     protected boolean allowRepeats() {
-        // Allow the same item in both frequency slots (matches Create's Redstone Link behaviour).
         return true;
     }
 
-    // ------------------------------------------------------------------ ghost slot
+    // ------------------------------------------------------------------ inner slots
 
-    /**
-     * Slim SlotItemHandler that marks itself as a ghost slot so Create's renderer
-     * draws the translucent overlay instead of a real item.
-     */
+    /** Mirrors LinkedTypewriterMenuCommon.PlayerSlot — isActive() gated by slotsActive. */
+    private class PlayerSlot extends Slot {
+        public PlayerSlot(Container container, int index, int x, int y) {
+            super(container, index, x, y);
+        }
+
+        @Override
+        public boolean isActive() {
+            return slotsActive;
+        }
+    }
+
     private static class GhostSlot extends SlotItemHandler {
         public GhostSlot(IItemHandler itemHandler, int index, int x, int y) {
             super(itemHandler, index, x, y);

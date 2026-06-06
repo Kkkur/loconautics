@@ -17,6 +17,9 @@ import net.minecraft.world.level.block.entity.BlockEntity;
  * block entity each frame. No packets, no cached fields — same as TrainHUD reads
  * from carriage.train.throttle on the client entity.
  */
+
+// TODO: tweak the lerped value for smooth HUD
+
 public class AnalogControllerHUD {
 
     public static final LayeredDraw.Layer OVERLAY = AnalogControllerHUD::render;
