@@ -13,45 +13,71 @@ import net.minecraft.world.item.ItemStack;
 import java.util.List;
 
 /**
- * Frequency config screen — opened via Shift+right-click.
+ * Frequency config screen — opened via Shift+right-click on the Analog Controller.
  *
- * Uses the LINKED_TYPEWRITER_BIND panel from Aeronautics as background,
- * mirroring how EntryModifierScreen renders the bind submenu inside the typewriter.
+ * Renders the Aeronautics bind panel exactly as EntryModifierScreen does,
+ * but as a standalone screen (our window IS the modification menu).
  *
- * Background : simulated:textures/gui/linked_typewriter/linked_typewriter.png
- * UV region  : LINKED_TYPEWRITER_BIND — startX=0, startY=154, width=212, height=89
+ * Coordinate derivation from Aeronautics source:
+ *   EntryModifierScreen.renderBG():
+ *     MODIFICATION_MENU.render(guiGraphics, getCenterWidth(), getCenterHeight())
+ *       → getCenterWidth()  = parentScreen.leftPos + 11
+ *       → getCenterHeight() = parentScreen.topPos  - 31
+ *     renderPlayerInventory(getCenterWidth()+19, getCenterHeight()+72)
+ *       → (leftPos+30, topPos+41) in their system
  *
- * Layout mirrors EntryModifierScreen.renderBG():
- *   - MODIFICATION_MENU panel rendered at (leftPos, topPos)
- *   - Player inventory rendered at (leftPos + 19, topPos + 72)
- *   - Confirm button at (leftPos + PANEL_W - 56, topPos + 32)
- *   - Trash button  at (leftPos + PANEL_W - 33, topPos + 32)
+ *   EntryModifierScreen.resetXYPositions():
+ *     widgetHeight = getCenterHeight() + 32 = topPos + 1
+ *     confirmWidget.x = getCenterWidth() + BIND.width - 56 = leftPos + 11 + 212 - 56 = leftPos + 167
+ *     cancelWidget.x  = getCenterWidth() + BIND.width - 33 = leftPos + 11 + 212 - 33 = leftPos + 190
+ *
+ *   In our standalone screen the panel is at (leftPos+0, topPos+0), so we subtract
+ *   their panel origin offsets (+11, -31) from every coordinate:
+ *     renderPlayerInventory → (leftPos+0+19, topPos+0+72) = (leftPos+19, topPos+72)
+ *     confirmButton → leftPos+(167-11)=leftPos+156 … wait, no:
+ *     Their confirmButton is absolute, not relative to the panel.
+ *     Their panel at leftPos+11 → our panel at leftPos+0 → shift everything left by 11.
+ *     confirmButton.x = leftPos+167 → relative to our leftPos+0: leftPos+(167-11)=leftPos+156? No —
+ *     The button positions are screen-absolute. In their screen leftPos is their leftPos.
+ *     In our screen leftPos is our leftPos. We add them as offsets in init().
+ *     confirmButton: panel_relative_x = 167-11 = 156 → leftPos+156
+ *       But BIND.width=212, so the confirm is at panel_origin + 212 - 56 = 0 + 212 - 56 = 156. ✓
+ *     trashButton:   panel_relative_x = 190-11 = 179 → leftPos+179. 212-33=179. ✓
+ *     widgetHeight (y): topPos+1 → panel_relative_y = 1-(-31) ... no, we remove the -31 offset:
+ *       their topPos-31+32 = topPos+1. In our system topPos+0+32 = topPos+32? No:
+ *       widgetHeight formula: getCenterHeight()+32 = (topPos-31)+32 = topPos+1.
+ *       In our screen: panel_top=topPos+0, so equivalent formula: panelTop+32 = topPos+32.
+ *       But wait — the y=1 in their slot coords means topPos+1 (slot y is absolute).
+ *       Ghost slots are at panel-relative y=32 (from the menu derivation).
+ *       Buttons should be near the slots. Checking:
+ *       widgetY = topPos+1 → relative to our topPos+0: topPos+1. So button y = topPos+1.
  */
 public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogControllerMenu> {
 
+    // simulated:textures/gui/linked_typewriter/linked_typewriter.png — 256×256 sheet
     private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(
             "simulated", "textures/gui/linked_typewriter/linked_typewriter.png");
 
-    // LINKED_TYPEWRITER_KEY_MODIFICATION_MENU — the outer grey panel, (0,145) 214×80
-    private static final int BG_U = 0;
-    private static final int BG_V = 145;
-    private static final int BG_W = 214;
-    private static final int BG_H = 80;
+    // LINKED_TYPEWRITER_KEY_MODIFICATION_MENU: UV(0,145) 214×80
+    private static final int PANEL_U = 0;
+    private static final int PANEL_V = 145;
+    private static final int PANEL_W = 214;
+    private static final int PANEL_H = 80;
 
-    // LINKED_TYPEWRITER_BIND — the inner bind strip, (0,154) 212×89
-    private static final int BIND_U = 0;
-    private static final int BIND_V = 154;
-    private static final int BIND_W = 212;
-    private static final int BIND_H = 89;
+    // Player inventory background is 176×108; rendered at (leftPos+19, topPos+72).
+    // Extends below the panel — getExtraAreas() covers that region.
+    private static final int INV_X = 19;
+    private static final int INV_Y = 72;
 
-    // Player inventory render offset relative to leftPos/topPos — mirrors EntryModifierScreen
-    private static final int INV_OFFSET_X = 19;
-    private static final int INV_OFFSET_Y = 72;
+    // Button x = panel_origin + BIND.width - offset  (BIND.width = 212, from SimGUITextures)
+    // confirm: 212 - 56 = 156;  trash: 212 - 33 = 179
+    // Button y = topPos+1  (Aeronautics: widgetHeight = getCenterHeight()+32 = (topPos-31)+32 = topPos+1)
+    private static final int BTN_Y         = 1;
+    private static final int BTN_CONFIRM_X = 212 - 56; // 156
+    private static final int BTN_TRASH_X   = 212 - 33; // 179
 
     private IconButton confirmButton;
     private IconButton trashButton;
-
-    // Inventory bubble area for getExtraAreas()
     private Rect2i inventoryArea = new Rect2i(0, 0, 0, 0);
 
     public AnalogControllerScreen(AnalogControllerMenu menu, Inventory inv, Component title) {
@@ -60,27 +86,25 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
 
     @Override
     protected void init() {
-        setWindowSize(BG_W, BG_H);
+        // Window height must cover the full panel + inventory area so topPos centers correctly.
+        // Panel is 80px, but inventory renders at INV_Y=72 and is 108px tall → total = 72+108 = 180px.
+        // Using PANEL_H (80) here would center only the panel, pushing the inventory off-screen.
+        setWindowSize(PANEL_W, INV_Y + 108);
         super.init();
 
-        // Enable player slot interaction — mirrors EntryModifierScreen.startModifying()
         menu.slotsActive = true;
 
-        // Confirm button — mirrors EntryModifierScreen.resetXYPositions()
-        // x = leftPos + BIND_W - 56, y = topPos + 32 (vertical centre of the bind strip)
-        confirmButton = new IconButton(leftPos + BIND_W - 56, topPos + 32, AllIcons.I_CONFIRM);
+        confirmButton = new IconButton(leftPos + BTN_CONFIRM_X, topPos + BTN_Y, AllIcons.I_CONFIRM);
         confirmButton.withCallback(() -> minecraft.player.closeContainer());
         addRenderableWidget(confirmButton);
 
-        // Trash button — single click clears both slots, mirrors typewriter's clear path
-        // x = leftPos + BIND_W - 33
-        trashButton = new IconButton(leftPos + BIND_W - 33, topPos + 32, AllIcons.I_TRASH);
+        trashButton = new IconButton(leftPos + BTN_TRASH_X, topPos + BTN_Y, AllIcons.I_TRASH);
         trashButton.withCallback(this::clearFrequency);
         addRenderableWidget(trashButton);
 
-        // Record inventory bubble for getExtraAreas() so Create doesn't occlude it
-        // 9 slots × 18 = 162px wide, 4 rows × 18 = 72px tall (3 rows + hotbar)
-        inventoryArea = new Rect2i(leftPos + INV_OFFSET_X, topPos + INV_OFFSET_Y, 162, 76);
+        // Full inventory area for getExtraAreas(): 9 cols × 18 = 162 wide, (3 rows + hotbar) = 76 tall
+        // but PLAYER_INVENTORY texture is 176×108, so report the full texture rect.
+        inventoryArea = new Rect2i(leftPos + INV_X, topPos + INV_Y, 176, 108);
     }
 
     private void clearFrequency() {
@@ -90,25 +114,19 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTicks, int mouseX, int mouseY) {
-        // Outer grey modification panel
-        graphics.blit(TEXTURE, leftPos, topPos, BG_U, BG_V, BG_W, BG_H, 256, 256);
+        // LINKED_TYPEWRITER_KEY_MODIFICATION_MENU: UV(0,145) 214×80, sheet 256×256
+        graphics.blit(TEXTURE, leftPos, topPos, PANEL_U, PANEL_V, PANEL_W, PANEL_H, 256, 256);
 
-        // Inner bind strip overlaid on top — mirrors EntryModifierScreen.renderBG()
-        graphics.blit(TEXTURE, leftPos, topPos, BIND_U, BIND_V, BIND_W, BIND_H, 256, 256);
-
-        // Player inventory — mirrors EntryModifierScreen.renderBG() call to renderPlayerInventory()
-        renderPlayerInventory(graphics, leftPos + INV_OFFSET_X, topPos + INV_OFFSET_Y);
+        // Player inventory background — same relative offsets as EntryModifierScreen.renderBG()
+        // adjusted for our panel being at (leftPos+0, topPos+0) instead of (leftPos+11, topPos-31)
+        renderPlayerInventory(graphics, leftPos + INV_X, topPos + INV_Y);
     }
 
     @Override
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
-        // No labels
+        // No labels — title is part of the texture
     }
 
-    /**
-     * Tell Create about the inventory bubble so it isn't occluded.
-     * Mirrors LinkedTypewriterScreen.getExtraAreas().
-     */
     @Override
     public List<Rect2i> getExtraAreas() {
         return List.of(inventoryArea);

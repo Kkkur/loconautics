@@ -16,18 +16,27 @@ import net.neoforged.neoforge.items.SlotItemHandler;
 /**
  * Frequency-selection menu for the Analog Controller.
  *
- * Mirrors LinkedTypewriterMenuCommon exactly:
- *   - addPlayerSlots() adds real-coordinate slots gated by slotsActive
- *   - Two ghost frequency slots follow at indices 36 and 37
+ * Mirrors LinkedTypewriterMenuImpl exactly:
+ *   addPlayerSlots(38, 59) → in our standalone screen this becomes (27, 90)
+ *   Ghost slots at (94, 32) and (112, 32)
  *
- * Slot layout:
- *   Slots 0-35 : player inventory (PlayerSlot, visibility gated by slotsActive)
- *   Slot 36    : frequency first  (ghost)
- *   Slot 37    : frequency second (ghost)
+ * Coordinate derivation (from Aeronautics source):
+ *   Their panel renders at getCenterWidth()=leftPos+11, getCenterHeight()=topPos-31.
+ *   Their addPlayerSlots(38, 59) and renderPlayerInventory at leftPos+30, topPos+41.
+ *   Our panel renders at (leftPos+0, topPos+0) — our window IS the panel (214×80).
+ *   Our renderPlayerInventory at (leftPos+19, topPos+72).
+ *   Our player slots must offset identically: slotX=invX+8=27, slotY=invY+18=90.
+ *   Ghost slots: their absolute (105, 1) relative to their panel (leftPos+11, topPos-31)
+ *     → panel-relative (94, 32); same for slot 1 at (112, 32).
+ *
+ * Slot indices:
+ *   0–35  : player inventory (PlayerSlot, gated by slotsActive)
+ *   36    : frequency first  (ghost)
+ *   37    : frequency second (ghost)
  */
 public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEntity> {
 
-    /** Controls whether player slots respond to interaction. Set true by the screen on open. */
+    /** Set true by the screen on open to enable player slot interaction. */
     public boolean slotsActive = false;
 
     // ------------------------------------------------------------------ constructors
@@ -68,21 +77,21 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
 
     @Override
     protected void addSlots() {
-        // Player slots at real coordinates — screen passes the correct origin from renderPlayerInventory.
-        // Mirroring EntryModifierScreen: inventory rendered at centerX+19, centerY+72.
-        // We use 0,0 here; AbstractSimiContainerScreen offsets by leftPos/topPos automatically.
-        addPlayerSlots(0, 0);
+        // Player slots — positions derived so they align with renderPlayerInventory(leftPos+19, topPos+72).
+        // Texture slot grid offset: col 0 at x+8, main row 0 at y+18, hotbar at y+76.
+        // → slotX base = 19+8 = 27, slotY base = 72+18 = 90 (rows), hotbar = 72+76 = 148 → y arg = 90.
+        addPlayerSlots(27, 90);
 
-        // Ghost frequency slots — panel-relative positions inside the LINKED_TYPEWRITER_BIND panel.
-        // The two colored squares in the bind panel sit at roughly x=88,y=33 and x=106,y=33
-        // relative to the panel origin (empirically from the 212×89 layout in the screenshot).
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 88, 33));
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 106, 33));
+        // Ghost frequency slots — panel-relative positions matching LinkedTypewriterMenuImpl.
+        // Their absolute (105, 1) and (123, 1) relative to panel origin (leftPos+11, topPos-31)
+        // → (105-11, 1+31) = (94, 32) and (112, 32).
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 94, 32));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 112, 32));
     }
 
     /**
      * Mirrors LinkedTypewriterMenuCommon.addPlayerSlots exactly —
-     * hotbar first, then main inventory rows, with PlayerSlot gating isActive().
+     * hotbar first (y+58), then main inventory rows (y, y+18, y+36), gated by slotsActive.
      */
     @Override
     protected void addPlayerSlots(int x, int y) {
@@ -131,6 +140,11 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
 
         @Override
         public boolean isFake() {
+            return true;
+        }
+
+        @Override
+        public boolean isActive() {
             return true;
         }
     }
