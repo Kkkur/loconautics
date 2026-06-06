@@ -3,6 +3,7 @@ package com.lycoris.loconautics.network;
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
+import com.lycoris.loconautics.network.packets.AnalogControllerDismountPacket;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.core.BlockPos;
@@ -54,6 +55,13 @@ public final class LoconauticsNetwork {
                 AnalogControllerScrollPacket.STREAM_CODEC,
                 AnalogControllerScrollPacket::handle
         );
+
+        // Client -> Server: player explicitly dismounted (ESC).
+        registrar.playToServer(
+                AnalogControllerDismountPacket.TYPE,
+                AnalogControllerDismountPacket.STREAM_CODEC,
+                AnalogControllerDismountPacket::handle
+        );
         // Server -> Client: a train entered/left physics mode.
         registrar.playToClient(
                 PhysicsTrainSyncPacket.TYPE,
@@ -77,5 +85,11 @@ public final class LoconauticsNetwork {
     /** Tells a specific client player they have mounted/dismounted an Analog Controller. */
     public static void sendMount(ServerPlayer player, boolean mounted, BlockPos pos) {
         PacketDistributor.sendToPlayer(player, new AnalogControllerMountPacket(mounted, pos));
+    }
+
+    /** Sends a dismount request from client to server. */
+    public static void sendDismount(BlockPos pos) {
+        net.createmod.catnip.platform.CatnipServices.NETWORK.sendToServer(
+                new AnalogControllerDismountPacket(pos));
     }
 }

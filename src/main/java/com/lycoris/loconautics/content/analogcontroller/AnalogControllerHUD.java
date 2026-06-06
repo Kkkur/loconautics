@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import net.createmod.catnip.animation.LerpedFloat;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -38,6 +39,10 @@ public class AnalogControllerHUD {
     // Lock icon size
     private static final int LOCK_W = 8, LOCK_H = 10;
 
+    // Animated bar values — chase actual values each frame like TrainHUD
+    private static final LerpedFloat displayedSpeed    = LerpedFloat.linear();
+    private static final LerpedFloat displayedThrottle = LerpedFloat.linear();
+
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("AnalogControllerHUD");
     private static int logThrottle = 0;
 
@@ -66,9 +71,18 @@ public class AnalogControllerHUD {
 
         if (shouldLog) LOGGER.info("HUD RENDERING: power={} locked={}", ace.getCurrentPower(), ace.isLocked());
 
-        int power   = ace.getCurrentPower();
-        boolean locked = ace.isLocked();
+        int power    = ace.getCurrentPower();
+        boolean locked   = ace.isLocked();
         int maxPower = ace.getMaxPower();
+
+        // Tick lerped values toward actual targets (same pattern as TrainHUD)
+        float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(true);
+        displayedSpeed.chase(power / 15.0, 0.5, LerpedFloat.Chaser.EXP);
+        displayedSpeed.tickChaser();
+        displayedThrottle.chase(maxPower / 15.0, 0.75, LerpedFloat.Chaser.EXP);
+        displayedThrottle.tickChaser();
+        float animSpeed    = displayedSpeed.getValue(partialTicks);
+        float animThrottle = displayedThrottle.getValue(partialTicks);
 
         // Anchor: same as Create's TrainHUD
         int originX = graphics.guiWidth() / 2 - 91;
@@ -78,31 +92,29 @@ public class AnalogControllerHUD {
         graphics.blit(WIDGETS, originX, barY, 0,
                 0, 190, SPEED_BG_W, SPEED_BG_H, 256, 256);
 
-        // 2. SPEED — fills from left proportional to current power (like train speed)
-        int fillW = Math.round((power / 15.0f) * SPEED_W);
+        // 2. SPEED — fills from left proportional to animated speed
+        int fillW = Math.round(animSpeed * SPEED_W);
         if (fillW > 0) {
             graphics.blit(WIDGETS, originX, barY, 0,
                     0, 185, fillW, SPEED_H, 256, 256);
         }
 
-        // 3. THROTTLE — drawn from the RIGHT, represents the portion above the max cap.
-        //    Create's logic: w = fullWidth * (1 - throttle), drawn starting at invW into texture.
-        //    throttle = maxPower / 15.0f, so the cap blocks the right portion.
-        int throttleW   = Math.round((1.0f - maxPower / 15.0f) * THROTTLE_W); // portion blocked
-        int invW        = THROTTLE_W - throttleW;                              // left edge of blocked zone
+        // 3. THROTTLE — drawn from the RIGHT using animated throttle cap
+        int throttleW = Math.round((1.0f - animThrottle) * THROTTLE_W);
+        int invW      = THROTTLE_W - throttleW;
         if (throttleW > 0) {
             graphics.blit(WIDGETS, originX + invW, barY, 0,
                     invW, 195, throttleW, THROTTLE_H, 256, 256);
         }
 
-        // 4. THROTTLE_PTR — sits at the cap boundary (invW - 3), always visible
+        // 4. FRAME — drawn before pointer so pointer renders on top
+        graphics.blit(WIDGETS, originX - 2, barY + SPEED_BG_H - 4, 0,
+                0, 200, FRAME_W, FRAME_H, 256, 256);
+
+        // 5. THROTTLE_PTR — sits at the cap boundary, above the frame, below the lock
         int ptrX = originX + Math.max(1, invW) - 3;
         graphics.blit(WIDGETS, ptrX, barY - 2, 0,
                 0, 209, PTR_W, PTR_H, 256, 256);
-
-        // HUD frame rail
-        graphics.blit(WIDGETS, originX - 2, barY + SPEED_BG_H - 4, 0,
-                0, 200, FRAME_W, FRAME_H, 256, 256);
 
         // Direction zone: Create draws at (77, -20) relative to the bar origin.
         // In absolute coords that is originX + 77, barY - 20.

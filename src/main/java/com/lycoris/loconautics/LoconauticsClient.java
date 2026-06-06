@@ -83,6 +83,18 @@ final class LoconauticsClientGameEvents {
     }
 
     @SubscribeEvent
+    static void onKeyInput(net.neoforged.neoforge.client.event.InputEvent.Key event) {
+        if (!AnalogControllerClientHandler.isControlling()) return;
+        // ESC (256) key press — close any open screen and dismount.
+        // InputEvent.Key is not cancellable, so ESC will still open the pause menu;
+        // we immediately close it again and dismount.
+        if (event.getKey() == 256 && event.getAction() == 1) {
+            AnalogControllerClientHandler.stopControllingClient();
+            net.minecraft.client.Minecraft.getInstance().setScreen(null);
+        }
+    }
+
+    @SubscribeEvent
     static void onMouseScroll(net.neoforged.neoforge.client.event.InputEvent.MouseScrollingEvent event) {
         if (!AnalogControllerClientHandler.isControlling()) return;
         if (net.minecraft.client.Minecraft.getInstance().screen != null) return;

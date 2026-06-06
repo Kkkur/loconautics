@@ -46,8 +46,14 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     // ------------------------------------------------------------------ constants
 
-    /** Ticks between automatic signal decay steps when unlocked and idle. */
-    private static final int DECAY_TICKS = 10;
+    /** Ticks between each W raise step (~1 second). */
+    private static final int RAISE_TICKS  = 20;
+
+    /** Ticks between each S lower step (~1.5 seconds). */
+    private static final int LOWER_TICKS  = 30;
+
+    /** Ticks between automatic signal decay steps (~2 seconds). */
+    private static final int DECAY_TICKS  = 40;
 
     /** Maximum redstone signal value. */
     private static final int MAX_POWER = 15;
@@ -66,6 +72,12 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     /** Whether S is currently held (lower signal). */
     private boolean loweringSignal = false;
+
+    /** Countdown to next raise step. */
+    private int raiseTimer = RAISE_TICKS;
+
+    /** Countdown to next lower step. */
+    private int lowerTimer = LOWER_TICKS;
 
     /** Countdown to next decay step. */
     private int decayTimer = DECAY_TICKS;
@@ -128,17 +140,31 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
         int previousPower = currentPower;
 
-        // --- apply held keys (sent by AnalogControllerInputPacket) ---
+        // --- apply held keys at rate-limited intervals ---
         if (raisingSignal) {
-            currentPower = Math.min(currentPower + 1, maxPower); // respect cap
-            decayTimer = DECAY_TICKS; // reset decay whenever player actively pushes
-        } else if (loweringSignal) {
-            currentPower = Math.max(currentPower - 1, 0);
+            // W is blocked if locked and already at or above the throttle cap
+            boolean blockedByLock = locked && currentPower >= maxPower;
+            if (!blockedByLock) {
+                raiseTimer--;
+                if (raiseTimer <= 0) {
+                    raiseTimer = RAISE_TICKS;
+                    currentPower = Math.min(currentPower + 1, maxPower);
+                }
+            }
+            decayTimer = DECAY_TICKS; // reset decay whenever player is actively pushing
+        }
+
+        if (loweringSignal) {
+            lowerTimer--;
+            if (lowerTimer <= 0) {
+                lowerTimer = LOWER_TICKS;
+                currentPower = Math.max(currentPower - 1, 0);
+            }
             decayTimer = DECAY_TICKS;
         }
 
-        // --- decay when not locked and not actively raising ---
-        if (!locked && !raisingSignal && currentUser != null) {
+        // --- decay always runs when unlocked and not actively raising ---
+        if (!locked && !raisingSignal) {
             decayTimer--;
             if (decayTimer <= 0) {
                 decayTimer = DECAY_TICKS;
@@ -172,9 +198,11 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     private void connectUser(Player player) {
         currentUser = player.getUUID();
-        locked = false;
+        // locked intentionally NOT reset — player may have locked before dismounting
         raisingSignal = false;
         loweringSignal = false;
+        raiseTimer = RAISE_TICKS;
+        lowerTimer = LOWER_TICKS;
         decayTimer = DECAY_TICKS;
         updateBlockState(level, getBlockState());
         setChanged();
@@ -201,7 +229,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             }
         }
         currentUser = null;
-        locked = false;
+        // locked intentionally preserved — block remembers lock state between uses
         raisingSignal = false;
         loweringSignal = false;
         // Signal stays at its last value — player can lock it before dismounting.
@@ -226,10 +254,12 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             case 0 -> { // W → raise
                 raisingSignal = pressed;
                 if (pressed) loweringSignal = false;
+                else raiseTimer = RAISE_TICKS; // reset on release so next press fires immediately
             }
             case 1 -> { // S → lower
                 loweringSignal = pressed;
                 if (pressed) raisingSignal = false;
+                else lowerTimer = LOWER_TICKS;
             }
             case 5 -> { // Shift → toggle lock on key-down only
                 if (pressed) {
