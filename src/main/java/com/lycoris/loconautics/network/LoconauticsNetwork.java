@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.network;
 
+import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +31,12 @@ public final class LoconauticsNetwork {
                 AssembleAsPhysicsTrainPacket::handle
         );
 
+        // Client -> Server: key event from a mounted Analog Controller.
+        registrar.playToServer(
+                AnalogControllerInputPacket.TYPE,
+                AnalogControllerInputPacket.STREAM_CODEC,
+                AnalogControllerInputPacket::handle
+        )
         // Server -> Client: a train entered/left physics mode.
         registrar.playToClient(
                 PhysicsTrainSyncPacket.TYPE,
