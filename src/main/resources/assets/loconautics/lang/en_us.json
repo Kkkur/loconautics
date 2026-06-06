@@ -8,6 +8,8 @@
   "block.loconautics.analog_controller.gui.done_tooltip": "Confirm frequency and close",
   "block.loconautics.analog_controller.gui.clear_tooltip": "Clear frequency slots",
 
+  "itemGroup.loconautics.main": "Loconautics",
+
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
 
   "loconautics.configuration.title": "Loconautics Config",

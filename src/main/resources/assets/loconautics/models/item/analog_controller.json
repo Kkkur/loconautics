@@ -3,6 +3,8 @@
 	"textures": {
 		"4": "create:block/controls_frame",
 		"1_7": "loconautics:block/analog_controller",
+		"lever": "create:block/controls/train/lever",
+		"cover": "create:block/controls/train/cover",
 		"redstone_antenna": "create:block/redstone_antenna",
 		"particle": "create:block/bogey/particle"
 	},
@@ -117,28 +119,44 @@
 			}
 		},
 		{
+			"name": "cover",
+			"comment": "Train controls cover — uses Create's cover texture, centred over the panel",
+			"from": [2, 7, 7],
+			"to": [14, 16, 15],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 11.5, 11]},
+			"faces": {
+				"north": {"uv": [0, 0, 12, 9], "texture": "#cover"},
+				"south": {"uv": [0, 0, 12, 9], "texture": "#cover"},
+				"up": {"uv": [0, 0, 12, 8], "texture": "#cover"},
+				"down": {"uv": [0, 0, 12, 8], "texture": "#cover"}
+			}
+		},
+		{
+			"name": "lever_left",
+			"comment": "Left lever (speed) at neutral/mid position — uses Create's lever texture",
 			"from": [4, 11, -1],
 			"to": [6, 13, 9],
 			"rotation": {"angle": 45, "axis": "x", "origin": [0, 12, 11]},
 			"faces": {
-				"north": {"uv": [8, 1.5, 9, 2.5], "rotation": 180, "texture": "#1_7"},
-				"east": {"uv": [9, 3, 8, 8], "rotation": 90, "texture": "#1_7"},
-				"west": {"uv": [9, 3, 8, 8], "rotation": 270, "texture": "#1_7"},
-				"up": {"uv": [8, 3, 9, 8], "texture": "#1_7"},
-				"down": {"uv": [8, 3, 9, 8], "rotation": 180, "texture": "#1_7"}
+				"north": {"uv": [0, 0, 2, 1], "texture": "#lever"},
+				"east": {"uv": [0, 0, 10, 2], "rotation": 90, "texture": "#lever"},
+				"west": {"uv": [0, 0, 10, 2], "rotation": 270, "texture": "#lever"},
+				"up": {"uv": [0, 0, 2, 10], "texture": "#lever"},
+				"down": {"uv": [0, 0, 2, 10], "rotation": 180, "texture": "#lever"}
 			}
 		},
 		{
-			"name": "lever",
+			"name": "lever_right",
+			"comment": "Right lever (throttle cap) — slightly different rest angle",
 			"from": [10, 9, -1],
 			"to": [12, 11, 9],
 			"rotation": {"angle": 30, "axis": "x", "origin": [6, 10, 11]},
 			"faces": {
-				"north": {"uv": [8, 1.5, 9, 2.5], "rotation": 180, "texture": "#1_7"},
-				"east": {"uv": [9, 3, 8, 8], "rotation": 90, "texture": "#1_7"},
-				"west": {"uv": [9, 3, 8, 8], "rotation": 270, "texture": "#1_7"},
-				"up": {"uv": [8, 3, 9, 8], "texture": "#1_7"},
-				"down": {"uv": [8, 3, 9, 8], "rotation": 180, "texture": "#1_7"}
+				"north": {"uv": [0, 0, 2, 1], "texture": "#lever"},
+				"east": {"uv": [0, 0, 10, 2], "rotation": 90, "texture": "#lever"},
+				"west": {"uv": [0, 0, 10, 2], "rotation": 270, "texture": "#lever"},
+				"up": {"uv": [0, 0, 2, 10], "texture": "#lever"},
+				"down": {"uv": [0, 0, 2, 10], "rotation": 180, "texture": "#lever"}
 			}
 		}
 	],

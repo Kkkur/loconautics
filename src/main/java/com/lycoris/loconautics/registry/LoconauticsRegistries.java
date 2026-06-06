@@ -7,6 +7,7 @@ import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
@@ -35,6 +36,10 @@ public final class LoconauticsRegistries {
 
     public static final DeferredRegister<MenuType<?>> MENUS =
             DeferredRegister.create(net.minecraft.core.registries.Registries.MENU,
+                    LoconauticsConstants.MOD_ID);
+
+    public static final DeferredRegister<CreativeModeTab> CREATIVE_TABS =
+            DeferredRegister.create(net.minecraft.core.registries.Registries.CREATIVE_MODE_TAB,
                     LoconauticsConstants.MOD_ID);
 
     // ------------------------------------------------------------------ Analog Controller
@@ -66,6 +71,16 @@ public final class LoconauticsRegistries {
             IMenuTypeExtension.create((id, inv, buf) ->
                     new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inv, buf)));
 
+    public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
+            LOCONAUTICS_TAB = CREATIVE_TABS.register("main", () ->
+            net.minecraft.world.item.CreativeModeTab.builder()
+                    .title(net.minecraft.network.chat.Component.translatable("itemGroup.loconautics.main"))
+                    .icon(() -> new net.minecraft.world.item.ItemStack(ANALOG_CONTROLLER_ITEM.get()))
+                    .displayItems((params, output) -> {
+                        output.accept(ANALOG_CONTROLLER_ITEM.get());
+                    })
+                    .build());
+
     // ------------------------------------------------------------------ constructor / register
 
     private LoconauticsRegistries() {
@@ -77,5 +92,6 @@ public final class LoconauticsRegistries {
         ITEMS.register(modEventBus);
         BLOCK_ENTITIES.register(modEventBus);
         MENUS.register(modEventBus);
+        CREATIVE_TABS.register(modEventBus);
     }
 }

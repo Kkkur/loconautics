@@ -52,6 +52,9 @@ import java.util.List;
  *       Buttons should be near the slots. Checking:
  *       widgetY = topPos+1 → relative to our topPos+0: topPos+1. So button y = topPos+1.
  */
+
+// TODO: Fix screen buttons, they're currently 50 pixels up.
+
 public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogControllerMenu> {
 
     // simulated:textures/gui/linked_typewriter/linked_typewriter.png — 256×256 sheet
