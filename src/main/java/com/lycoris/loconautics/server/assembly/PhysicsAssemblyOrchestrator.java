@@ -155,6 +155,8 @@ public final class PhysicsAssemblyOrchestrator {
             return;
         }
 
+        // Set the initial mass. Ongoing updates are handled by PhysicsTrainTickHandler
+        // every 30 ticks, since BE tick() does not fire inside Sable sub-levels.
         axle.setTrainMass(totalMassKg);
         LoconauticsConstants.LOGGER.info(
                 "wireMassToAxle: set train mass to {}kg on axle at {}",

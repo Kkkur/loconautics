@@ -28,7 +28,7 @@ public final class Loconautics {
         modEventBus.addListener(this::commonSetup);
 
         // Config
-        modContainer.registerConfig(ModConfig.Type.SERVER, Config.SPEC);
+        modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

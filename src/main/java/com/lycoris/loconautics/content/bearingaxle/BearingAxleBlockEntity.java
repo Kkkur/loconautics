@@ -18,20 +18,16 @@ import java.util.List;
 public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveGoggleInformation {
 
     // ---------------------------------------------------------------------------
-    // Mass field — set by the physics pipeline via setTrainMass()
+    // Mass — pushed by PhysicsTrainTickHandler every 30 ticks.
+    // Block entities inside Sable sub-levels do not tick normally, so mass updates
+    // come from the server game tick handler, not from this BE's own tick().
     // ---------------------------------------------------------------------------
 
     private double totalMassKg = 0.0;
 
-    // Ticks between stress recalculations (20 ticks = 1 second).
-    // Catches runtime mass changes (blocks added/removed from a live train).
-    private static final int STRESS_UPDATE_INTERVAL = 20;
-    private int stressUpdateTicker = 0;
-
     /**
-     * Called by the physics assembly pipeline after train mass is known,
-     * and whenever mass changes at runtime (blocks added/removed from the train).
-     * Immediately marks the kinetic network dirty so stress updates next tick.
+     * Called by PhysicsTrainTickHandler every 30 ticks (and once at assembly time
+     * by PhysicsAssemblyOrchestrator) to update the train mass and recompute stress.
      */
     public void setTrainMass(double massKg) {
         this.totalMassKg = massKg;
@@ -45,45 +41,24 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     }
 
     // ---------------------------------------------------------------------------
-    // Stress — mass-based formula using server config values
+    // Stress formula
     // ---------------------------------------------------------------------------
 
     /**
      * Stress impact at 1 RPM. Full SU = impact * abs(speed).
      *
-     * Formula: max(BASE_IMPACT, totalMassKg / MASS_DIVISOR)
-     *   BASE_IMPACT  — minimum SU floor even when mass is zero (default 1.0 SU)
-     *   MASS_DIVISOR — how many kg per 1 SU of impact (default 50 kg/SU)
+     * Formula: BASE_IMPACT + (totalMassKg / MASS_DIVISOR)
+     *   BASE_IMPACT  — flat base cost always present regardless of mass (default 1.0 SU)
+     *   MASS_DIVISOR — kg per 1 SU of added impact (default 50 kg/SU)
      *
-     * Example: 500 kg train, defaults → max(1.0, 500/50) = 10 SU at 1 RPM.
+     * Example: 500 kg train, defaults → 1.0 + (500/50) = 11.0 SU at 1 RPM.
      */
     @Override
     public float calculateStressApplied() {
         double divisor = Config.MASS_DIVISOR.get();
         double base    = Config.BASE_IMPACT.get();
-        this.lastStressApplied = (float) Math.max(base, totalMassKg / divisor);
+        this.lastStressApplied = (float) (base + (totalMassKg / divisor));
         return this.lastStressApplied;
-    }
-
-    // ---------------------------------------------------------------------------
-    // Tick — periodic stress refresh for real-time mass changes
-    // ---------------------------------------------------------------------------
-
-    @Override
-    public void tick() {
-        super.tick();
-
-        if (level == null || level.isClientSide)
-            return;
-
-        if (++stressUpdateTicker >= STRESS_UPDATE_INTERVAL) {
-            stressUpdateTicker = 0;
-            float newStress = calculateStressApplied();
-            if (newStress != lastStressApplied) {
-                lastStressApplied = newStress;
-                networkDirty = true;
-            }
-        }
     }
 
     // ---------------------------------------------------------------------------
@@ -92,7 +67,7 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
 
     @Override
     public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-        boolean added = super.addToGoggleTooltip(tooltip, isPlayerSneaking);
+        super.addToGoggleTooltip(tooltip, isPlayerSneaking);
 
         LoconauticsLang.translate("gui.goggles.bearing_axle_stats").forGoggles(tooltip);
 
@@ -105,12 +80,12 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
                 .style(totalMassKg > 0 ? ChatFormatting.GOLD : ChatFormatting.DARK_GRAY)
                 .forGoggles(tooltip, 1);
 
-        // Current SU (live)
-        float currentSU = calculateStressApplied() * Math.abs(getSpeed());
-        LoconauticsLang.translate("gui.goggles.current_su")
+        // Stress Impact (at 1 RPM)
+        float impact = calculateStressApplied();
+        LoconauticsLang.translate("gui.goggles.stress_impact")
                 .style(ChatFormatting.GRAY)
                 .forGoggles(tooltip);
-        LoconauticsLang.number(currentSU)
+        LoconauticsLang.number(impact)
                 .translate("gui.goggles.unit_su")
                 .style(ChatFormatting.AQUA)
                 .forGoggles(tooltip, 1);
@@ -152,7 +127,5 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     }
 
     @Override
-    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-        // behaviours added in future phases
-    }
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
 }

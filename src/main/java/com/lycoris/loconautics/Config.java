@@ -37,7 +37,7 @@ public final class Config {
         MASS_DIVISOR = BUILDER
                 .comment("Divides total train mass (kg) to produce the stress impact per RPM.",
                         "Lower values = more stress per kg. Default: 50.0 (100 kg train → 2.0 impact).")
-                .defineInRange("massDivisor", 50.0, 1.0, 1000.0);
+                .defineInRange("massDivisor", 10.0, 1.0, 1000.0);
 
         BASE_IMPACT = BUILDER
                 .comment("Minimum stress impact regardless of train mass.",
