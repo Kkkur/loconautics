@@ -8,6 +8,7 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleRenderer;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
@@ -61,6 +62,10 @@ public final class LoconauticsClient {
         event.registerBlockEntityRenderer(
                 LoconauticsRegistries.ANALOG_CONTROLLER_BE.get(),
                 AnalogControllerRenderer::new
+        );
+        event.registerBlockEntityRenderer(
+                LoconauticsRegistries.BEARING_AXLE_BE.get(),
+                BearingAxleRenderer::new
         );
     }
 

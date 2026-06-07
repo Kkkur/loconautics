@@ -10,6 +10,8 @@ import org.joml.Vector3dc;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.core.PhysicsTrainPose;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 import com.lycoris.loconautics.server.PhysicsTrainRegistry;
 import com.lycoris.loconautics.server.assembly.PhysicsTrainDisassembler;
@@ -20,6 +22,7 @@ import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
 import com.simibubi.create.content.trains.entity.Train;
 
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
+import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.Pose3d;
@@ -29,6 +32,7 @@ import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -58,6 +62,10 @@ public final class PhysicsTrainTickHandler {
     /** Throttle for diagnostic logging (ticks). Set high enough not to spam. */
     private static final int LOG_INTERVAL = 40;
     private static int tickCounter = 0;
+
+    /** Re-fetch train mass from Sable and push to the Bearing Axle every N ticks. */
+    private static final int MASS_UPDATE_INTERVAL = 30;
+    private static int massTickCounter = 0;
 
     private PhysicsTrainTickHandler() {
     }
@@ -163,6 +171,18 @@ public final class PhysicsTrainTickHandler {
                 LoconauticsConstants.LOGGER.error("Error in lifecycle for physics train {}", tag.trainId(), t);
             }
         }
+
+        // Re-fetch mass from Sable sub-levels and push to the Bearing Axle every 30 ticks.
+        // Block entities inside sub-levels do not tick normally, so we do this from here.
+        if ((massTickCounter++ % MASS_UPDATE_INTERVAL) == 0) {
+            for (PhysicsTrainTag tag : new ArrayList<>(registry.all())) {
+                try {
+                    tickMass(server, tag);
+                } catch (Throwable t) {
+                    LoconauticsConstants.LOGGER.error("Error updating mass for physics train {}", tag.trainId(), t);
+                }
+            }
+        }
     }
 
     private static void tickLifecycle(MinecraftServer server, PhysicsTrainTag tag, boolean log) {
@@ -203,6 +223,68 @@ public final class PhysicsTrainTickHandler {
         if (alive == 0 && sawContainer && count > 0) {
             PhysicsTrainDisassembler.disassemble(server, tag.trainId());
         }
+    }
+
+    /**
+     * Re-fetches mass from all Sable sub-levels for a physics train and pushes the total
+     * into the BearingAxleBlockEntity. Called from the server game tick, not from the BE
+     * tick, because block entities inside Sable sub-levels do not tick normally.
+     */
+    private static void tickMass(MinecraftServer server, PhysicsTrainTag tag) {
+        Train train = Create.RAILWAYS.trains.get(tag.trainId());
+        if (train == null) return;
+
+        List<Carriage> carriages = train.carriages;
+        int count = Math.min(carriages.size(), tag.subLevelIds().size());
+
+        double totalMass = 0.0;
+        BearingAxleBlockEntity axle = null;
+
+        for (int i = 0; i < count; i++) {
+            UUID subLevelId = tag.subLevelIds().get(i);
+            if (subLevelId == null) continue;
+
+            CarriageContraptionEntity entity = carriages.get(i).anyAvailableEntity();
+            if (entity == null || !(entity.level() instanceof ServerLevel level)) continue;
+
+            ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+            if (container == null) continue;
+
+            if (!(container.getSubLevel(subLevelId) instanceof ServerSubLevel serverSub)) continue;
+
+            // buildMassTracker() does a fresh block scan of the sub-level bounds.
+            // getMassTracker() returns a baked snapshot from the last build — it does NOT
+            // update when blocks are added/removed. We must rebuild each poll cycle.
+            serverSub.buildMassTracker();
+            MassData tracker = serverSub.getMassTracker();
+            if (tracker != null) totalMass += tracker.getMass();
+
+            if (axle == null) {
+                axle = findBearingAxleInSubLevel(serverSub);
+            }
+        }
+
+        if (axle != null) {
+            axle.setTrainMass(totalMass);
+        }
+    }
+
+    /** Scans the sub-level's own ServerLevel for a BearingAxleBlockEntity. */
+    private static BearingAxleBlockEntity findBearingAxleInSubLevel(ServerSubLevel serverSub) {
+        var bounds = serverSub.getPlot().getBoundingBox();
+        ServerLevel subLevel = serverSub.getLevel();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (!(subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock)) continue;
+                    BlockEntity be = subLevel.getBlockEntity(pos);
+                    if (be instanceof BearingAxleBlockEntity axle) return axle;
+                }
+            }
+        }
+        return null;
     }
 
     /** Verifies the pin held: {@code poseNow} should equal {@code target} every tick (no gravity sag). */

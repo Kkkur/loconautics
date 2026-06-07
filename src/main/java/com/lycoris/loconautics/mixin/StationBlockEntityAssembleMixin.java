@@ -31,7 +31,6 @@ public class StationBlockEntityAssembleMixin {
             try {
                 ServerSubLevel subLevel = SubLevelBridge.createFromContraption(serverLevel, contraption);
                 if (subLevel != null) {
-                    // Pass anchor alongside subLevel id so disassembler can restore BE NBT
                     PhysicsAssemblyContext.addSubLevel(subLevel.getUniqueId(), contraption.anchor);
                     return;
                 }

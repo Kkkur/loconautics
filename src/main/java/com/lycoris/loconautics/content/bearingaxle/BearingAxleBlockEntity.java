@@ -1,0 +1,131 @@
+package com.lycoris.loconautics.content.bearingaxle;
+
+import com.lycoris.loconautics.Config;
+import com.lycoris.loconautics.foundation.LoconauticsLang;
+import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
+
+import java.util.List;
+
+public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveGoggleInformation {
+
+    // ---------------------------------------------------------------------------
+    // Mass — pushed by PhysicsTrainTickHandler every 30 ticks.
+    // Block entities inside Sable sub-levels do not tick normally, so mass updates
+    // come from the server game tick handler, not from this BE's own tick().
+    // ---------------------------------------------------------------------------
+
+    private double totalMassKg = 0.0;
+
+    /**
+     * Called by PhysicsTrainTickHandler every 30 ticks (and once at assembly time
+     * by PhysicsAssemblyOrchestrator) to update the train mass and recompute stress.
+     */
+    public void setTrainMass(double massKg) {
+        this.totalMassKg = massKg;
+        this.lastStressApplied = calculateStressApplied();
+        this.networkDirty = true;
+        this.setChanged();
+    }
+
+    public double getTrainMass() {
+        return totalMassKg;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Stress formula
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Stress impact at 1 RPM. Full SU = impact * abs(speed).
+     *
+     * Formula: BASE_IMPACT + (totalMassKg / MASS_DIVISOR)
+     *   BASE_IMPACT  — flat base cost always present regardless of mass (default 1.0 SU)
+     *   MASS_DIVISOR — kg per 1 SU of added impact (default 50 kg/SU)
+     *
+     * Example: 500 kg train, defaults → 1.0 + (500/50) = 11.0 SU at 1 RPM.
+     */
+    @Override
+    public float calculateStressApplied() {
+        double divisor = Config.MASS_DIVISOR.get();
+        double base    = Config.BASE_IMPACT.get();
+        this.lastStressApplied = (float) (base + (totalMassKg / divisor));
+        return this.lastStressApplied;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Goggle tooltip
+    // ---------------------------------------------------------------------------
+
+    @Override
+    public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
+        super.addToGoggleTooltip(tooltip, isPlayerSneaking);
+
+        LoconauticsLang.translate("gui.goggles.bearing_axle_stats").forGoggles(tooltip);
+
+        // Train Weight
+        LoconauticsLang.translate("gui.goggles.train_weight")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.number(totalMassKg)
+                .translate("gui.goggles.unit_kg")
+                .style(totalMassKg > 0 ? ChatFormatting.GOLD : ChatFormatting.DARK_GRAY)
+                .forGoggles(tooltip, 1);
+
+        // Stress Impact (at 1 RPM)
+        float impact = calculateStressApplied();
+        LoconauticsLang.translate("gui.goggles.stress_impact")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.number(impact)
+                .translate("gui.goggles.unit_su")
+                .style(ChatFormatting.AQUA)
+                .forGoggles(tooltip, 1);
+
+        // RPM (live)
+        LoconauticsLang.translate("gui.goggles.rpm")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.number(Math.abs(getSpeed()))
+                .translate("gui.goggles.unit_rpm")
+                .style(ChatFormatting.AQUA)
+                .forGoggles(tooltip, 1);
+
+        return true;
+    }
+
+    // ---------------------------------------------------------------------------
+    // NBT
+    // ---------------------------------------------------------------------------
+
+    @Override
+    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.write(tag, registries, clientPacket);
+        tag.putDouble("TotalMassKg", totalMassKg);
+    }
+
+    @Override
+    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.read(tag, registries, clientPacket);
+        totalMassKg = tag.getDouble("TotalMassKg");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Boilerplate
+    // ---------------------------------------------------------------------------
+
+    public BearingAxleBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
+    }
+
+    @Override
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
+}

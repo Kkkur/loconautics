@@ -33,8 +33,10 @@ public final class Loconautics {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
-        // Pin each physics-train sub-level's logicalPose to the carriage pose inside the physics tick,
-        // so collision/raytrace (which read logicalPose) coincide with the visible body.
         PhysicsTrainTickHandler.register();
+
+        // NOTE: BlockStressValues.IMPACTS placeholder for the Bearing Axle was removed in Phase 5.
+        // Stress is now computed dynamically in BearingAxleBlockEntity.calculateStressApplied()
+        // using the train mass set by PhysicsAssemblyOrchestrator after assembly.
     }
 }

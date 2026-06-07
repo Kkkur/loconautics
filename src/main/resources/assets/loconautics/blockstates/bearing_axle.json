@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "axis=z": { "model": "loconautics:block/bearing_axle" },
+    "axis=x": { "model": "loconautics:block/bearing_axle", "y": 90 },
+    "axis=y": { "model": "loconautics:block/bearing_axle", "x": 90 }
+  }
+}

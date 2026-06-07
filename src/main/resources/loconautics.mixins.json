@@ -8,11 +8,12 @@
     "EntityNoContraptionCollisionMixin",
     "MovingInteractionBehaviourMixin",
     "StationBlockEntityAssembleMixin",
+    "StationBlockEntityAssembleControlsMixin",
+    "StationBlockEntityAccessor",
     "TrainDisassembleMixin"
   ],
   "client": [
     "client.AssemblyScreenMixin",
-    "client.StationBlockEntityAccessor",
     "client.ClientContraptionRenderMixin",
     "client.CarriageBogeyRenderMixin",
     "client.CarriageBogeyVisualMixin",

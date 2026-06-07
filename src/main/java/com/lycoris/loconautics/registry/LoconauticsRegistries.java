@@ -3,6 +3,8 @@ package com.lycoris.loconautics.registry;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerMenu;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.world.inventory.MenuType;
@@ -71,6 +73,29 @@ public final class LoconauticsRegistries {
             IMenuTypeExtension.create((id, inv, buf) ->
                     new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inv, buf)));
 
+    // ------------------------------------------------------------------ Bearing Axle
+
+    public static final DeferredHolder<Block, BearingAxleBlock> BEARING_AXLE =
+            BLOCKS.register("bearing_axle", () -> new BearingAxleBlock(
+                    BlockBehaviour.Properties.of()
+                            .mapColor(MapColor.METAL)
+                            .strength(3.5f)
+                            .sound(SoundType.NETHERITE_BLOCK)
+                            .requiresCorrectToolForDrops()
+            ));
+
+    public static final DeferredHolder<Item, BlockItem> BEARING_AXLE_ITEM =
+            ITEMS.register("bearing_axle", () ->
+                    new BlockItem(BEARING_AXLE.get(), new Item.Properties().stacksTo(64)));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<BearingAxleBlockEntity>>
+            BEARING_AXLE_BE = BLOCK_ENTITIES.register("bearing_axle", () ->
+            BlockEntityType.Builder
+                    .of((pos, state) -> new BearingAxleBlockEntity(
+                                    LoconauticsRegistries.BEARING_AXLE_BE.get(), pos, state),
+                            BEARING_AXLE.get())
+                    .build(null));
+
     public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
             LOCONAUTICS_TAB = CREATIVE_TABS.register("main", () ->
             net.minecraft.world.item.CreativeModeTab.builder()
@@ -78,6 +103,7 @@ public final class LoconauticsRegistries {
                     .icon(() -> new net.minecraft.world.item.ItemStack(ANALOG_CONTROLLER_ITEM.get()))
                     .displayItems((params, output) -> {
                         output.accept(ANALOG_CONTROLLER_ITEM.get());
+                        output.accept(BEARING_AXLE_ITEM.get());
                     })
                     .build());
 
