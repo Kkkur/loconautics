@@ -8,6 +8,7 @@
     "EntityNoContraptionCollisionMixin",
     "MovingInteractionBehaviourMixin",
     "StationBlockEntityAssembleMixin",
+    "StationBlockEntityAssembleControlsMixin",
     "StationBlockEntityAccessor",
     "TrainDisassembleMixin"
   ],
