@@ -238,6 +238,7 @@ public final class PhysicsTrainTickHandler {
         int count = Math.min(carriages.size(), tag.subLevelIds().size());
 
         double totalMass = 0.0;
+        boolean readAny = false;
         BearingAxleBlockEntity axle = null;
 
         for (int i = 0; i < count; i++) {
@@ -252,19 +253,29 @@ public final class PhysicsTrainTickHandler {
 
             if (!(container.getSubLevel(subLevelId) instanceof ServerSubLevel serverSub)) continue;
 
-            // buildMassTracker() does a fresh block scan of the sub-level bounds.
-            // getMassTracker() returns a baked snapshot from the last build — it does NOT
-            // update when blocks are added/removed. We must rebuild each poll cycle.
-            serverSub.buildMassTracker();
+            // Read Sable's LIVE mass tracker — do NOT call buildMassTracker() here.
+            // buildMassTracker() throws away the running MergedMassTracker and builds a brand new one.
+            // Sable already builds it once when the body joins the pipeline (RapierPhysicsPipeline) and
+            // refreshes it non-destructively every physics tick (SubLevelPhysicsSystem.updateMergedMassData).
+            // Rebuilding it mid-simulation resets the inertia tensor and corrupts the Rapier body, which
+            // makes the train "explode". A physics train's block composition is fixed after assembly, so its
+            // mass is constant — we just read the value Sable maintains. getMassTracker() can be null for the
+            // first ticks after assembly (before Sable's first build); then we simply skip this cycle.
             MassData tracker = serverSub.getMassTracker();
-            if (tracker != null) totalMass += tracker.getMass();
+            if (tracker != null) {
+                totalMass += tracker.getMass();
+                readAny = true;
+            }
 
             if (axle == null) {
                 axle = findBearingAxleInSubLevel(serverSub);
             }
         }
 
-        if (axle != null) {
+        // Push only when we actually read a tracker this cycle (don't clobber a good value with 0 before
+        // Sable has built its tracker) and only when the mass changed (setTrainMass marks the BE dirty and
+        // flags the network — avoid doing that on every poll once the mass has settled).
+        if (axle != null && readAny && totalMass != axle.getTrainMass()) {
             axle.setTrainMass(totalMass);
         }
     }
