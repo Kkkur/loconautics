@@ -7,6 +7,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.lycoris.loconautics.client.screen.SableModeButton;
+import com.lycoris.loconautics.mixin.StationBlockEntityAccessor;
 
 import com.simibubi.create.content.trains.entity.Train;
 import com.simibubi.create.content.trains.station.AbstractStationScreen;

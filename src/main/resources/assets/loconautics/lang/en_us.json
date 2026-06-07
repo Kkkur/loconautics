@@ -12,7 +12,7 @@
   "itemGroup.loconautics.main": "Loconautics",
 
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
-  "loconautics.assembly.missing_bearing_axle": "Train must contain a Bearing Axle to assemble as a physics train.",
+  "loconautics.assembly.missing_bearing_axle": "No Bearing Axle found in the assembly area",
 
   "loconautics.configuration.title": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
