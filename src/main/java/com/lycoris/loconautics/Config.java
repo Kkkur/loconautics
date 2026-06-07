@@ -54,6 +54,11 @@ public final class Config {
                     "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
             .defineInRange("transmissionSuImpact", 4.0, 0.0, 100.0);
 
+    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_CAPACITY = BUILDER
+            .comment("Stress Units capacity provided by the Transmission to its output network.",
+                    "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
+            .defineInRange("transmissionSuCapacity", 262144.0, 0.0, Double.MAX_VALUE);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {
