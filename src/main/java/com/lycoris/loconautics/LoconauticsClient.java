@@ -5,6 +5,7 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHa
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
+import com.lycoris.loconautics.content.transmission.TransmissionRenderer;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;

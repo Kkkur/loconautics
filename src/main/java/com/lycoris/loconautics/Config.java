@@ -47,6 +47,13 @@ public final class Config {
         BUILDER.pop();
     }
 
+    // ------------------------------------------------------------------ Transmission
+
+    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT = BUILDER
+            .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
+                    "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
+            .defineInRange("transmissionSuImpact", 4.0, 0.0, 100.0);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

@@ -1,6 +1,7 @@
 {
   "block.loconautics.analog_controller": "Analog Controller",
   "block.loconautics.bearing_axle": "Bearing Axle",
+  "block.loconautics.transmission": "Transmission",
   "block.loconautics.analog_controller.start": "Controlling Analog Controller",
   "block.loconautics.analog_controller.stop": "Released Analog Controller",
   "block.loconautics.analog_controller.gui.slot1": "Freq 1",
