@@ -5,14 +5,20 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 
 import com.simibubi.create.content.trains.station.StationBlockEntity;
 
+import net.minecraft.core.Direction;
+
 /**
- * Exposes Create's package-private {@code StationBlockEntity.bogeyCount} so the assembly screen
- * mixin can grey out our button exactly like the vanilla assemble button (active only when there
- * are bogeys to assemble).
+ * Exposes Create's package-private fields on StationBlockEntity.
  */
 @Mixin(StationBlockEntity.class)
 public interface StationBlockEntityAccessor {
 
     @Accessor("bogeyCount")
     int loconautics$getBogeyCount();
+
+    @Accessor("assemblyDirection")
+    Direction loconautics$getAssemblyDirection();
+
+    @Accessor("assemblyLength")
+    int loconautics$getAssemblyLength();
 }

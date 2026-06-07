@@ -24,6 +24,29 @@ public final class Config {
             .comment("Render debug overlays for physics trains (sub-level bounds, pose markers).")
             .define("debugRender", false);
 
+    // -------------------------------------------------------------------------
+    // Bearing Axle
+    // -------------------------------------------------------------------------
+
+    public static final ModConfigSpec.DoubleValue MASS_DIVISOR;
+    public static final ModConfigSpec.DoubleValue BASE_IMPACT;
+
+    static {
+        BUILDER.push("bearing_axle");
+
+        MASS_DIVISOR = BUILDER
+                .comment("Divides total train mass (kg) to produce the stress impact per RPM.",
+                        "Lower values = more stress per kg. Default: 50.0 (100 kg train → 2.0 impact).")
+                .defineInRange("massDivisor", 50.0, 1.0, 1000.0);
+
+        BASE_IMPACT = BUILDER
+                .comment("Minimum stress impact regardless of train mass.",
+                        "Ensures the Bearing Axle always costs something even on an empty train.")
+                .defineInRange("baseImpact", 1.0, 0.0, 100.0);
+
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

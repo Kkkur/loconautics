@@ -12,11 +12,25 @@
   "itemGroup.loconautics.main": "Loconautics",
 
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
+  "loconautics.assembly.missing_bearing_axle": "Train must contain a Bearing Axle to assemble as a physics train.",
 
   "loconautics.configuration.title": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Config",
   "loconautics.configuration.enableSableMode": "Enable Sable Physics Mode",
   "loconautics.configuration.physicsTrainMaxSpeed": "Physics Train Max Speed",
-  "loconautics.configuration.debugRender": "Debug Render"
+  "loconautics.configuration.debugRender": "Debug Render",
+
+  "loconautics.configuration.bearing_axle.massDivisor": "Mass Divisor",
+  "loconautics.configuration.bearing_axle.massDivisor.tooltip": "Divides total train mass (kg) to get stress impact per RPM. Lower = more stress per kg.",
+  "loconautics.configuration.bearing_axle.baseImpact": "Base Stress Impact",
+  "loconautics.configuration.bearing_axle.baseImpact.tooltip": "Minimum stress impact even on an empty train.",
+
+  "loconautics.gui.goggles.bearing_axle_stats": "Bearing Axle",
+  "loconautics.gui.goggles.train_weight": "Train Weight",
+  "loconautics.gui.goggles.unit_kg": "kg",
+  "loconautics.gui.goggles.current_su": "Stress Impact",
+  "loconautics.gui.goggles.unit_su": "su",
+  "loconautics.gui.goggles.rpm": "Speed",
+  "loconautics.gui.goggles.unit_rpm": "RPM"
 }
