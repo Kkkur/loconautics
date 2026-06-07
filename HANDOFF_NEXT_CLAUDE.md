@@ -8,6 +8,24 @@
 
 ---
 
+## 0b. ACTUALIZACIÓN 2026-06-07 (léeme primero)
+Cambios de esta sesión (todo pusheado a origin):
+- **Gate A/B RESUELTO: el usuario eligió la Opción B (tren 100% propio)**, NO reusar el `Train` de Create.
+  Solo se reutiliza el grafo de vías (`TrackGraph`/`TravellingPoint`). Fases 3-4 implican reimplementar
+  navegación/señales/acoplamiento (ver §7).
+- **Fase 1 + 2a construidas** (rama all-sable, commit `c32c869`; sin confirmar in-game aún):
+  `allsable/RailFollower` (1 `TravellingPoint` recorriendo la vía, rebota en topes) y `allsable/RailCarriage`
+  (2 bogeys rígidos → pose completa vía `RailPose`). Comandos en `allsable/RailDebug`:
+  `/loconautics railtest [speed]` (Fase 1), `/loconautics railtest2 [spacing] [speed]` (Fase 2a: dibuja
+  bogeys + centro + flecha de orientación), `/loconautics railtest clear`. Marcadores de partículas, sin
+  sub-level/entidad todavía. Jar desplegado en `Skybound SMP/mods/` (md5 `6d3636…`, solo Fase 1/2a).
+- **`feature/analog-controller` (bloque analog controller de Lycoris/MDLOP: GUI/red/modelos) integrado**:
+  mergeado en `master` (fast-forward → `4da2b29`) y en `feature/all-sable-physics-train` (merge `61c0afa`,
+  archivos disjuntos, compila). Se hizo con **merge directo + push** (no PRs: `gh` no instalado, sin token;
+  además el repo NUNCA ha usado PRs — siempre commit directo). La rama all-sable fusionada compila.
+- **Siguiente:** confirmar Fase 1/2a in-game; luego Fase 2b (mover un sub-level real con la pose), que necesita
+  integración con el ensamblaje (Fase 3).
+
 ## 0. Qué es el proyecto (recordatorio de 1 párrafo)
 Addon NeoForge 1.21.1 que convierte trenes de Create en **sub-levels físicos de Sable** que siguen las vías
 de Create. Autores: Lycoris (usuario) + MDLOP. Repo `github.com:Kkkur/loconautics`. Carpeta local
@@ -28,10 +46,11 @@ de Create. Autores: Lycoris (usuario) + MDLOP. Repo `github.com:Kkkur/loconautic
 ## 2. ESTADO DE RAMAS (todo en origin)
 | Rama | Commit | Qué es |
 |---|---|---|
-| `master` | `e7696e5` | **Fix de colisión, CONFIRMADO bueno.** Base estable. |
-| `backup/collision-fix-stable` | `e7696e5` | Copia de seguridad del estado bueno. |
+| `master` | `4da2b29` | Fix de colisión **+ analog-controller** (mergeado 2026-06-07). Base estable. |
+| `backup/collision-fix-stable` | `e7696e5` | Copia de seguridad del fix de colisión puro (pre-analog). |
 | `feature/sable-train-controls` | `2430d2a` | Enfoque **híbrido** de controles (WIP, medio-funciona — ver §4). |
-| `feature/all-sable-physics-train` | `6b0e58b` | **AQUÍ AHORA.** Pivote a "todo Sable" (ver §7). Parte de master. |
+| `feature/analog-controller` | `4da2b29` | Bloque "analog controller" (GUI/red/modelos) de Lycoris/MDLOP. Ya mergeado en master y all-sable. |
+| `feature/all-sable-physics-train` | `61c0afa` | **AQUÍ AHORA.** Pivote "todo Sable" (§7) + Fase 1/2a + analog-controller. |
 | `new-main` | — | preexistente del compa. |
 
 ---
@@ -180,11 +199,14 @@ physics object que sigue las vías**, eliminando la `CarriageContraptionEntity` 
 conflictos). Hacerlo AHORA como base, antes de añadir más cosas (luego costaría reconstruir). En rama aparte
 para no perder nada.
 
-**Lo ya hecho en esta rama (commit `6b0e58b`):**
-- **`DESIGN_all_sable_train.md`** — diseño completo. LÉELO.
-- **`allsable/RailPose.java`** — núcleo: calcula la pose del vagón (pos + orientación) desde dos
-  `TravellingPoint` (bogeys), espejando `Carriage.alignEntity`. **Compila contra la API de vías de Create →
-  viabilidad validada.**
+**Lo ya hecho en esta rama:**
+- **`DESIGN_all_sable_train.md`** (commit `6b0e58b`) — diseño completo. LÉELO (actualizado con el gate B y el
+  estado de fases).
+- **`allsable/RailPose.java`** (`6b0e58b`) — núcleo: pose del vagón (pos + orientación) desde dos
+  `TravellingPoint`, espejando `Carriage.alignEntity`. Compila → viabilidad validada.
+- **`allsable/RailFollower.java` + `RailCarriage.java` + `RailDebug.java`** (commit `c32c869`, 2026-06-07) —
+  **Fase 1 + 2a** (ver §0b). Recorren la vía y derivan la pose; comandos `/loconautics railtest[2]`. Sin
+  confirmar in-game todavía.
 
 **Hallazgo de viabilidad (clave):** la matemática de seguir vías está en utilidades de Create **independientes
 de la contraption**: `TravellingPoint.travel(graph, distancia, ITrackSelector, …)` avanza por el carril
@@ -193,11 +215,12 @@ pos, dir, axis)` localiza un punto en el grafo. `TrackEdge.getPosition(graph,t)`
 pose+banking. **Reutilizamos el motor de raíles de Create; solo cambia la REPRESENTACIÓN (contraption →
 sub-level físico).** ("Todo Sable" NO es reinventar las vías — siguen siendo de Create.)
 
-**DECISIÓN PENDIENTE (gate) — preguntada al usuario, SIN responder aún:**
-- **Opción A (recomendada):** reusar `Train`/`Carriage`/navegación/señales/acoplamiento de Create y SOLO
-  cambiar la representación a sub-level de Sable (sin la entidad de contraption). Mucho menos trabajo.
-- **Opción B:** tren 100% propio sobre `TravellingPoint` (independencia total, pero reimplementar
-  navegación/señales/estaciones/acoplamiento = enorme).
+**DECISIÓN (gate) — RESUELTA 2026-06-07: el usuario eligió la Opción B.**
+- **Opción B (ELEGIDA):** tren 100% propio sobre `TravellingPoint` (independencia total de Create; hay que
+  reimplementar navegación/señales/estaciones/acoplamiento = enorme, en Fases 3-4). Solo se reutiliza el
+  grafo de vías (`TrackGraph`/`TrackEdge`), NO el `Train` de Create.
+- (Descartada) Opción A: reusar `Train`/`Carriage`/navegación de Create cambiando solo la representación.
+  Era la recomendada por menos trabajo, pero el usuario priorizó la independencia total.
 
 **Plan por fases (en el DESIGN):** Fase 0 (doc+esqueleto, HECHO) → **Fase 1 = mover un cuerpo de debug por
 una vía a velocidad constante** (recta+curva; **igual en A y B**, así que se puede construir ya) → Fase 2
@@ -209,8 +232,9 @@ ensamblaje, ocultar/no-spawnear la contraption) → Fase 4 (controles + multi-va
 suave (visto en `RapierPhysicsPipeline.updateContraptionPoses`). Alternativa de arranque: el pin del physics
 tick que YA funciona (master), alimentado por nuestros `TravellingPoint`.
 
-**SIGUIENTE ACCIÓN sugerida:** preguntar/confirmar A vs B; mientras, construir **Fase 1** (es independiente de
-A/B). Yo (Claude anterior) iba a construir la Fase 1 cuando se acabó el contexto.
+**SIGUIENTE ACCIÓN sugerida:** confirmar in-game las Fases 1/2a (`/loconautics railtest` y `railtest2`); si la
+pose va bien, atacar la **Fase 2b** (mover un sub-level real con la pose), que requiere integración con el
+ensamblaje (Fase 3). Recordar: Opción B → reimplementar navegación/acoplamiento, sin apoyarse en el `Train`.
 
 ---
 
@@ -241,7 +265,10 @@ Extraer RARs: `/c/Program Files/WinRAR/UnRAR.exe x`.
 ---
 ## 10. TL;DR para arrancar rápido
 1. Colisión: ✅ resuelta (master). 2. Controles híbridos: 🟡 casi, en su rama, bloqueados por
-`canInteractWithBlock` (bypass sin confirmar). 3. **Decisión tomada: PIVOTAR a "todo Sable"** (rama
-`feature/all-sable-physics-train`); el tren será sub-level físico movido por `TravellingPoint` de Create, sin
-`CarriageContraptionEntity`. 4. **Gate pendiente: Opción A (reusar Train de Create) vs B (todo propio)** —
-recomendé A. 5. Siguiente: construir **Fase 1** (cuerpo de debug recorriendo una vía; igual en A/B).
+`canInteractWithBlock` (bypass sin confirmar). 3. **Pivote a "todo Sable"** (rama
+`feature/all-sable-physics-train`): tren = sub-level físico movido por `TravellingPoint` de Create, sin
+`CarriageContraptionEntity`. 4. **Gate RESUELTO: Opción B (tren 100% propio)** — solo se reusa el grafo de
+vías, no el `Train` de Create. 5. **Fase 1 + 2a construidas** (`allsable/RailFollower`/`RailCarriage`/
+`RailDebug`, comandos `/loconautics railtest[2]`) — sin confirmar in-game. 6. **analog-controller mergeado**
+en master (`4da2b29`) y all-sable (`61c0afa`). 7. Siguiente: confirmar Fase 1/2a in-game → Fase 2b (mover
+sub-level real con la pose). Ver §0b.
