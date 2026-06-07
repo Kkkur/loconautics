@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "loconautics:block/bearing_axle" },
+    "facing=south": { "model": "loconautics:block/bearing_axle", "y": 180 },
+    "facing=east":  { "model": "loconautics:block/bearing_axle", "y": 90 },
+    "facing=west":  { "model": "loconautics:block/bearing_axle", "y": 270 }
+  }
+}
