@@ -1,6 +1,6 @@
 package com.lycoris.loconautics.content.bearingaxle;
 
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -8,7 +8,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
-public class BearingAxleBlockEntity extends SmartBlockEntity {
+public class BearingAxleBlockEntity extends KineticBlockEntity {
 
     public BearingAxleBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -16,6 +16,6 @@ public class BearingAxleBlockEntity extends SmartBlockEntity {
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-        // Kinetic behaviours wired in Phase 2
+        // Mass-based stress wired in Phase 4
     }
 }
