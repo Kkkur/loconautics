@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.content.bearingaxle;
 
+import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.foundation.LoconauticsLang;
 import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -17,19 +18,20 @@ import java.util.List;
 public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveGoggleInformation {
 
     // ---------------------------------------------------------------------------
-    // Mass field — physics friend hooks in here via setTrainMass()
+    // Mass field — set by the physics pipeline via setTrainMass()
     // ---------------------------------------------------------------------------
 
     private double totalMassKg = 0.0;
 
-    // Ticks between stress recalculations (20 ticks = 1 second)
+    // Ticks between stress recalculations (20 ticks = 1 second).
+    // Catches runtime mass changes (blocks added/removed from a live train).
     private static final int STRESS_UPDATE_INTERVAL = 20;
     private int stressUpdateTicker = 0;
 
     /**
-     * Called by the physics assembly pipeline (Phase 5) after train mass is known,
+     * Called by the physics assembly pipeline after train mass is known,
      * and whenever mass changes at runtime (blocks added/removed from the train).
-     * Immediately marks the network dirty so stress updates next tick.
+     * Immediately marks the kinetic network dirty so stress updates next tick.
      */
     public void setTrainMass(double massKg) {
         this.totalMassKg = massKg;
@@ -43,20 +45,23 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     }
 
     // ---------------------------------------------------------------------------
-    // Stress — formula left open for Phase 5 / config wiring
+    // Stress — mass-based formula using server config values
     // ---------------------------------------------------------------------------
 
     /**
      * Stress impact at 1 RPM. Full SU = impact * abs(speed).
      *
-     * TODO Phase 5: replace placeholder with mass-based formula:
-     *   return (float) Math.max(Config.BASE_IMPACT.get(), totalMassKg / Config.MASS_DIVISOR.get());
+     * Formula: max(BASE_IMPACT, totalMassKg / MASS_DIVISOR)
+     *   BASE_IMPACT  — minimum SU floor even when mass is zero (default 1.0 SU)
+     *   MASS_DIVISOR — how many kg per 1 SU of impact (default 50 kg/SU)
+     *
+     * Example: 500 kg train, defaults → max(1.0, 500/50) = 10 SU at 1 RPM.
      */
     @Override
     public float calculateStressApplied() {
-        // Placeholder: flat 4.0 SU impact (matches BlockStressValues registration in Loconautics.java)
-        // Replace this body in Phase 5 once Config and mass wiring are done.
-        this.lastStressApplied = 4.0f;
+        double divisor = Config.MASS_DIVISOR.get();
+        double base    = Config.BASE_IMPACT.get();
+        this.lastStressApplied = (float) Math.max(base, totalMassKg / divisor);
         return this.lastStressApplied;
     }
 

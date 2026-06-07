@@ -3,7 +3,6 @@ package com.lycoris.loconautics;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import com.lycoris.loconautics.server.tick.PhysicsTrainTickHandler;
-import com.simibubi.create.api.stress.BlockStressValues;
 
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -36,13 +35,8 @@ public final class Loconautics {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
         PhysicsTrainTickHandler.register();
 
-        // Register a placeholder stress impact for the Bearing Axle.
-        // This will be replaced by mass-based dynamic stress in Phase 4.
-        event.enqueueWork(() ->
-                BlockStressValues.IMPACTS.register(
-                        LoconauticsRegistries.BEARING_AXLE.get(),
-                        () -> 4.0
-                )
-        );
+        // NOTE: BlockStressValues.IMPACTS placeholder for the Bearing Axle was removed in Phase 5.
+        // Stress is now computed dynamically in BearingAxleBlockEntity.calculateStressApplied()
+        // using the train mass set by PhysicsAssemblyOrchestrator after assembly.
     }
 }

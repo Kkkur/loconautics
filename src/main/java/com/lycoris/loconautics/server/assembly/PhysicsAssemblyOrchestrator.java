@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
+import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.core.PhysicsTrainTag;
 import com.lycoris.loconautics.core.PhysicsTrainTag.CarriageEntry;
@@ -23,10 +24,16 @@ import com.simibubi.create.content.trains.station.StationBlockEntity;
 import com.simibubi.create.content.trains.track.TrackTargetingBehaviour;
 import com.simibubi.create.foundation.utility.CreateLang;
 
+import dev.ryanhcode.sable.api.physics.mass.MassData;
+import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.sublevel.ServerSubLevel;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 public final class PhysicsAssemblyOrchestrator {
 
@@ -38,9 +45,6 @@ public final class PhysicsAssemblyOrchestrator {
             return;
         }
 
-        // Gate: scan the assembly area for a Bearing Axle BEFORE touching station.assemble().
-        // On failure we set the station's lastException so the error appears in the
-        // AssemblyScreen UI exactly like Create's own assembly errors — no chat message needed.
         if (!hasBearingAxleInAssemblyArea(player.serverLevel(), station)) {
             StationBlockEntityAccessor accessor = (StationBlockEntityAccessor) station;
             accessor.loconautics$setLastException(
@@ -49,7 +53,6 @@ public final class PhysicsAssemblyOrchestrator {
                     )
             );
             accessor.loconautics$setFailedCarriageIndex(-1);
-            // Force a block-entity update so the client sees the new lastException immediately.
             station.setChanged();
             station.sendData();
             LoconauticsConstants.LOGGER.info(
@@ -95,6 +98,90 @@ public final class PhysicsAssemblyOrchestrator {
                 newTrainId,
                 entries.size()
         );
+
+        // Phase 5: wire mass from Sable sub-levels into the Bearing Axle.
+        wireMassToAxle(level, entries);
+    }
+
+    /**
+     * After assembly, sum the mass of every carriage's sub-level and push the
+     * total into the BearingAxleBlockEntity so it can compute correct stress.
+     *
+     * <p>The blocks are already inside Sable sub-levels by the time this runs —
+     * they are no longer in the main world — so we scan each sub-level's own
+     * ServerLevel to find the axle, not the main world.
+     *
+     * <p>If a sub-level's MassTracker is null (buildMassTracker hasn't run yet),
+     * that carriage contributes 0 kg and a warning is logged. The periodic
+     * stress re-tick in BearingAxleBlockEntity (every 20 ticks) will pick up
+     * the correct mass once the tracker becomes available.
+     */
+    private static void wireMassToAxle(ServerLevel level, List<CarriageEntry> entries) {
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            LoconauticsConstants.LOGGER.warn("wireMassToAxle: Sable container not found on level");
+            return;
+        }
+
+        double totalMassKg = 0.0;
+        BearingAxleBlockEntity axle = null;
+
+        for (CarriageEntry entry : entries) {
+            if (!(container.getSubLevel(entry.subLevelId()) instanceof ServerSubLevel serverSub)) {
+                LoconauticsConstants.LOGGER.warn(
+                        "wireMassToAxle: sub-level {} not found", entry.subLevelId());
+                continue;
+            }
+
+            // Sum mass — null-check: buildMassTracker() may not have run yet.
+            MassData massTracker = serverSub.getMassTracker();
+            if (massTracker == null) {
+                LoconauticsConstants.LOGGER.warn(
+                        "wireMassToAxle: MassTracker not ready for sub-level {}, contributing 0 kg",
+                        entry.subLevelId());
+            } else {
+                totalMassKg += massTracker.getMass();
+            }
+
+            // Scan the sub-level's own ServerLevel for the axle — blocks live there after assembly.
+            if (axle == null) {
+                axle = findBearingAxleInSubLevel(serverSub);
+            }
+        }
+
+        if (axle == null) {
+            LoconauticsConstants.LOGGER.warn(
+                    "wireMassToAxle: could not find BearingAxleBlockEntity in assembled train");
+            return;
+        }
+
+        axle.setTrainMass(totalMassKg);
+        LoconauticsConstants.LOGGER.info(
+                "wireMassToAxle: set train mass to {}kg on axle at {}",
+                totalMassKg, axle.getBlockPos());
+    }
+
+    /**
+     * Scans the sub-level's own ServerLevel for a {@link BearingAxleBlockEntity}.
+     * After assembly, carriage blocks live inside the Sable sub-level's level,
+     * not in the main world.
+     */
+    @Nullable
+    private static BearingAxleBlockEntity findBearingAxleInSubLevel(ServerSubLevel serverSub) {
+        var bounds = serverSub.getPlot().getBoundingBox();
+        ServerLevel subLevel = serverSub.getLevel();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (!(subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock)) continue;
+                    BlockEntity be = subLevel.getBlockEntity(pos);
+                    if (be instanceof BearingAxleBlockEntity axleBlockEntity) return axleBlockEntity;
+                }
+            }
+        }
+        return null;
     }
 
     @Nullable
@@ -105,38 +192,19 @@ public final class PhysicsAssemblyOrchestrator {
         return null;
     }
 
-    /**
-     * Scans the station's assembly area for a Bearing Axle block.
-     *
-     * <p>Create's assembly highlight (orange overlay) is drawn starting from the track block
-     * the station is targeting — {@code edgePoint.getGlobalPosition()} — not from the station
-     * block itself. Using the station's own {@link StationBlockEntity#getBlockPos()} as the
-     * origin means the AABB could miss the track entirely when the station is placed off to
-     * the side. This method uses the same origin Create uses so the scan matches the visual.
-     *
-     * <p>The scan is expanded ±2 blocks perpendicular to the assembly direction (to catch
-     * blocks placed slightly off the track centreline) and +4 blocks above (to handle tall
-     * builds). The station block itself is included in the expansion so it is never missed
-     * even when the station IS the origin.
-     */
     private static boolean hasBearingAxleInAssemblyArea(ServerLevel level, StationBlockEntity station) {
         StationBlockEntityAccessor accessor = (StationBlockEntityAccessor) station;
         Direction assemblyDirection = accessor.loconautics$getAssemblyDirection();
         int assemblyLength = accessor.loconautics$getAssemblyLength();
 
-        // If the station is not in assembly mode or hasn't refreshed yet, allow through —
-        // Create will handle the non-assembly-mode case gracefully.
         if (assemblyDirection == null || assemblyLength == 0) {
             return true;
         }
 
-        // Use the track block position as origin, matching the Create orange highlight.
         TrackTargetingBehaviour<?> edgePoint = accessor.loconautics$getEdgePoint();
         BlockPos trackOrigin = edgePoint.getGlobalPosition();
-
         BlockPos end = trackOrigin.relative(assemblyDirection, assemblyLength);
 
-        // Expand ±2 perpendicular to catch off-centre placements; +4 above for tall builds.
         BlockPos min = new BlockPos(
                 Math.min(trackOrigin.getX(), end.getX()) - 2,
                 Math.min(trackOrigin.getY(), end.getY()) - 2,
