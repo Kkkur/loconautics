@@ -3,6 +3,8 @@ package com.lycoris.loconautics.registry;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerMenu;
+import com.lycoris.loconautics.content.transmission.TransmissionBlock;
+import com.lycoris.loconautics.content.transmission.TransmissionBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.world.inventory.MenuType;
@@ -71,6 +73,32 @@ public final class LoconauticsRegistries {
             IMenuTypeExtension.create((id, inv, buf) ->
                     new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inv, buf)));
 
+    // ------------------------------------------------------------------ Transmission
+
+    public static final DeferredHolder<Block, TransmissionBlock> TRANSMISSION =
+            BLOCKS.register("transmission", () -> new TransmissionBlock(
+                    BlockBehaviour.Properties.of()
+                            .mapColor(MapColor.METAL)
+                            .strength(3.5f)
+                            .sound(SoundType.NETHERITE_BLOCK)
+                            .requiresCorrectToolForDrops()
+            ));
+
+    public static final DeferredHolder<Item, BlockItem> TRANSMISSION_ITEM =
+            ITEMS.register("transmission", () ->
+                    new BlockItem(TRANSMISSION.get(),
+                            new Item.Properties().stacksTo(64)));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<TransmissionBlockEntity>>
+            TRANSMISSION_BE = BLOCK_ENTITIES.register("transmission", () ->
+            BlockEntityType.Builder
+                    .of((pos, state) -> new TransmissionBlockEntity(
+                                    LoconauticsRegistries.TRANSMISSION_BE.get(), pos, state),
+                            TRANSMISSION.get())
+                    .build(null));
+
+    // ------------------------------------------------------------------ Creative tab
+
     public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
             LOCONAUTICS_TAB = CREATIVE_TABS.register("main", () ->
             net.minecraft.world.item.CreativeModeTab.builder()
@@ -78,6 +106,7 @@ public final class LoconauticsRegistries {
                     .icon(() -> new net.minecraft.world.item.ItemStack(ANALOG_CONTROLLER_ITEM.get()))
                     .displayItems((params, output) -> {
                         output.accept(ANALOG_CONTROLLER_ITEM.get());
+                        output.accept(TRANSMISSION_ITEM.get());
                     })
                     .build());
 

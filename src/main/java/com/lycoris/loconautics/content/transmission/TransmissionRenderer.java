@@ -3,9 +3,9 @@ package com.lycoris.loconautics.content.transmission;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
-import com.simibubi.create.foundation.render.CachedBuffers;
-import com.simibubi.create.foundation.render.SuperByteBuffer;
-import net.createmod.catnip.render.CatnipClient;
+import net.createmod.catnip.render.CachedBuffers;
+import net.createmod.catnip.render.SuperByteBuffer;
+import net.createmod.catnip.animation.AnimationTickHolder;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
@@ -41,7 +41,7 @@ public class TransmissionRenderer extends KineticBlockEntityRenderer<Transmissio
         // the blockstate and model are axis-symmetric so it doesn't matter visually.
         Direction outputFace = Direction.fromAxisAndDirection(axis, Direction.AxisDirection.POSITIVE);
 
-        float time = CatnipClient.getGameTime() + partialTicks;
+        float time = AnimationTickHolder.getTicks() + partialTicks;
 
         for (Direction dir : Direction.values()) {
             if (dir.getAxis() != axis) continue;

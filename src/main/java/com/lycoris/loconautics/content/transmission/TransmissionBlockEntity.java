@@ -66,7 +66,7 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
      */
     @Override
     public float calculateStressApplied() {
-        return (float) Config.TRANSMISSION_SU_IMPACT.get();
+        return Config.TRANSMISSION_SU_IMPACT.get().floatValue();
     }
 
     // ------------------------------------------------------------------ API

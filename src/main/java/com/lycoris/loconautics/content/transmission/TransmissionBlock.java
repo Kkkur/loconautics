@@ -1,8 +1,8 @@
 package com.lycoris.loconautics.content.transmission;
 
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import com.mojang.serialization.MapCodec;
 import com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock;
+import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.context.BlockPlaceContext;
@@ -14,7 +14,6 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
-import org.jetbrains.annotations.Nullable;
 
 /**
  * Transmission block — a kinetic speed regulator driven by redstone.
@@ -27,10 +26,7 @@ import org.jetbrains.annotations.Nullable;
  *   1. Detects redstone neighbour changes and forwards the signal to the BE.
  *   2. Keeps STAGE in sync for the renderer/blockstate variants.
  */
-public class TransmissionBlock extends RotatedPillarKineticBlock {
-
-    public static final MapCodec<TransmissionBlock> CODEC =
-            TransmissionBlock.simpleCodec(TransmissionBlock::new);
+public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<TransmissionBlockEntity> {
 
     /** Visual stage: 0 = off, 1–5 = power bands 1-3 / 4-6 / 7-9 / 10-12 / 13-15 */
     public static final IntegerProperty STAGE = IntegerProperty.create("stage", 0, 5);
@@ -41,13 +37,6 @@ public class TransmissionBlock extends RotatedPillarKineticBlock {
                 this.defaultBlockState()
                         .setValue(STAGE, 0)
         );
-    }
-
-    // ------------------------------------------------------------------ codec
-
-    @Override
-    protected MapCodec<? extends RotatedPillarKineticBlock> getCodec() {
-        return CODEC;
     }
 
     // ------------------------------------------------------------------ state
@@ -85,14 +74,13 @@ public class TransmissionBlock extends RotatedPillarKineticBlock {
     // ------------------------------------------------------------------ block entity
 
     @Override
-    public BlockEntityType<? extends TransmissionBlockEntity> getBlockEntityType() {
-        return LoconauticsRegistries.TRANSMISSION_BE.get();
+    public Class<TransmissionBlockEntity> getBlockEntityClass() {
+        return TransmissionBlockEntity.class;
     }
 
-    @Nullable
     @Override
-    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
-        return new TransmissionBlockEntity(LoconauticsRegistries.TRANSMISSION_BE.get(), pos, state);
+    public BlockEntityType<? extends TransmissionBlockEntity> getBlockEntityType() {
+        return LoconauticsRegistries.TRANSMISSION_BE.get();
     }
 
     // ------------------------------------------------------------------ helpers
