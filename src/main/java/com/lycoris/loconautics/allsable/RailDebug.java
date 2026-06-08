@@ -100,7 +100,17 @@ public final class RailDebug {
                                 .then(Commands.argument("speed", DoubleArgumentType.doubleArg(0.01, 5.0))
                                         .executes(ctx -> startCarriage(ctx.getSource().getPlayerOrException(),
                                                 DoubleArgumentType.getDouble(ctx, "spacing"),
-                                                DoubleArgumentType.getDouble(ctx, "speed")))))));
+                                                DoubleArgumentType.getDouble(ctx, "speed"))))))
+                .then(Commands.literal("sabletrain")
+                        .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(), DEFAULT_SPEED))
+                        .then(Commands.argument("speed", DoubleArgumentType.doubleArg(-5.0, 5.0))
+                                .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(),
+                                        DoubleArgumentType.getDouble(ctx, "speed"))))
+                        .then(Commands.literal("clear").executes(ctx -> {
+                            int n = SableTrainSpawner.clear();
+                            ctx.getSource().sendSuccess(() -> Component.literal("[sabletrain] cleared " + n + " train(s)"), false);
+                            return n;
+                        }))));
     }
 
     private static int startFollower(ServerPlayer player, double speed) throws CommandSyntaxException {

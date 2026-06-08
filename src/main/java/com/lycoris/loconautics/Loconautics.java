@@ -35,6 +35,10 @@ public final class Loconautics {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
         PhysicsTrainTickHandler.register();
 
+        // All-Sable (Option B) custom trains: drive sub-levels along Create rails with no Create Train.
+        // Sable's event platform accumulates listeners, so this coexists with the hybrid driver above.
+        com.lycoris.loconautics.allsable.SableTrainDriver.register();
+
         // NOTE: BlockStressValues.IMPACTS placeholder for the Bearing Axle was removed in Phase 5.
         // Stress is now computed dynamically in BearingAxleBlockEntity.calculateStressApplied()
         // using the train mass set by PhysicsAssemblyOrchestrator after assembly.
