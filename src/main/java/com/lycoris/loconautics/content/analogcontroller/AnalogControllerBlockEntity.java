@@ -409,8 +409,17 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     }
 
     private boolean playerInRange(Player player) {
+        if (level == null) {
+            return true;
+        }
         double range = player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE) * 2.0;
-        return player.blockPosition().distSqr(worldPosition) < range * range;
+        // The controller may live inside a Sable sub-level, where worldPosition is a far-away plot-grid
+        // coordinate — so a raw distance to the player always reads "out of range" and instantly dismounts
+        // them. Project the block's position OUT of the sub-level to its real-world location first. When the
+        // block isn't in a sub-level, projectOutOfSubLevel returns the point unchanged (normal behaviour).
+        net.minecraft.world.phys.Vec3 blockWorld = dev.ryanhcode.sable.Sable.HELPER.projectOutOfSubLevel(
+                level, net.minecraft.world.phys.Vec3.atCenterOf(worldPosition));
+        return blockWorld.distanceToSqr(player.position()) < range * range;
     }
 
     // ------------------------------------------------------------------ MenuProvider
