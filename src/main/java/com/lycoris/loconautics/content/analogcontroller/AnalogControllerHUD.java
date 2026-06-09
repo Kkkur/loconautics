@@ -60,7 +60,7 @@ public class AnalogControllerHUD {
         BlockEntity be = mc.level.getBlockEntity(pos);
         if (!(be instanceof AnalogControllerBlockEntity ace)) return;
 
-        int power    = ace.getCurrentPower();
+        int power    = ace.isBackwardActive() ? ace.getBackwardPower() : ace.getCurrentPower();
         boolean locked   = ace.isLocked();
         int maxPower = ace.getMaxPower();
 

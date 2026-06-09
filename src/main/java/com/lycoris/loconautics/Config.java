@@ -59,6 +59,14 @@ public final class Config {
                     "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
             .defineInRange("transmissionSuCapacity", 262144.0, 0.0, Double.MAX_VALUE);
 
+    // ------------------------------------------------------------------ Analog Controller
+
+    public static final ModConfigSpec.DoubleValue ANALOG_BACKWARD_RATIO = BUILDER
+            .comment("Fraction of maxPower sent on the forward frequency while in backward mode.",
+                    "The backward frequency always receives a binary ON signal (15) when reversing.",
+                    "Default: 0.30 → round(maxPower * 0.30) is sent on the forward frequency.")
+            .defineInRange("analogBackwardRatio", 0.30, 0.0, 1.0);
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

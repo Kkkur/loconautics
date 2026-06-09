@@ -73,7 +73,7 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
     // confirm at x=157, trash at x=175 (each icon is ~16px wide with 2px gap)
     private static final int BTN_Y         = 60;
     private static final int BTN_CONFIRM_X = 157;
-    private static final int BTN_TRASH_X   = 175;
+    private static final int BTN_TRASH_X   = 179;
 
     private IconButton confirmButton;
     private IconButton trashButton;
@@ -120,7 +120,22 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
 
     @Override
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
-        // Labels are baked into the texture
+        // Draw row labels using Minecraft's font renderer.
+        // Coordinates are panel-relative (leftPos/topPos already applied by the parent).
+        // The two grey rectangles span roughly x=23..86; centre x=54.
+        // Forward row centre y≈38, Backward row centre y≈68.
+        var font = minecraft.font;
+        int labelColor = 0xFFFFFFFF;
+
+        Component forward  = Component.literal("Forward");
+        Component backward = Component.literal("Backward");
+
+        int fwdW  = font.width(forward);
+        int bwdW  = font.width(backward);
+        int textH = font.lineHeight;
+
+        graphics.drawString(font, forward,  54 - fwdW / 2, 40 - textH / 2, labelColor, true);
+        graphics.drawString(font, backward, 54 - bwdW / 2, 69 - textH / 2, labelColor, true);
     }
 
     @Override

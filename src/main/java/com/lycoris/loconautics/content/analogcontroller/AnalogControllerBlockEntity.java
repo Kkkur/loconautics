@@ -112,6 +112,26 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     @Nullable
     private AnalogLinkEntry linkEntry;
 
+    /** Link entry for the backward (binary) frequency. Non-null only while backwardActive. */
+    @Nullable
+    private AnalogLinkEntry backLinkEntry;
+
+    /**
+     * True while the controller is in backward mode (currentPower == 0, S was pressed).
+     * While active, the backward frequency gets a binary ON signal and the forward
+     * frequency carries the backward speed (round(maxPower * backwardRatio)).
+     */
+    private boolean backwardActive = false;
+
+    /**
+     * The forward-frequency power level used while in backward mode.
+     * Decays toward 0 using the same DECAY_TICKS logic; backward mode exits when it hits 0.
+     */
+    private int backwardPower = 0;
+
+    /** The target backwardPower level — ramped up to 1 step per RAISE_TICKS on entry. */
+    private int backwardTargetPower = 0;
+
     // ------------------------------------------------------------------ constructor
 
     public AnalogControllerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
@@ -121,6 +141,17 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
         // No standard Create behaviours needed; we manage the network manually.
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level == null || level.isClientSide) return;
+        // Re-register the transmitter with Create's network and restore the block state.
+        // linkEntry is always null after deserialization (not persisted), so any non-zero
+        // power or active backward mode needs to be pushed back into the network.
+        updateNetwork(level);
+        updateBlockState(level, getBlockState());
     }
 
     // ------------------------------------------------------------------ tick
@@ -147,52 +178,127 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             }
         }
 
-        int previousPower = currentPower;
+        int previousPower    = currentPower;
+        boolean previousBack = backwardActive;
+        int previousBackPow  = backwardPower;
+        // ================================================================
+        // BACKWARD MODE
+        // ================================================================
+        if (backwardActive) {
+            // W + S held simultaneously → cancel each other, nothing changes
+            boolean bothHeld = raisingSignal && loweringSignal;
 
-        // --- apply held keys at rate-limited intervals ---
-        if (raisingSignal) {
-            // W is blocked if locked and already at or above the throttle cap
-            boolean blockedByLock = locked && currentPower >= maxPower;
-            if (!blockedByLock) {
+            if (!bothHeld) {
+                if (raisingSignal) {
+                    // W held while in backward → decelerate backward speed
+                    if (!locked) {
+                        raiseTimer--;
+                        if (raiseTimer <= 0) {
+                            raiseTimer = RAISE_TICKS;
+                            backwardPower = Math.max(backwardPower - 1, 0);
+                            // Cancel any pending ramp
+                            backwardTargetPower = 0;
+                        }
+                        decayTimer = DECAY_TICKS;
+                    }
+                } else if (!loweringSignal) {
+                    // No keys held → natural decay of backward speed (only while mounted)
+                    if (!locked && currentUser != null && backwardPower > 0) {
+                        decayTimer--;
+                        if (decayTimer <= 0) {
+                            decayTimer = DECAY_TICKS;
+                            backwardPower = Math.max(backwardPower - 1, 0);
+                        }
+                    }
+                }
+                // S held → no-op (stays in backward mode at current speed)
+            }
+
+            // Ramp up toward target (only while mounted, like acceleration)
+            if (currentUser != null && backwardPower < backwardTargetPower) {
                 raiseTimer--;
                 if (raiseTimer <= 0) {
                     raiseTimer = RAISE_TICKS;
-                    currentPower = Math.min(currentPower + 1, maxPower);
+                    backwardPower = Math.min(backwardPower + 1, backwardTargetPower);
+                    // Once we've reached the target, clear it so decay is never blocked
+                    if (backwardPower >= backwardTargetPower) {
+                        backwardTargetPower = 0;
+                    }
                 }
             }
-            decayTimer = DECAY_TICKS; // reset decay whenever player is actively pushing
-        }
 
-        if (loweringSignal) {
-            lowerTimer--;
-            if (lowerTimer <= 0) {
-                lowerTimer = LOWER_TICKS;
-                currentPower = Math.max(currentPower - 1, 0);
+            // Exit backward mode when backward speed reaches 0
+            if (backwardPower <= 0 && backwardTargetPower <= 0) {
+                backwardActive      = false;
+                backwardPower       = 0;
+                backwardTargetPower = 0;
             }
-            decayTimer = DECAY_TICKS;
-        }
 
-        // --- decay runs when not actively controlling ---
-        // When locked: decays down to maxPower (the throttle cap), not to 0.
-        // When unlocked: decays all the way to 0.
-        if (!raisingSignal && !loweringSignal) {
-            int decayFloor = locked ? maxPower : 0;
-            if (currentPower > decayFloor) {
-                decayTimer--;
-                if (decayTimer <= 0) {
-                    decayTimer = DECAY_TICKS;
-                    currentPower = Math.max(currentPower - 1, decayFloor);
+            // ================================================================
+            // FORWARD MODE
+            // ================================================================
+        } else {
+            // --- apply held keys at rate-limited intervals ---
+            if (raisingSignal) {
+                boolean blockedByLock = locked && currentPower >= maxPower;
+                if (!blockedByLock) {
+                    raiseTimer--;
+                    if (raiseTimer <= 0) {
+                        raiseTimer = RAISE_TICKS;
+                        currentPower = Math.min(currentPower + 1, maxPower);
+                    }
+                }
+                decayTimer = DECAY_TICKS;
+            }
+
+            if (loweringSignal) {
+                lowerTimer--;
+                if (lowerTimer <= 0) {
+                    lowerTimer = LOWER_TICKS;
+                    currentPower = Math.max(currentPower - 1, 0);
+                }
+                decayTimer = DECAY_TICKS;
+
+                // Enter backward mode when currentPower hits 0 while S is still held
+                if (currentPower == 0) {
+                    backwardActive      = true;
+                    backwardPower       = 0;
+                    backwardTargetPower = computeBackwardPower();
+                    raiseTimer          = RAISE_TICKS;
+                    decayTimer          = DECAY_TICKS;
+                }
+            }
+
+            // --- decay when idle ---
+            if (!raisingSignal && !loweringSignal) {
+                int decayFloor = locked ? maxPower : 0;
+                if (currentPower > decayFloor) {
+                    decayTimer--;
+                    if (decayTimer <= 0) {
+                        decayTimer = DECAY_TICKS;
+                        currentPower = Math.max(currentPower - 1, decayFloor);
+                    }
                 }
             }
         }
 
-        // --- propagate to network if changed ---
-        if (currentPower != previousPower) {
+        // --- propagate to network if anything changed ---
+        boolean changed = currentPower != previousPower
+                || backwardActive != previousBack
+                || backwardPower  != previousBackPow;
+
+        if (changed) {
             updateNetwork(level);
             updateBlockState(level, state);
             setChanged();
             sendData();
         }
+    }
+
+    /** Returns the forward-frequency power level to use while in backward mode. */
+    private int computeBackwardPower() {
+        double ratio = com.lycoris.loconautics.Config.ANALOG_BACKWARD_RATIO.get();
+        return (int) Math.round(maxPower * ratio);
     }
 
     // ------------------------------------------------------------------ user management
@@ -309,37 +415,68 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     private void updateNetwork(Level level) {
         if (level == null || level.isClientSide) return;
 
-        // Remove old entry if present
+        // --- Remove existing entries ---
         if (linkEntry != null) {
             Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, linkEntry);
-        }
-
-        // Don't transmit at power 0
-        if (currentPower <= 0) {
             linkEntry = null;
-            return;
+        }
+        if (backLinkEntry != null) {
+            Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, backLinkEntry);
+            backLinkEntry = null;
         }
 
-        RedstoneLinkNetworkHandler.Frequency first =
+        RedstoneLinkNetworkHandler.Frequency fwdFirst =
                 RedstoneLinkNetworkHandler.Frequency.of(frequencyFirst);
-        RedstoneLinkNetworkHandler.Frequency second =
+        RedstoneLinkNetworkHandler.Frequency fwdSecond =
                 RedstoneLinkNetworkHandler.Frequency.of(frequencySecond);
 
-        // Both slots empty → no frequency configured, don't transmit
-        if (first == RedstoneLinkNetworkHandler.Frequency.EMPTY
-                && second == RedstoneLinkNetworkHandler.Frequency.EMPTY) {
-            linkEntry = null;
-            return;
-        }
+        boolean hasFwdFreq = fwdFirst  != RedstoneLinkNetworkHandler.Frequency.EMPTY
+                || fwdSecond != RedstoneLinkNetworkHandler.Frequency.EMPTY;
 
-        linkEntry = new AnalogLinkEntry(worldPosition, Couple.create(first, second), currentPower);
-        Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, linkEntry);
+        if (backwardActive) {
+            // Forward frequency → backward speed signal
+            if (hasFwdFreq && backwardPower > 0) {
+                linkEntry = new AnalogLinkEntry(
+                        worldPosition,
+                        Couple.create(fwdFirst, fwdSecond),
+                        backwardPower);
+                Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, linkEntry);
+            }
+
+            // Backward frequency → binary ON (15)
+            RedstoneLinkNetworkHandler.Frequency backFirst =
+                    RedstoneLinkNetworkHandler.Frequency.of(frequencyBackFirst);
+            RedstoneLinkNetworkHandler.Frequency backSecond =
+                    RedstoneLinkNetworkHandler.Frequency.of(frequencyBackSecond);
+
+            boolean hasBackFreq = backFirst  != RedstoneLinkNetworkHandler.Frequency.EMPTY
+                    || backSecond != RedstoneLinkNetworkHandler.Frequency.EMPTY;
+
+            if (hasBackFreq) {
+                backLinkEntry = new AnalogLinkEntry(
+                        worldPosition,
+                        Couple.create(backFirst, backSecond),
+                        15);
+                Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, backLinkEntry);
+            }
+
+        } else {
+            // Normal forward mode
+            if (hasFwdFreq && currentPower > 0) {
+                linkEntry = new AnalogLinkEntry(
+                        worldPosition,
+                        Couple.create(fwdFirst, fwdSecond),
+                        currentPower);
+                Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, linkEntry);
+            }
+            // Backward frequency stays OFF (no entry added)
+        }
     }
 
     private void updateBlockState(Level level, BlockState state) {
-        boolean active = currentUser != null;
-        boolean powered = currentPower > 0;
-        int power = currentPower;
+        boolean active  = currentUser != null;
+        boolean powered = currentPower > 0 || backwardActive;
+        int power = backwardActive ? backwardPower : currentPower;
 
         BlockState newState = state
                 .setValue(AnalogControllerBlock.POWER, power)
@@ -370,6 +507,10 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         if (linkEntry != null) {
             Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, linkEntry);
             linkEntry = null;
+        }
+        if (backLinkEntry != null) {
+            Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, backLinkEntry);
+            backLinkEntry = null;
         }
     }
 
@@ -409,6 +550,10 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     public boolean isLocked() { return locked; }
 
     public boolean hasUser() { return currentUser != null; }
+
+    public boolean isBackwardActive() { return backwardActive; }
+
+    public int getBackwardPower() { return backwardPower; }
 
     @Nullable
     public UUID getCurrentUser() { return currentUser; }
@@ -464,6 +609,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         tag.putInt("Power", currentPower);
         tag.putBoolean("Locked", locked);
         tag.putInt("MaxPower", maxPower);
+        tag.putBoolean("BackwardActive", backwardActive);
+        tag.putInt("BackwardPower", backwardPower);
+        tag.putInt("BackwardTargetPower", backwardTargetPower);
         if (currentUser != null) {
             tag.putUUID("User", currentUser);
         }
@@ -479,9 +627,12 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
-        currentPower = tag.getInt("Power");
-        locked = tag.getBoolean("Locked");
-        maxPower = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
+        currentPower   = tag.getInt("Power");
+        locked         = tag.getBoolean("Locked");
+        maxPower       = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
+        backwardActive      = tag.getBoolean("BackwardActive");
+        backwardPower       = tag.contains("BackwardPower")       ? tag.getInt("BackwardPower")       : 0;
+        backwardTargetPower = tag.contains("BackwardTargetPower") ? tag.getInt("BackwardTargetPower") : 0;
         // Intentionally NOT restoring currentUser — if the chunk unloads mid-ride
         // the player is already disconnected, restoring a stale UUID would lock the
         // controller and prevent anyone from mounting it again.

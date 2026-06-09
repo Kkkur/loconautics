@@ -86,8 +86,8 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
      *   39    : backward frequency second (ghost, blue slot — backward row)
      *
      * Ghost slot positions are panel-relative pixel coords from texture analysis:
-     *   Forward row:  red x=93 y=31, blue x=111 y=31
-     *   Backward row: red x=93 y=60, blue x=111 y=60
+     *   Forward row:  red x=94 y=32, blue x=112 y=32
+     *   Backward row: red x=94 y=61, blue x=112 y=61
      *
      * Player inventory sits below the panel (panel is 95px tall).
      * INV_Y=100 → addPlayerSlots base: x=19+8=27, y=100+18=118.
@@ -97,12 +97,12 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
         addPlayerSlots(27, 118);
 
         // Forward frequency slots (top row)
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 93, 31));
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 111, 31));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 94, 32));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 112, 32));
 
         // Backward frequency slots (bottom row)
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 2, 93, 60));
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 3, 111, 60));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 2, 94, 61));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 3, 112, 61));
     }
 
     /**
