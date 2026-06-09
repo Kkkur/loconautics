@@ -1,12 +1,20 @@
 {
   "variants": {
-    "active=false,facing=north": { "model": "loconautics:block/analog_controller" },
-    "active=false,facing=south": { "model": "loconautics:block/analog_controller", "y": 180 },
-    "active=false,facing=east":  { "model": "loconautics:block/analog_controller", "y": 90 },
-    "active=false,facing=west":  { "model": "loconautics:block/analog_controller", "y": 270 },
-    "active=true,facing=north":  { "model": "loconautics:block/analog_controller_powered" },
-    "active=true,facing=south":  { "model": "loconautics:block/analog_controller_powered", "y": 180 },
-    "active=true,facing=east":   { "model": "loconautics:block/analog_controller_powered", "y": 90 },
-    "active=true,facing=west":   { "model": "loconautics:block/analog_controller_powered", "y": 270 }
+    "active=false,powered=false,facing=north": { "model": "loconautics:block/analog_controller" },
+    "active=false,powered=false,facing=south": { "model": "loconautics:block/analog_controller", "y": 180 },
+    "active=false,powered=false,facing=east":  { "model": "loconautics:block/analog_controller", "y": 90 },
+    "active=false,powered=false,facing=west":  { "model": "loconautics:block/analog_controller", "y": 270 },
+    "active=false,powered=true,facing=north":  { "model": "loconautics:block/analog_controller_transmitting" },
+    "active=false,powered=true,facing=south":  { "model": "loconautics:block/analog_controller_transmitting", "y": 180 },
+    "active=false,powered=true,facing=east":   { "model": "loconautics:block/analog_controller_transmitting", "y": 90 },
+    "active=false,powered=true,facing=west":   { "model": "loconautics:block/analog_controller_transmitting", "y": 270 },
+    "active=true,powered=false,facing=north":  { "model": "loconautics:block/analog_controller_powered" },
+    "active=true,powered=false,facing=south":  { "model": "loconautics:block/analog_controller_powered", "y": 180 },
+    "active=true,powered=false,facing=east":   { "model": "loconautics:block/analog_controller_powered", "y": 90 },
+    "active=true,powered=false,facing=west":   { "model": "loconautics:block/analog_controller_powered", "y": 270 },
+    "active=true,powered=true,facing=north":   { "model": "loconautics:block/analog_controller_powered" },
+    "active=true,powered=true,facing=south":   { "model": "loconautics:block/analog_controller_powered", "y": 180 },
+    "active=true,powered=true,facing=east":    { "model": "loconautics:block/analog_controller_powered", "y": 90 },
+    "active=true,powered=true,facing=west":    { "model": "loconautics:block/analog_controller_powered", "y": 270 }
   }
 }

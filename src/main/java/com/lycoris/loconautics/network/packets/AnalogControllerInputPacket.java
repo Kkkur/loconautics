@@ -51,25 +51,27 @@ public record AnalogControllerInputPacket(
 
     /** Runs on the server main thread. */
     public static void handle(AnalogControllerInputPacket packet, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player)) return;
-        if (player.isSpectator() && packet.pressed()) return;
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            if (player.isSpectator() && packet.pressed()) return;
 
-        BlockPos pos = packet.controllerPos();
-        Level level = player.level();
+            BlockPos pos = packet.controllerPos();
+            Level level = player.level();
 
-        // Try real world first, then fall back to the Sable sub-level that owns this pos
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof AnalogControllerBlockEntity)) {
-            dev.ryanhcode.sable.sublevel.SubLevel subLevel =
-                    dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
-            if (subLevel != null) {
-                be = subLevel.getLevel().getBlockEntity(pos);
+            // Try real world first, then fall back to the Sable sub-level that owns this pos
+            BlockEntity be = level.getBlockEntity(pos);
+            if (!(be instanceof AnalogControllerBlockEntity)) {
+                dev.ryanhcode.sable.sublevel.SubLevel subLevel =
+                        dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
+                if (subLevel != null) {
+                    be = subLevel.getLevel().getBlockEntity(pos);
+                }
             }
-        }
-        if (!(be instanceof AnalogControllerBlockEntity ace)) return;
+            if (!(be instanceof AnalogControllerBlockEntity ace)) return;
 
-        for (int key : packet.keys()) {
-            ace.onKeyEvent(player.getUUID(), key, packet.pressed());
-        }
+            for (int key : packet.keys()) {
+                ace.onKeyEvent(player.getUUID(), key, packet.pressed());
+            }
+        });
     }
 }

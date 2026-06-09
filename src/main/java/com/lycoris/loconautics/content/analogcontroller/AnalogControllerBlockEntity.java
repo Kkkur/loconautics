@@ -194,21 +194,22 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     /** Debounce for the mount toggle (ticks). A click on a block INSIDE a Sable sub-level can be delivered
      *  twice in one click (e.g. both hands), which would mount then instantly dismount — swallow the echo. */
     private static final long TOGGLE_DEBOUNCE_TICKS = 3;
-    private long lastToggleTick = Long.MIN_VALUE;
+    private long lastToggleTick = -TOGGLE_DEBOUNCE_TICKS;
 
     public void toggleUser(Player player) {
         if (level == null) return;
         long now = level.getGameTime();
+        com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
+                "[analog-BE] toggleUser: player={} currentUser={} now={} lastToggle={} debounced={}",
+                player.getUUID(), currentUser, now, lastToggleTick, now - lastToggleTick < TOGGLE_DEBOUNCE_TICKS);
         if (now - lastToggleTick < TOGGLE_DEBOUNCE_TICKS) {
-            return; // duplicate interaction from the same click — ignore so we don't mount-then-release
+            return;
         }
         lastToggleTick = now;
         if (currentUser != null) {
             if (currentUser.equals(player.getUUID())) {
-                // Same player clicks again → dismount
                 disconnectUser(level);
             }
-            // Another player already using it → ignore
         } else {
             connectUser(player);
         }
@@ -331,11 +332,13 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     private void updateBlockState(Level level, BlockState state) {
         boolean active = currentUser != null;
+        boolean powered = currentPower > 0;
         int power = currentPower;
 
         BlockState newState = state
                 .setValue(AnalogControllerBlock.POWER, power)
-                .setValue(AnalogControllerBlock.ACTIVE, active);
+                .setValue(AnalogControllerBlock.ACTIVE, active)
+                .setValue(AnalogControllerBlock.POWERED, powered);
 
         if (!newState.equals(state)) {
             level.setBlockAndUpdate(worldPosition, newState);
