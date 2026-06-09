@@ -6,8 +6,11 @@ import org.joml.Vector3dc;
 
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.allsable.SableTrain.Car;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
+import com.lycoris.loconautics.content.transmission.TransmissionBlock;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
@@ -195,22 +198,24 @@ public final class SableTrainDriver {
         if (container == null) {
             return;
         }
-        BearingAxleBlockEntity axle = null;
-        for (Car car : train.cars()) {
-            if (car.subLevelId() != null
-                    && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) {
-                axle = findBearingAxle(sub);
-                if (axle != null) {
-                    break;
-                }
-            }
-        }
-        if (axle == null) {
-            return; // no powered axle — keep current target (debug constant speed)
-        }
+        Controls c = findControls(train, container);
+
         double maxSpeed = maxSpeedBpt();
-        double rpm = axle.getSpeed();
-        double target = (rpm / 256.0) * maxSpeed;
+        Double target = null;
+        if (c.analog != null) {
+            // Analog Controller = the driver's throttle: power 0..15 maps to 0..maxSpeed (forward).
+            target = (c.analog.getCurrentPower() / 15.0) * maxSpeed;
+        } else if (c.axle != null) {
+            // Bearing Axle = kinetic engine: signed RPM (256 = full) maps to ±maxSpeed.
+            target = (c.axle.getSpeed() / 256.0) * maxSpeed;
+        }
+        if (target == null) {
+            return; // no control block on board — keep the debug/command target speed
+        }
+        // Transmission = gearbox: STAGE 0 (off) .. 5 (full) scales the speed.
+        if (c.transmissionStage >= 0) {
+            target *= c.transmissionStage / 5.0;
+        }
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
         train.setTargetSpeed(target);
     }
@@ -221,25 +226,43 @@ public final class SableTrainDriver {
         return cfg > 0.0 ? cfg : 1.0;
     }
 
-    /** Scans a sub-level's own level for a {@link BearingAxleBlockEntity}. */
-    private static BearingAxleBlockEntity findBearingAxle(ServerSubLevel sub) {
-        BoundingBox3ic bounds = sub.getPlot().getBoundingBox();
-        ServerLevel subLevel = sub.getLevel();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
-            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
-                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
-                    pos.set(x, y, z);
-                    if (!(subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock)) {
-                        continue;
-                    }
-                    BlockEntity be = subLevel.getBlockEntity(pos);
-                    if (be instanceof BearingAxleBlockEntity axle) {
-                        return axle;
+    /** Control blocks found inside a train's car sub-levels. */
+    private static final class Controls {
+        AnalogControllerBlockEntity analog;
+        BearingAxleBlockEntity axle;
+        int transmissionStage = -1; // -1 = no transmission present
+    }
+
+    /** Single pass over each car's sub-level collecting the Analog Controller / Bearing Axle / Transmission. */
+    private static Controls findControls(SableTrain train, ServerSubLevelContainer container) {
+        Controls c = new Controls();
+        for (Car car : train.cars()) {
+            if (car.subLevelId() == null
+                    || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+                continue;
+            }
+            ServerLevel subLevel = sub.getLevel();
+            var bounds = sub.getPlot().getBoundingBox();
+            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+            for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+                for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                    for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        var state = subLevel.getBlockState(pos);
+                        var block = state.getBlock();
+                        if (c.analog == null && block instanceof AnalogControllerBlock
+                                && subLevel.getBlockEntity(pos) instanceof AnalogControllerBlockEntity a) {
+                            c.analog = a;
+                        } else if (c.axle == null && block instanceof BearingAxleBlock
+                                && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity a) {
+                            c.axle = a;
+                        } else if (c.transmissionStage < 0 && block instanceof TransmissionBlock) {
+                            c.transmissionStage = state.getValue(TransmissionBlock.STAGE);
+                        }
                     }
                 }
             }
         }
-        return null;
+        return c;
     }
 }

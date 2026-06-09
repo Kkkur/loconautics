@@ -105,7 +105,16 @@ public final class SableTrainSpawner {
             return 0;
         }
 
-        // 5) Bogey spacing from the cart's longer horizontal extent (so the two bogeys sit near its ends).
+        // 5) Re-locate the rail under the cart's horizontal CENTRE, so the centred bogeys line up with the
+        //    car body (otherwise the span is offset toward wherever the player happened to look).
+        int cx = (bounds.minX() + bounds.maxX()) / 2;
+        int cz = (bounds.minZ() + bounds.maxZ()) / 2;
+        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), look);
+        if (centreTrack != null) {
+            track = centreTrack;
+        }
+
+        // 6) Bogey spacing from the cart's longer horizontal extent (so the two bogeys sit near its ends).
         double spacing = Math.max(1.0, Math.max(bounds.maxX() - bounds.minX(), bounds.maxZ() - bounds.minZ()));
         RailCarriage carriage = RailCarriage.at(track.location(), track.upNormal(), spacing, 0.0);
         if (carriage == null) {

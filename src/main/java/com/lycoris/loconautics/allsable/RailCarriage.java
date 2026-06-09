@@ -59,15 +59,19 @@ public final class RailCarriage {
      * resolved.
      */
     public static RailCarriage at(TrackGraphLocation location, Vec3 upNormal, double bogeySpacing, double speed) {
-        TravellingPoint leading = RailFollower.pointAt(location);
-        if (leading == null) {
+        TravellingPoint seed = RailFollower.pointAt(location);
+        if (seed == null) {
             return null;
         }
-        // Clone the leading point and walk it backwards along the rail to seat the trailing bogey.
-        TravellingPoint trailing = new TravellingPoint(leading.node1, leading.node2, leading.edge,
-                leading.position, leading.upsideDown);
-        ITrackSelector backSteer = trailing.steer(SteerDirection.NONE, upNormal);
-        trailing.travel(location.graph, -bogeySpacing, backSteer,
+        // Place the two bogeys at the carriage ENDS, CENTRED on the spawn point: leading is half the span
+        // ahead, trailing half behind. This mirrors Create (bogeys at the ends), so as the leading bogey
+        // enters a curve the whole car yaws progressively instead of only pivoting once its centre arrives.
+        double half = bogeySpacing / 2.0;
+        TravellingPoint leading = new TravellingPoint(seed.node1, seed.node2, seed.edge, seed.position, seed.upsideDown);
+        leading.travel(location.graph, half, leading.steer(SteerDirection.NONE, upNormal),
+                leading.ignoreEdgePoints(), leading.ignoreTurns(), leading.ignorePortals());
+        TravellingPoint trailing = new TravellingPoint(seed.node1, seed.node2, seed.edge, seed.position, seed.upsideDown);
+        trailing.travel(location.graph, -half, trailing.steer(SteerDirection.NONE, upNormal),
                 trailing.ignoreEdgePoints(), trailing.ignoreTurns(), trailing.ignorePortals());
         return new RailCarriage(location.graph, leading, trailing, upNormal, bogeySpacing, speed);
     }
