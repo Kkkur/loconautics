@@ -21,7 +21,6 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -201,8 +200,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                         }
                         decayTimer = DECAY_TICKS;
                     }
-                } else if (!loweringSignal) {
-                    // No keys held → natural decay of backward speed (only while mounted)
+                } else {
+                    // No keys held OR S held → natural decay (S is a no-op in backward mode)
                     if (!locked && currentUser != null && backwardPower > 0) {
                         decayTimer--;
                         if (decayTimer <= 0) {
@@ -211,7 +210,6 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                         }
                     }
                 }
-                // S held → no-op (stays in backward mode at current speed)
             }
 
             // Ramp up toward target (only while mounted, like acceleration)
@@ -332,8 +330,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         // locked intentionally NOT reset — player may have locked before dismounting
         raisingSignal = false;
         loweringSignal = false;
-        raiseTimer = 0;
-        lowerTimer = 0;
+        raiseTimer = RAISE_TICKS;
+        lowerTimer = LOWER_TICKS;
         decayTimer = DECAY_TICKS;
         updateBlockState(level, getBlockState());
         setChanged();
@@ -564,13 +562,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     public void onScroll(UUID user, int delta) {
         if (!user.equals(currentUser)) return;
         maxPower = Math.max(0, Math.min(MAX_POWER, maxPower + delta));
-        // Only snap currentPower down immediately when NOT locked.
-        // When locked, decay will bring it down to the new maxPower gradually.
-        if (!locked && currentPower > maxPower) {
-            currentPower = maxPower;
-            updateNetwork(level);
-            updateBlockState(level, getBlockState());
-        }
+        // Never snap currentPower — decay brings it down to maxPower gradually
+        // whether locked or not. This matches the expected deceleration feel.
         setChanged();
         sendData();
     }

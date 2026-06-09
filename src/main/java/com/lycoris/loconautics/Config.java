@@ -49,23 +49,40 @@ public final class Config {
 
     // ------------------------------------------------------------------ Transmission
 
-    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT = BUILDER
-            .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
-                    "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
-            .defineInRange("transmissionSuImpact", 4.0, 0.0, 100.0);
+    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT;
+    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_CAPACITY;
 
-    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_CAPACITY = BUILDER
-            .comment("Stress Units capacity provided by the Transmission to its output network.",
-                    "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
-            .defineInRange("transmissionSuCapacity", 262144.0, 0.0, Double.MAX_VALUE);
+    static {
+        BUILDER.push("transmission");
+
+        TRANSMISSION_SU_IMPACT = BUILDER
+                .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
+                        "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
+                .defineInRange("suImpact", 4.0, 0.0, 100.0);
+
+        TRANSMISSION_SU_CAPACITY = BUILDER
+                .comment("Stress Units capacity provided by the Transmission to its output network.",
+                        "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
+                .defineInRange("suCapacity", 262144.0, 0.0, Double.MAX_VALUE);
+
+        BUILDER.pop();
+    }
 
     // ------------------------------------------------------------------ Analog Controller
 
-    public static final ModConfigSpec.DoubleValue ANALOG_BACKWARD_RATIO = BUILDER
-            .comment("Fraction of maxPower sent on the forward frequency while in backward mode.",
-                    "The backward frequency always receives a binary ON signal (15) when reversing.",
-                    "Default: 0.30 → round(maxPower * 0.30) is sent on the forward frequency.")
-            .defineInRange("analogBackwardRatio", 0.30, 0.0, 1.0);
+    public static final ModConfigSpec.DoubleValue ANALOG_BACKWARD_RATIO;
+
+    static {
+        BUILDER.push("analog_controller");
+
+        ANALOG_BACKWARD_RATIO = BUILDER
+                .comment("Fraction of maxPower sent on the forward frequency while in backward mode.",
+                        "The backward frequency always receives a binary ON signal (15) when reversing.",
+                        "Default: 0.30 → round(maxPower * 0.30) is sent on the forward frequency.")
+                .defineInRange("backwardRatio", 0.30, 0.0, 1.0);
+
+        BUILDER.pop();
+    }
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 
