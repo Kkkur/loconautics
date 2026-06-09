@@ -59,9 +59,48 @@ public final class SableTrainSpawner {
     /** A rail location under the cart + the track up-normal + the rail's world Y (top surface). */
     private record TrackHit(TrackGraphLocation location, Vec3 upNormal, int railY) {}
 
+    /** The train most recently spawned, so {@code addcar} knows which convoy to extend. */
+    private static UUID lastTrainId;
+
+    /** Spawns a NEW single-car custom train from the cart the player is looking at. */
     public static int spawn(ServerPlayer player, double speed) {
         ServerLevel level = player.serverLevel();
+        SableTrain.Car car = buildCar(player, level);
+        if (car == null) {
+            return 0;
+        }
+        UUID id = UUID.randomUUID();
+        SableTrain train = new SableTrain(id, level, List.of(car));
+        train.setTargetSpeed(speed);
+        SableTrainRegistry.register(train);
+        ensureObserver(level);
+        lastTrainId = id;
+        msg(player, String.format("custom train spawned speed=%.2f — id %s — add cars with /loconautics sabletrain addcar",
+                speed, id.toString().substring(0, 8)));
+        return 1;
+    }
 
+    /** Appends the looked-at cart to the most recently spawned train as a new (articulated) car. */
+    public static int addCar(ServerPlayer player) {
+        if (lastTrainId == null || SableTrainRegistry.get(lastTrainId) == null) {
+            msg(player, "no train to add to — spawn one first with /loconautics sabletrain");
+            return 0;
+        }
+        SableTrain train = SableTrainRegistry.get(lastTrainId);
+        SableTrain.Car car = buildCar(player, train.level());
+        if (car == null) {
+            return 0;
+        }
+        train.cars().add(car);
+        msg(player, "car added — train now has " + train.cars().size() + " cars (each pivots on its own bogeys)");
+        return 1;
+    }
+
+    /**
+     * Lifts the cart the player is looking at into a sub-level and seats a {@link RailCarriage} under it,
+     * returning a {@link SableTrain.Car}. Sends a chat message and returns {@code null} on any failure.
+     */
+    private static SableTrain.Car buildCar(ServerPlayer player, ServerLevel level) {
         // 1) Raycast to the cart block the player is looking at.
         Vec3 eye = player.getEyePosition(1.0F);
         Vec3 look = player.getViewVector(1.0F);
@@ -69,31 +108,30 @@ public final class SableTrainSpawner {
         BlockHitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         if (hit.getType() == HitResult.Type.MISS) {
             msg(player, "look at the cart you built (on a rail), within " + (int) REACH + " blocks");
-            return 0;
+            return null;
         }
         BlockPos origin = hit.getBlockPos();
         if (level.getBlockState(origin).getBlock() instanceof ITrackBlock) {
             msg(player, "look at the CART, not the rail itself");
-            return 0;
+            return null;
         }
 
         // 2) Find the rail UNDER the cart first (gives us railY for the gather filter + the bogey location).
         TrackHit track = findRailBelow(level, origin, look);
         if (track == null) {
             msg(player, "no Create rail found under/near the cart");
-            return 0;
+            return null;
         }
         int railY = track.railY();
 
-        // 3) Flood-fill the cart, but only blocks ABOVE the rail (never descend to the ground): reject tracks
-        //    and anything at or below the rail's Y. This is why the cart no longer needs the ground cleared.
+        // 3) Flood-fill the cart, but only blocks ABOVE the rail (reject tracks and anything at/below rail Y).
         GatherResult gather = SubLevelAssemblyHelper.gatherConnectedBlocks(origin, level, MAX_BLOCKS,
                 (from, fromState, cand, candState, dir) ->
                         cand.getY() > railY && !(candState.getBlock() instanceof ITrackBlock));
         if (gather.assemblyState() != GatherResult.State.SUCCESS || gather.blocks() == null) {
             msg(player, "couldn't gather a cart above the rail (" + gather.assemblyState()
                     + ") — make sure cart blocks sit above the track");
-            return 0;
+            return null;
         }
         Set<BlockPos> blocks = gather.blocks();
         BoundingBox3i bounds = gather.boundingBox();
@@ -102,11 +140,10 @@ public final class SableTrainSpawner {
         ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, origin, blocks, bounds);
         if (sub == null) {
             msg(player, "sub-level creation failed");
-            return 0;
+            return null;
         }
 
-        // 5) Re-locate the rail under the cart's horizontal CENTRE, so the centred bogeys line up with the
-        //    car body (otherwise the span is offset toward wherever the player happened to look).
+        // 5) Re-locate the rail under the cart's horizontal CENTRE so the centred bogeys line up with the body.
         int cx = (bounds.minX() + bounds.maxX()) / 2;
         int cz = (bounds.minZ() + bounds.maxZ()) / 2;
         TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), look);
@@ -114,25 +151,16 @@ public final class SableTrainSpawner {
             track = centreTrack;
         }
 
-        // 6) Bogey spacing from the cart's longer horizontal extent (so the two bogeys sit near its ends).
+        // 6) Bogey spacing from the cart's longer horizontal extent (bogeys near its ends → it pivots properly).
         double spacing = Math.max(1.0, Math.max(bounds.maxX() - bounds.minX(), bounds.maxZ() - bounds.minZ()));
         RailCarriage carriage = RailCarriage.at(track.location(), track.upNormal(), spacing, 0.0);
         if (carriage == null) {
             msg(player, "couldn't seat the rail body (track not in a graph?)");
-            return 0;
+            return null;
         }
-
-        UUID id = UUID.randomUUID();
-        SableTrain train = new SableTrain(id, level, List.of(new SableTrain.Car(sub.getUniqueId(), carriage)));
-        train.setTargetSpeed(speed);
-        SableTrainRegistry.register(train);
-        ensureObserver(level);
-
-        msg(player, String.format("custom train spawned (%d blocks, spacing %.0f) speed=%.2f — id %s",
-                blocks.size(), spacing, speed, id.toString().substring(0, 8)));
-        LoconauticsConstants.LOGGER.info("[sabletrain] spawned {} ({} blocks, spacing {}) graph {} speed={}",
-                id, blocks.size(), spacing, track.location().graph.id, speed);
-        return 1;
+        LoconauticsConstants.LOGGER.info("[sabletrain] built car ({} blocks, spacing {}) on graph {}",
+                blocks.size(), spacing, track.location().graph.id);
+        return new SableTrain.Car(sub.getUniqueId(), carriage);
     }
 
     /** Sets the target speed of every active custom train (live throttle for testing). Returns the count. */
@@ -162,6 +190,7 @@ public final class SableTrainSpawner {
             SableTrainRegistry.remove(train.id());
             n++;
         }
+        lastTrainId = null;
         return n;
     }
 

@@ -115,6 +115,8 @@ public final class RailDebug {
                                                     "[sabletrain] set speed " + v + " on " + n + " train(s)"), false);
                                             return n;
                                         })))
+                        .then(Commands.literal("addcar")
+                                .executes(ctx -> SableTrainSpawner.addCar(ctx.getSource().getPlayerOrException())))
                         .then(Commands.literal("stop").executes(ctx -> {
                             int n = SableTrainSpawner.setSpeedAll(0.0);
                             ctx.getSource().sendSuccess(() -> Component.literal("[sabletrain] stopped " + n + " train(s)"), false);
