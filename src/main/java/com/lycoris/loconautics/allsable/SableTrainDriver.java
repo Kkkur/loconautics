@@ -250,11 +250,23 @@ public final class SableTrainDriver {
     /** Diagnostics: per-car centre/stopped state (to see why a car isn't moving) + bearing-axle RPM. */
     private static void logOrientation(SableTrain train) {
         String axleRpm = "no-axle";
+        String axleMass = "n/a";
+        double subMass = 0.0;
         ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
         if (container != null) {
+            for (Car car : train.cars()) {
+                if (car.subLevelId() != null
+                        && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub && !sub.isRemoved()) {
+                    MassData md = sub.getMassTracker();
+                    if (md != null) {
+                        subMass += md.getMass();
+                    }
+                }
+            }
             BearingAxleBlockEntity axle = findBearingAxle(train, container);
             if (axle != null) {
                 axleRpm = f(axle.getSpeed());
+                axleMass = f(axle.getTrainMass());
             }
         }
         StringBuilder cars = new StringBuilder();
@@ -265,8 +277,8 @@ public final class SableTrainDriver {
                     .append(centre == null ? "=NULL" : "=(" + f(centre.x) + "," + f(centre.y) + "," + f(centre.z) + ")")
                     .append(c.stopped() ? "[STOPPED]" : "");
         }
-        LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} cars={}:{}",
-                f(train.speed()), f(train.targetSpeed()), axleRpm, train.cars().size(), cars);
+        LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} subMass={} axleTrainMass={} cars={}:{}",
+                f(train.speed()), f(train.targetSpeed()), axleRpm, f(subMass), axleMass, train.cars().size(), cars);
     }
 
     private static String f(double d) {

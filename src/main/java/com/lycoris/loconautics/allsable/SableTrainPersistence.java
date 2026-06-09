@@ -50,15 +50,25 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 @EventBusSubscriber(modid = LoconauticsConstants.MOD_ID)
 public final class SableTrainPersistence {
 
-    /** Ticks after start to keep retrying graph/sub-level resolution before giving up on a record. */
-    private static final long RESTORE_WINDOW_TICKS = 600; // ~30s
+    /** How often (ticks) to attempt resolving still-pending records. A car's sub-level only becomes active once
+     *  its plot-grid chunk loads, which can be long after start — so we keep retrying, not just for ~30s. */
+    private static final int RESTORE_RETRY_INTERVAL = 10;
+
+    /** How often (ticks) to log WHY a still-pending train can't be restored yet (so a remote test is
+     *  self-diagnosing without us seeing the log live). */
+    private static final int RESTORE_LOG_INTERVAL = 100; // ~5s
+
+    /** After this many ticks still pending, stop retrying this session (keep the disk record for next launch).
+     *  Generous: a sub-level may only activate when the player walks near it. */
+    private static final int RESTORE_GIVEUP_TICKS = 6000; // ~5 min
 
     /** Re-snapshot live trains to disk this often, so a hard crash keeps a recent rail position. */
     private static final int SNAPSHOT_INTERVAL_TICKS = 200;
 
     /** Records still waiting to be restored (trainId -> serialised compound). Drained on tick. */
     private static final Map<UUID, CompoundTag> pending = new HashMap<>();
-    private static long restoreDeadline = -1;
+    /** Ticks elapsed since start while records are still pending (drives retry/log/giveup cadence). */
+    private static int restoreTicks = 0;
     private static int snapshotCounter = 0;
 
     private SableTrainPersistence() {
@@ -99,19 +109,22 @@ public final class SableTrainPersistence {
         MinecraftServer server = event.getServer();
         pending.clear();
         pending.putAll(SableTrainStore.get(server).records());
-        restoreDeadline = server.overworld().getGameTime() + RESTORE_WINDOW_TICKS;
+        restoreTicks = 0;
         snapshotCounter = 0;
-        if (!pending.isEmpty()) {
-            LoconauticsConstants.LOGGER.info("[sabletrain] persistence: {} train(s) to restore after restart",
-                    pending.size());
-        }
+        // Loud banner so a remote tester can confirm THIS build (with persistence) is the one running.
+        LoconauticsConstants.LOGGER.info("[sabletrain] persistence active — {} saved train(s) to restore",
+                pending.size());
     }
 
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
         if (!pending.isEmpty()) {
-            drainPending(server);
+            restoreTicks++;
+            if (restoreTicks % RESTORE_RETRY_INTERVAL == 0) {
+                boolean verbose = restoreTicks % RESTORE_LOG_INTERVAL == 0; // periodically log why it's stuck
+                drainPending(server, verbose);
+            }
         }
         if (!SableTrainRegistry.isEmpty() && (snapshotCounter++ % SNAPSHOT_INTERVAL_TICKS) == 0) {
             snapshotAll(server);
@@ -124,21 +137,21 @@ public final class SableTrainPersistence {
         snapshotAll(server);          // capture final rail positions before the registry is dropped
         SableTrainRegistry.clear();   // in-memory only — the on-disk records stay for next launch
         pending.clear();
-        restoreDeadline = -1;
+        restoreTicks = 0;
     }
 
     // ---------------------------------------------------------------------------------------------
     // Restore.
     // ---------------------------------------------------------------------------------------------
 
-    private static void drainPending(MinecraftServer server) {
-        boolean pastDeadline = restoreDeadline >= 0 && server.overworld().getGameTime() > restoreDeadline;
+    private static void drainPending(MinecraftServer server, boolean verbose) {
+        boolean giveUp = restoreTicks >= RESTORE_GIVEUP_TICKS;
         Iterator<Map.Entry<UUID, CompoundTag>> it = pending.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, CompoundTag> entry = it.next();
             SableTrain train;
             try {
-                train = deserialize(entry.getValue(), server);
+                train = deserialize(entry.getValue(), server, verbose, entry.getKey());
             } catch (Throwable t) {
                 LoconauticsConstants.LOGGER.error("[sabletrain] error restoring train {} — dropping", entry.getKey(), t);
                 it.remove();
@@ -151,11 +164,11 @@ public final class SableTrainPersistence {
                 it.remove();
                 LoconauticsConstants.LOGGER.info("[sabletrain] restored train {} ({} car(s)) in {}",
                         train.id(), train.cars().size(), train.level().dimension().location());
-            } else if (pastDeadline) {
-                // Graph/sub-level still not available after the window. Stop retrying this session, but KEEP the
-                // disk record — the dimension may simply be unloaded and become resolvable on a future launch.
+            } else if (giveUp) {
+                // Still unresolved after a long window. Stop retrying this session, but KEEP the disk record so a
+                // future launch (e.g. once the player visits that area / dimension) can restore it.
                 LoconauticsConstants.LOGGER.warn(
-                        "[sabletrain] could not restore train {} (track graph or sub-level unavailable) — will retry next launch",
+                        "[sabletrain] giving up on train {} this session (track graph or sub-level never became available) — kept on disk for next launch",
                         entry.getKey());
                 it.remove();
             }
@@ -214,15 +227,22 @@ public final class SableTrainPersistence {
      * Rebuilds a {@link SableTrain} from a serialised record, or returns {@code null} if it isn't yet
      * resolvable (dimension/container/track-graph/sub-level not loaded) — the caller retries those next tick.
      */
-    static SableTrain deserialize(CompoundTag tag, MinecraftServer server) {
+    static SableTrain deserialize(CompoundTag tag, MinecraftServer server, boolean verbose, UUID trainId) {
         ResourceKey<Level> dimKey = ResourceKey.create(
                 Registries.DIMENSION, ResourceLocation.parse(tag.getString("Dimension")));
         ServerLevel level = server.getLevel(dimKey);
         if (level == null) {
+            if (verbose) {
+                LoconauticsConstants.LOGGER.warn("[sabletrain] waiting to restore {}: dimension {} not loaded",
+                        trainId, tag.getString("Dimension"));
+            }
             return null; // dimension not loaded yet
         }
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {
+            if (verbose) {
+                LoconauticsConstants.LOGGER.warn("[sabletrain] waiting to restore {}: no sub-level container yet", trainId);
+            }
             return null;
         }
         DimensionPalette dims = DimensionPalette.read(tag);
@@ -236,9 +256,19 @@ public final class SableTrainPersistence {
 
             TrackGraph graph = Create.RAILWAYS.trackNetworks.get(graphId);
             if (graph == null) {
+                if (verbose) {
+                    LoconauticsConstants.LOGGER.warn(
+                            "[sabletrain] waiting to restore {}: track graph {} not loaded ({} graphs present)",
+                            trainId, graphId, Create.RAILWAYS.trackNetworks.size());
+                }
                 return null; // track graphs not loaded yet — retry the whole train later
             }
             if (!(container.getSubLevel(subId) instanceof ServerSubLevel)) {
+                if (verbose) {
+                    LoconauticsConstants.LOGGER.warn(
+                            "[sabletrain] waiting to restore {}: sub-level {} not active yet (chunk not loaded?)",
+                            trainId, subId);
+                }
                 return null; // the car's sub-level hasn't loaded yet — retry later
             }
             RailCarriage carriage = RailCarriage.restore(graph, c.getCompound("Carriage"), dims);
