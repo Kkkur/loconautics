@@ -8,7 +8,62 @@
 
 ---
 
-## 0b. ACTUALIZACIÓN 2026-06-07 (léeme primero)
+## 0a. ACTUALIZACIÓN 2026-06-09 noche (LÉEME PRIMERO — estado más reciente)
+Rama `feature/all-sable-physics-train`, último commit **`5958845`**, jar desplegado md5 **`038887f`**.
+Workflow sin cambios (build → copiar jar a `Skybound SMP/mods/` → el usuario reinicia → yo leo `latest.log`).
+**Referencia clave nueva: `RESEARCH_sable_aeronautics.md`** (catálogo a fondo de TODA la API de Sable/Aeronautics
+— motion models, fuerzas, constraints, controles, `Sable.HELPER`, etc. Léelo antes de tocar física).
+
+**EL TREN ALL-SABLE FUNCIONA IN-GAME** (modo "pin" por defecto): `/loconautics sabletrain [speed]` levanta un
+cart construido sobre una vía a un sub-level físico que **recorre la vía, gira en curvas y te lleva encima
+fluido**, sin `CarriageContraptionEntity` ni Create `Train`. Código en `allsable/`:
+- `RailFollower`/`RailCarriage`/`RailPose` (matemática de vías), `SableTrain`/`SableTrainRegistry`/
+  `SableTrainDriver` (modelo + driver), `SableTrainSpawner` (comando), `RailDebug` (comandos).
+- Comandos: `/loconautics sabletrain [speed]` (spawn), `... speed <v>` / `... stop` (throttle en vivo),
+  `... addcar` (multi-vagón: cada vagón su sub-level+2 bogeys, hereda dirección del tren), `... clear`,
+  `... physics [speed]` (ver abajo). Debug de raíl: `railtest`/`railtest2`.
+- **Motion model = teleport-pin** (cinemático): el driver fija el `logicalPose` de cada vagón a la pose de su
+  `RailCarriage` cada physics tick. Orientación = **delta de bases** (arregló el roll en rampas; era Euler
+  rotateX=roll al ir por eje X). Giro estilo Create = bogeys en los extremos, centrados.
+- **Captura del cart**: flood-fill SOLO de bloques por ENCIMA del raíl (da igual que toque el suelo).
+- **Bearing axle weight EN all-sable**: `SableTrainDriver.updateAxleMass` cada 30 ticks suma la masa de los
+  sub-levels y la pone en el axle (antes salía 0; el cableado solo existía en el híbrido).
+- **Controles en sub-levels (patrón clave)**: el alcance/rango se mide con `Sable.HELPER.projectOutOfSubLevel`
+  (NO con coords crudas del plot, que están lejísimos → desmontaba al instante). Ver `AnalogControllerBlockEntity.playerInRange`.
+
+**MODO FÍSICO (force-bogeys) — v1, comando aparte, SIN tunear:** `/loconautics sabletrain physics`. El vagón
+es cuerpo libre, cada bogey lo sujeta a la vía con un **muelle** (receta de `WheelMount`, §N del RESEARCH);
+puede DESCARRILAR. Constantes K=150/C=25 a calibrar. El usuario dijo "mejor seguimos con el pin, deja el
+físico aparte" → es secundario.
+
+**⚠️ MIXINS DE ESTACIÓN HÍBRIDOS = FAIL-SAFE/efectivamente OFF:** `PhysicsAssemblyContext` lanzaba
+`NoClassDefFoundError` desde el mixin en el modpack → envolvimos los redirects en try/catch para no romper el
+ensamblaje normal de Create. Efecto: el **ensamblaje físico híbrido** ("Assemble as Physics Train") puede no
+crear sub-levels. NO es bloqueante porque el all-sable lo reemplaza. (Si se quiere el híbrido, hay que
+resolver ese classloader.)
+
+**PROBLEMAS ABIERTOS (prioridad):**
+1. **Analog Controller no conduce dentro del sub-level.** Monta (tras el fix de rango) pero subir power con
+   teclas no mueve el tren. Sospecha: los BE no tickean en sub-levels (la decay/serverTick no corre) y/o el
+   enrutado de teclas no llega. **HAY LOGS `[analog]` puestos** (sanity-disconnect, key fromCurrentUser) —
+   NECESITAS leer `latest.log` mientras el usuario lo prueba para diagnosticar. (La cadena real:
+   Analog Controller → redstone-link → Transmission → shaft → Bearing Axle RPM → velocidad; solo el bearing
+   axle fija la velocidad del tren, ver §0a y RESEARCH §Y.)
+2. **"Solo ensamblar si hay un bogey"** — pedido por el usuario, SIN aclarar qué significa "bogey" en el
+   all-sable (no hay bloque bogey explícito; los bogeys son `TravellingPoint` abstractos). Preguntar antes.
+3. **"Se parte en trozos" al romper un bloque** = splitting de bloques flotantes de Sable
+   (`FloatingBlockController`). Investigar desactivarlo para sub-levels de tren. (Romper un vagón ya NO tira el
+   tren entero — el `SubLevelObserver` quita solo ese vagón.)
+4. **Acople multi-vagón con constraint** (Fixed/Generic, RESEARCH §H.4) — pendiente; ahora los vagones se
+   mantienen juntos solo por "misma velocidad" (loose).
+5. **Persistencia**: los SableTrain NO sobreviven reinicios (`SableTrainRegistry` es en memoria). Los
+   sub-levels SÍ persisten en disco → quedan huérfanos. Implementar SavedData + re-seat de bogeys
+   (`TravellingPoint.write/read`).
+6. Tuning del modo físico (K/C).
+
+---
+
+## 0b. ACTUALIZACIÓN 2026-06-07 (contexto previo)
 Cambios de esta sesión (todo pusheado a origin):
 - **Gate A/B RESUELTO: el usuario eligió la Opción B (tren 100% propio)**, NO reusar el `Train` de Create.
   Solo se reutiliza el grafo de vías (`TrackGraph`/`TravellingPoint`). Fases 3-4 implican reimplementar
