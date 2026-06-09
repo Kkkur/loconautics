@@ -159,17 +159,8 @@ public final class SableTrainDriver {
         }
     }
 
-    /** Diagnostics for the slope/curve orientation issue: forward vector, derived yaw/pitch, bogey positions. */
+    /** Diagnostics: per-car centre/stopped state (to see why a car isn't moving) + bearing-axle RPM. */
     private static void logOrientation(SableTrain train) {
-        RailCarriage c = train.cars().get(0).carriage();
-        var lead = c.leadingPos();
-        var trail = c.trailingPos();
-        var fwd = c.forward();
-        double dx = lead.x - trail.x, dy = lead.y - trail.y, dz = lead.z - trail.z;
-        double yaw = Math.toDegrees(Math.atan2(dz, dx)) + 180.0;
-        double pitch = -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-        // Bearing-axle RPM: KEY signal — tells us whether Create's kinetic network produces rotation INSIDE
-        // the sub-level (BEs don't tick there, so this may stay 0 even with a powered chain on board).
         String axleRpm = "no-axle";
         ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
         if (container != null) {
@@ -178,9 +169,16 @@ public final class SableTrainDriver {
                 axleRpm = f(axle.getSpeed());
             }
         }
-        LoconauticsConstants.LOGGER.info(
-                "[sabletrain] diag speed={} axleRPM={} fwd=({}, {}, {}) yaw={} pitch={} dy={}",
-                f(train.speed()), axleRpm, f(fwd.x), f(fwd.y), f(fwd.z), f(yaw), f(pitch), f(dy));
+        StringBuilder cars = new StringBuilder();
+        for (int i = 0; i < train.cars().size(); i++) {
+            RailCarriage c = train.cars().get(i).carriage();
+            var centre = c.center();
+            cars.append(" car").append(i)
+                    .append(centre == null ? "=NULL" : "=(" + f(centre.x) + "," + f(centre.y) + "," + f(centre.z) + ")")
+                    .append(c.stopped() ? "[STOPPED]" : "");
+        }
+        LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} cars={}:{}",
+                f(train.speed()), f(train.targetSpeed()), axleRpm, train.cars().size(), cars);
     }
 
     private static String f(double d) {

@@ -134,6 +134,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         if (currentUser != null) {
             Player player = level.getPlayerByUUID(currentUser);
             if (player == null || !playerInRange(player)) {
+                com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
+                        "[analog] sanity-disconnect: playerNull={} inRange={}",
+                        player == null, player != null && playerInRange(player));
                 disconnectUser(level);
             }
         }
@@ -263,6 +266,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
      * @param pressed  true = key down, false = key up
      */
     public void onKeyEvent(UUID user, int keyIndex, boolean pressed) {
+        com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
+                "[analog] key keyIndex={} pressed={} fromCurrentUser={}", keyIndex, pressed, user.equals(currentUser));
         if (!user.equals(currentUser)) return;
 
         switch (keyIndex) {

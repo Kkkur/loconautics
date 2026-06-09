@@ -220,7 +220,8 @@ public final class SableTrainSpawner {
         return null;
     }
 
-    /** Attach (once per container) an observer that drops any train whose car sub-level gets removed. */
+    /** Attach (once per container) an observer that drops only the affected CAR when its sub-level is removed
+     *  (not the whole train — breaking one car must not drop the rest of the convoy). */
     private static void ensureObserver(ServerLevel level) {
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null || OBSERVED.contains(container)) {
@@ -231,11 +232,9 @@ public final class SableTrainSpawner {
             public void onSubLevelRemoved(SubLevel subLevel, SubLevelRemovalReason reason) {
                 UUID removedId = subLevel.getUniqueId();
                 for (SableTrain train : SableTrainRegistry.all()) {
-                    for (SableTrain.Car car : train.cars()) {
-                        if (removedId.equals(car.subLevelId())) {
-                            SableTrainRegistry.remove(train.id());
-                            break;
-                        }
+                    boolean removed = train.cars().removeIf(car -> removedId.equals(car.subLevelId()));
+                    if (removed && train.cars().isEmpty()) {
+                        SableTrainRegistry.remove(train.id()); // only drop the train once it has no cars left
                     }
                 }
             }
