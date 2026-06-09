@@ -5,6 +5,9 @@ import com.simibubi.create.content.kinetics.base.KineticBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -17,6 +20,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
+import net.minecraft.world.phys.BlockHitResult;
 
 /**
  * Transmission block — a kinetic speed/direction regulator driven by two redstone signals.
@@ -74,8 +78,33 @@ public class TransmissionBlock extends KineticBlock implements IBE<TransmissionB
                 .setValue(DIRECTION_ACTIVE, false);
     }
 
+    // ------------------------------------------------------------------ interaction
+
+    /**
+     * Shift+right-click opens the frequency-binding GUI.
+     * Plain right-click is left for any wrench/goggles behaviour from KineticBlock.
+     */
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
+                                               Player player, BlockHitResult hit) {
+        if (!player.isShiftKeyDown()) {
+            return super.useWithoutItem(state, level, pos, player, hit);
+        }
+        if (level.isClientSide) return InteractionResult.SUCCESS;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof TransmissionBlockEntity tbe && player instanceof ServerPlayer sp) {
+            sp.openMenu(tbe, tbe::sendToMenu);
+        }
+        return InteractionResult.CONSUME;
+    }
+
     // ------------------------------------------------------------------ redstone
 
+    /**
+     * Vanilla redstone fallback — fires when an adjacent block changes its signal.
+     * This coexists with the link-network receivers: whichever source provides the
+     * higher signal at any given moment wins (same semantics as Create's own link blocks).
+     */
     @Override
     public void neighborChanged(BlockState state, Level level, BlockPos pos,
                                 Block changedBlock, BlockPos changedFrom, boolean isMoving) {
@@ -86,15 +115,13 @@ public class TransmissionBlock extends KineticBlock implements IBE<TransmissionB
         if (be instanceof TransmissionBlockEntity tbe) {
             Direction facing = state.getValue(FACING);
 
-            // Speed face: the minus (right) side — clockwise from output face
             Direction speedFace = getMinusFace(facing);
-            // Direction face: the plus (left) side — opposite of speed face
-            Direction dirFace = speedFace.getOpposite();
+            Direction dirFace   = speedFace.getOpposite();
 
-            int speedSignal = level.getSignal(pos.relative(speedFace), speedFace);
-            boolean dirSignal = level.getSignal(pos.relative(dirFace), dirFace) > 0;
+            int     speedSignal = level.getSignal(pos.relative(speedFace), speedFace);
+            boolean dirSignal   = level.getSignal(pos.relative(dirFace),   dirFace)   > 0;
 
-            tbe.setRedstonePower(speedSignal, dirSignal);
+            tbe.setVanillaRedstonePower(speedSignal, dirSignal);
         }
     }
 

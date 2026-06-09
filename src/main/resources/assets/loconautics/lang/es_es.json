@@ -17,5 +17,10 @@
   "loconautics.configuration.section.loconautics.common.toml.title": "Configuración de Loconautics",
   "loconautics.configuration.enableSableMode": "Activar Modo de Física Sable",
   "loconautics.configuration.physicsTrainMaxSpeed": "Velocidad Máxima del Tren Físico",
-  "loconautics.configuration.debugRender": "Renderizado de Depuración"
+  "loconautics.configuration.debugRender": "Renderizado de Depuración",
+
+  "gui.loconautics.bind_frequency.forward": "Adelante",
+  "gui.loconautics.bind_frequency.backward": "Atrás",
+  "gui.loconautics.bind_frequency.speed": "Velocidad",
+  "gui.loconautics.bind_frequency.direction": "Dirección"
 }

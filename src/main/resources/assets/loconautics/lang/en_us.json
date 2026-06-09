@@ -33,5 +33,10 @@
   "loconautics.gui.goggles.current_su": "Stress Impact",
   "loconautics.gui.goggles.unit_su": "su",
   "loconautics.gui.goggles.rpm": "Speed",
-  "loconautics.gui.goggles.unit_rpm": "RPM"
+  "loconautics.gui.goggles.unit_rpm": "RPM",
+
+  "gui.loconautics.bind_frequency.forward": "Forward",
+  "gui.loconautics.bind_frequency.backward": "Backward",
+  "gui.loconautics.bind_frequency.speed": "Speed",
+  "gui.loconautics.bind_frequency.direction": "Direction"
 }

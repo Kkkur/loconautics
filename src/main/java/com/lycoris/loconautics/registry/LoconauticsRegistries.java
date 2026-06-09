@@ -3,6 +3,7 @@ package com.lycoris.loconautics.registry;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerMenu;
+import com.lycoris.loconautics.content.transmission.TransmissionMenu;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.content.transmission.TransmissionBlock;
@@ -121,6 +122,11 @@ public final class LoconauticsRegistries {
                                     LoconauticsRegistries.TRANSMISSION_BE.get(), pos, state),
                             TRANSMISSION.get())
                     .build(null));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<TransmissionMenu>>
+            TRANSMISSION_MENU = MENUS.register("transmission", () ->
+            IMenuTypeExtension.create((id, inv, buf) ->
+                    new TransmissionMenu(LoconauticsRegistries.TRANSMISSION_MENU.get(), id, inv, buf)));
 
     // ------------------------------------------------------------------ Creative tab
 

@@ -6,6 +6,7 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.content.transmission.TransmissionRenderer;
+import com.lycoris.loconautics.content.transmission.TransmissionScreen;
 import com.lycoris.loconautics.content.transmission.TransmissionVisual;
 import dev.engine_room.flywheel.lib.visualization.SimpleBlockEntityVisualizer;
 import com.lycoris.loconautics.core.LoconauticsConstants;
@@ -85,6 +86,8 @@ public final class LoconauticsClient {
     private void onRegisterScreens(RegisterMenuScreensEvent event) {
         event.register(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(),
                 AnalogControllerScreen::new);
+        event.register(LoconauticsRegistries.TRANSMISSION_MENU.get(),
+                TransmissionScreen::new);
     }
 
     private void onRegisterGuiLayers(RegisterGuiLayersEvent event) {

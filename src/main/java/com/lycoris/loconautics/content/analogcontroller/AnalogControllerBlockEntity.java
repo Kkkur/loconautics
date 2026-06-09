@@ -21,6 +21,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.createmod.catnip.animation.LerpedFloat;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -56,6 +57,22 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     /** Maximum redstone signal value. */
     private static final int MAX_POWER = 15;
+
+    // ------------------------------------------------------------------ client-side animation state
+    //
+    // These fields are ONLY used on the client. They are NOT serialised to NBT.
+    // The renderer reads them via getValue(partialTick); clientTick() chases them
+    // each frame so the renderer itself stays stateless (fixes flicker when
+    // multiple controllers are visible simultaneously).
+
+    /** Lerps toward currentPower / 15 — drives the speed/throttle lever. */
+    public final LerpedFloat animSpeed = LerpedFloat.linear().startWithValue(0.0);
+
+    /** Lerps toward 0.5 (centre) — drives the steering lever (reserved for future use). */
+    public final LerpedFloat animSteer = LerpedFloat.linear().startWithValue(0.5);
+
+    /** Lerps toward 1 when mounted, 0 when idle — lifts/lowers both levers. */
+    public final LerpedFloat animEquip = LerpedFloat.linear().startWithValue(0.0);
 
     // ------------------------------------------------------------------ state
 
@@ -160,7 +177,25 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
      */
     public static void tick(Level level, BlockPos pos, BlockState state,
                             AnalogControllerBlockEntity be) {
+        if (level.isClientSide) {
+            be.clientTick();
+            return;
+        }
         be.serverTick(level, state);
+    }
+
+    /** Client-only: advance the three animation floats each game tick. */
+    private void clientTick() {
+        float targetSpeed = currentPower / 15.0f;
+        float targetEquip = hasUser() ? 1.0f : 0.0f;
+
+        animSpeed.chase(targetSpeed, 0.4, LerpedFloat.Chaser.EXP);
+        animSteer.chase(0.5,         0.4, LerpedFloat.Chaser.EXP);
+        animEquip.chase(targetEquip, 0.3, LerpedFloat.Chaser.EXP);
+
+        animSpeed.tickChaser();
+        animSteer.tickChaser();
+        animEquip.tickChaser();
     }
 
     private void serverTick(Level level, BlockState state) {
@@ -594,7 +629,21 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         return new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inventory, this);
     }
 
-    // ------------------------------------------------------------------ NBT
+    /**
+     * Writes the two row labels into the extra-data buffer before the standard
+     * pos+NBT payload so the client-side menu constructor can decode them.
+     *
+     * Labels are written first so the client constructor reads them before delegating
+     * to the parent, which calls {@link #createOnClient} (reads pos+NBT from the same buf).
+     */
+    @Override
+    public void sendToMenu(net.minecraft.network.RegistryFriendlyByteBuf buffer) {
+        net.minecraft.network.chat.ComponentSerialization.TRUSTED_STREAM_CODEC
+                .encode(buffer, Component.translatable(AnalogControllerMenu.FORWARD_KEY));
+        net.minecraft.network.chat.ComponentSerialization.TRUSTED_STREAM_CODEC
+                .encode(buffer, Component.translatable(AnalogControllerMenu.BACKWARD_KEY));
+        super.sendToMenu(buffer);
+    }
 
     @Override
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
