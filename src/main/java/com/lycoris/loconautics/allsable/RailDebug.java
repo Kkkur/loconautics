@@ -106,6 +106,20 @@ public final class RailDebug {
                         .then(Commands.argument("speed", DoubleArgumentType.doubleArg(-5.0, 5.0))
                                 .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(),
                                         DoubleArgumentType.getDouble(ctx, "speed"))))
+                        .then(Commands.literal("speed")
+                                .then(Commands.argument("value", DoubleArgumentType.doubleArg(-5.0, 5.0))
+                                        .executes(ctx -> {
+                                            double v = DoubleArgumentType.getDouble(ctx, "value");
+                                            int n = SableTrainSpawner.setSpeedAll(v);
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "[sabletrain] set speed " + v + " on " + n + " train(s)"), false);
+                                            return n;
+                                        })))
+                        .then(Commands.literal("stop").executes(ctx -> {
+                            int n = SableTrainSpawner.setSpeedAll(0.0);
+                            ctx.getSource().sendSuccess(() -> Component.literal("[sabletrain] stopped " + n + " train(s)"), false);
+                            return n;
+                        }))
                         .then(Commands.literal("clear").executes(ctx -> {
                             int n = SableTrainSpawner.clear();
                             ctx.getSource().sendSuccess(() -> Component.literal("[sabletrain] cleared " + n + " train(s)"), false);

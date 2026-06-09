@@ -28,6 +28,8 @@ public final class RailFollower {
     private final ITrackSelector selector;
     /** Blocks per tick (metres / tick). Always positive; direction is encoded in the point itself. */
     private double speed;
+    /** Last valid world position, returned if the point falls off the graph (edge becomes null). */
+    private Vec3 lastPos;
 
     private RailFollower(TrackGraph graph, TravellingPoint point, Vec3 upNormal, double speed) {
         this.graph = graph;
@@ -69,16 +71,24 @@ public final class RailFollower {
 
     /** Advances the point by {@code speed} and returns its new world position, reversing at dead ends. */
     public Vec3 tick() {
+        // If the point ever loses its edge (e.g. the graph changed under it), don't crash — hold position.
+        if (point.edge == null) {
+            return lastPos;
+        }
         point.travel(graph, speed, selector, point.ignoreEdgePoints(), point.ignoreTurns(), point.ignorePortals());
-        if (point.blocked) {
+        if (point.blocked && point.edge != null) {
             point.reverse(graph);
         }
-        return point.getPosition(graph);
+        if (point.edge == null) {
+            return lastPos;
+        }
+        lastPos = point.getPosition(graph);
+        return lastPos;
     }
 
     /** Current world position on the rail (no advance). */
     public Vec3 position() {
-        return point.getPosition(graph);
+        return point.edge == null ? lastPos : point.getPosition(graph);
     }
 
     public double speed() {
