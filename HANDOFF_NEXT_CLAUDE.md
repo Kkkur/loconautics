@@ -9,7 +9,7 @@
 ---
 
 ## 0a. ACTUALIZACIÓN 2026-06-09 noche (LÉEME PRIMERO — estado más reciente)
-Rama `feature/all-sable-physics-train`, último commit **`5958845`**, jar desplegado md5 **`038887f`**.
+Rama `feature/all-sable-physics-train`, último commit **`d87f932`**, jar desplegado md5 **`2539d13`**.
 Workflow sin cambios (build → copiar jar a `Skybound SMP/mods/` → el usuario reinicia → yo leo `latest.log`).
 **Referencia clave nueva: `RESEARCH_sable_aeronautics.md`** (catálogo a fondo de TODA la API de Sable/Aeronautics
 — motion models, fuerzas, constraints, controles, `Sable.HELPER`, etc. Léelo antes de tocar física).
@@ -49,8 +49,9 @@ resolver ese classloader.)
    NECESITAS leer `latest.log` mientras el usuario lo prueba para diagnosticar. (La cadena real:
    Analog Controller → redstone-link → Transmission → shaft → Bearing Axle RPM → velocidad; solo el bearing
    axle fija la velocidad del tren, ver §0a y RESEARCH §Y.)
-2. **"Solo ensamblar si hay un bogey"** — pedido por el usuario, SIN aclarar qué significa "bogey" en el
-   all-sable (no hay bloque bogey explícito; los bogeys son `TravellingPoint` abstractos). Preguntar antes.
+2. ~~"Solo ensamblar si hay un bogey"~~ HECHO (`d87f932`): `/loconautics sabletrain` exige un
+   `AbstractBogeyBlock` de Create en el cart (escaneo hasta el nivel del raíl). Interpretado como "el cart
+   necesita un bloque bogey/ruedas"; si el usuario quería otra cosa, ajustar.
 3. **"Se parte en trozos" al romper un bloque** = splitting de bloques flotantes de Sable
    (`FloatingBlockController`). Investigar desactivarlo para sub-levels de tren. (Romper un vagón ya NO tira el
    tren entero — el `SubLevelObserver` quita solo ese vagón.)
