@@ -190,6 +190,7 @@ public final class SableTrainDriver {
     // ---------------------------------------------------------------------------------------------
 
     private static int diagCounter = 0;
+    private static int massCounter = 0;
 
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -197,16 +198,52 @@ public final class SableTrainDriver {
             return;
         }
         boolean diag = (diagCounter++ % 20) == 0;
+        boolean updateMass = (massCounter++ % 30) == 0; // re-poll the Bearing Axle's train weight every 30 ticks
         for (SableTrain train : SableTrainRegistry.all()) {
             try {
                 applyPropulsion(train);
                 train.tickMotion();
+                if (updateMass) {
+                    updateAxleMass(train);
+                }
                 if (diag && !train.cars().isEmpty()) {
                     logOrientation(train);
                 }
             } catch (Throwable t) {
                 LoconauticsConstants.LOGGER.error("[sabletrain] error ticking motion for {}", train.id(), t);
             }
+        }
+    }
+
+    /**
+     * Every 30 ticks: sum the live mass of the train's car sub-levels and push it into the Bearing Axle
+     * ({@code setTrainMass}) so its weight/stress reflect the cart — and update if blocks are added/removed
+     * (Sable maintains the mass tracker; we never rebuild it — that's what exploded trains before).
+     */
+    private static void updateAxleMass(SableTrain train) {
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        if (container == null) {
+            return;
+        }
+        double total = 0.0;
+        boolean readAny = false;
+        BearingAxleBlockEntity axle = null;
+        for (Car car : train.cars()) {
+            if (car.subLevelId() == null
+                    || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+                continue;
+            }
+            MassData md = sub.getMassTracker();
+            if (md != null) {
+                total += md.getMass();
+                readAny = true;
+            }
+            if (axle == null) {
+                axle = bearingAxleIn(sub);
+            }
+        }
+        if (axle != null && readAny && total != axle.getTrainMass()) {
+            axle.setTrainMass(total);
         }
     }
 
@@ -281,17 +318,26 @@ public final class SableTrainDriver {
                     || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
                 continue;
             }
-            ServerLevel subLevel = sub.getLevel();
-            var bounds = sub.getPlot().getBoundingBox();
-            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-            for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
-                for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
-                    for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
-                        pos.set(x, y, z);
-                        if (subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock
-                                && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity axle) {
-                            return axle;
-                        }
+            BearingAxleBlockEntity axle = bearingAxleIn(sub);
+            if (axle != null) {
+                return axle;
+            }
+        }
+        return null;
+    }
+
+    /** Scans one sub-level's own level for a {@link BearingAxleBlockEntity}, or null. */
+    private static BearingAxleBlockEntity bearingAxleIn(ServerSubLevel sub) {
+        ServerLevel subLevel = sub.getLevel();
+        var bounds = sub.getPlot().getBoundingBox();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock
+                            && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity axle) {
+                        return axle;
                     }
                 }
             }
