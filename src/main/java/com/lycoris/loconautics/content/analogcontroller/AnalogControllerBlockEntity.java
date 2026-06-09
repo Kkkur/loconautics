@@ -188,8 +188,18 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     // ------------------------------------------------------------------ user management
 
+    /** Debounce for the mount toggle (ticks). A click on a block INSIDE a Sable sub-level can be delivered
+     *  twice in one click (e.g. both hands), which would mount then instantly dismount — swallow the echo. */
+    private static final long TOGGLE_DEBOUNCE_TICKS = 3;
+    private long lastToggleTick = Long.MIN_VALUE;
+
     public void toggleUser(Player player) {
         if (level == null) return;
+        long now = level.getGameTime();
+        if (now - lastToggleTick < TOGGLE_DEBOUNCE_TICKS) {
+            return; // duplicate interaction from the same click — ignore so we don't mount-then-release
+        }
+        lastToggleTick = now;
         if (currentUser != null) {
             if (currentUser.equals(player.getUUID())) {
                 // Same player clicks again → dismount
