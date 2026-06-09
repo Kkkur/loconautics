@@ -12,38 +12,27 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * Block entity for the Transmission.
  *
- * Extends {@link GeneratingKineticBlockEntity} so Create treats the output shaft as
- * a speed source (generator side). The input shaft is read purely for its direction
- * sign and contributes no stress of its own.
+ * Two redstone inputs:
+ *   Speed face  (minus side) → controls output RPM (0–15 → 0–256)
+ *   Dir face    (plus side)  → when ON, reverses output direction vs input
  *
- * Speed formula:
- *   signal == 0  → output speed = 0 (disengaged)
- *   signal 1–15 → outputRPM = ceil(signal * 256.0 / 15.0)
- *   sign of outputRPM = sign of input shaft speed (carries direction through)
- *
- * Stress:
- *   SU = Config.TRANSMISSION_SU_IMPACT (returned from calculateStressApplied).
- *   Create multiplies this by abs(outputRPM) automatically.
+ * When speed signal == 0 → output = 0 (disengaged, shafts hidden).
+ * When directionActive → output direction is flipped relative to input shaft.
  */
 public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
 
     // ------------------------------------------------------------------ state
 
-    /** Current redstone signal received by the block (0–15). Persisted to NBT. */
+    /** Current speed redstone signal (0–15). */
     private int redstonePower = 0;
 
-    /**
-     * Cached sign of the input shaft's speed (+1 or -1, never 0).
-     * Defaults to +1 when no source is connected.
-     * Updated each time redstone changes and on tick via {@link #readInputDirection()}.
-     */
+    /** Whether the direction-override signal is active. */
+    private boolean directionActive = false;
+
+    /** Cached sign of the input shaft's speed (+1 or -1). */
     private int inputDirection = 1;
 
-    /**
-     * Whether a live (spinning) kinetic source was found on the input face during the
-     * last {@link #readInputDirection()} call. When false and redstone is on, we still
-     * return speed 0 — the block won't self-stress the network without an actual input.
-     */
+    /** Whether a live kinetic source was found on the input face. */
     private boolean hasLiveInput = false;
 
     // ------------------------------------------------------------------ constructor
@@ -54,36 +43,21 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
 
     // ------------------------------------------------------------------ GeneratingKineticBlockEntity
 
-    /**
-     * Returns the signed output RPM that Create will push into the output kinetic network.
-     *
-     * Called by Create's kinetic engine whenever it needs to know the current speed.
-     * Must be fast and side-effect-free.
-     */
     @Override
     public float getGeneratedSpeed() {
         if (redstonePower == 0) return 0f;
-        if (!hasLiveInput) return 0f;   // no spinning input → don't self-generate
+        if (!hasLiveInput) return 0f;
         float rpm = (float) Math.ceil(redstonePower * 256.0 / 15.0);
-        return inputDirection >= 0 ? rpm : -rpm;
+        // Apply direction: normal = follow input, active = reverse vs input
+        int effectiveDir = directionActive ? -inputDirection : inputDirection;
+        return effectiveDir >= 0 ? rpm : -rpm;
     }
 
-    /**
-     * Stress impact for the output shaft network.
-     * Create multiplies this by abs(outputRPM) to get the full SU cost.
-     */
     @Override
     public float calculateStressApplied() {
         return Config.TRANSMISSION_SU_IMPACT.get().floatValue();
     }
 
-    /**
-     * SU capacity provided to the output network.
-     * Without this, GeneratingKineticBlockEntity adds zero capacity — any stress
-     * at all (including its own) immediately overstresses the network.
-     * We pass through the capacity from config so the Transmission acts as a
-     * proper power relay, not a dead-end consumer.
-     */
     @Override
     public float calculateAddedStressCapacity() {
         float capacity = Config.TRANSMISSION_SU_CAPACITY.get().floatValue();
@@ -91,21 +65,12 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         return capacity;
     }
 
-    // ------------------------------------------------------------------ API
+    // ------------------------------------------------------------------ tick
 
-    /**
-     * Called by {@link TransmissionBlock#neighborChanged} when the surrounding redstone
-     * signal changes. Updates stored power, reads input direction, refreshes the kinetic
-     * network, and syncs the STAGE blockstate property for the visual variant.
-     *
-     * Must only run on the server (caller guards this).
-     */
     @Override
     public void tick() {
         super.tick();
         if (level == null || level.isClientSide) return;
-        // Keep hasLiveInput current every tick so getGeneratedSpeed() is always accurate.
-        // Without this, loading a world with a motor already running would leave hasLiveInput=false.
         boolean wasLive = hasLiveInput;
         readInputDirection();
         if (hasLiveInput != wasLive) {
@@ -114,22 +79,34 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         }
     }
 
+    // ------------------------------------------------------------------ API
+
     private boolean updatingPower = false;
 
-    public void setRedstonePower(int power) {
-        if (updatingPower) return; // guard against recursive neighborChanged re-entry
+    /**
+     * Called by TransmissionBlock#neighborChanged with both signals.
+     */
+    public void setRedstonePower(int speedPower, boolean dirActive) {
+        if (updatingPower) return;
         updatingPower = true;
         try {
             boolean wasDisengaged = this.redstonePower == 0;
-            this.redstonePower = power;
+            boolean dirChanged = this.directionActive != dirActive;
+
+            this.redstonePower = speedPower;
+            this.directionActive = dirActive;
+
             readInputDirection();
-            updateStageBlockstate(power);   // expose/hide shafts FIRST so Create sees correct topology
-            if (wasDisengaged && power != 0) {
-                // Shafts just became visible — force Create to rebuild the kinetic network
-                // from scratch so it picks up the now-connected neighbours.
+            updateStageBlockstate(speedPower, dirActive);
+
+            if (wasDisengaged && speedPower != 0) {
+                detachKinetics();
+            } else if (dirChanged) {
+                // Direction flip needs a full kinetic rebuild so Create re-propagates signs
                 detachKinetics();
             }
-            updateGeneratedRotation();      // notify Create the output speed changed
+
+            updateGeneratedRotation();
             setChanged();
         } finally {
             updatingPower = false;
@@ -138,30 +115,16 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
 
     // ------------------------------------------------------------------ internals
 
-    /**
-     * Reads the speed of the block on the input (back) face of this transmission.
-     *
-     * The input face is the side opposite the output face.
-     * We determine the axis from the blockstate, then look at both ends:
-     *   - one end is the output (front), the other is the input (back).
-     * We read the adjacent BE's getSpeed() to get the raw network speed there,
-     * which gives us direction without being affected by our own getGeneratedSpeed().
-     *
-     * Falls back to the current inputDirection (keeping last known) if no source found.
-     */
     private void readInputDirection() {
         if (level == null || level.isClientSide) return;
 
         BlockState state = getBlockState();
-        Direction.Axis axis = state.getValue(TransmissionBlock.AXIS);
+        Direction.Axis axis = state.getValue(TransmissionBlock.FACING).getAxis();
 
         for (Direction dir : Direction.values()) {
             if (dir.getAxis() != axis) continue;
 
             BlockPos neighbourPos = worldPosition.relative(dir);
-
-            // If this block has a kinetic source assigned, only read from that side.
-            // This prevents the output network's speed from bleeding back in as "input".
             if (source != null && !neighbourPos.equals(source)) continue;
 
             if (level.getBlockEntity(neighbourPos) instanceof com.simibubi.create.content.kinetics.base.KineticBlockEntity kbe) {
@@ -176,16 +139,15 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         hasLiveInput = false;
     }
 
-    /**
-     * Writes the STAGE property into the blockstate so the correct texture variant renders.
-     * Flag 3 = update neighbours + send to clients.
-     */
-    private void updateStageBlockstate(int power) {
+    private void updateStageBlockstate(int power, boolean dirActive) {
         if (level == null || level.isClientSide) return;
         BlockState current = getBlockState();
         int stage = TransmissionBlock.powerToStage(power);
-        if (current.getValue(TransmissionBlock.STAGE) != stage) {
-            level.setBlock(worldPosition, current.setValue(TransmissionBlock.STAGE, stage), 2);
+        BlockState updated = current
+                .setValue(TransmissionBlock.STAGE, stage)
+                .setValue(TransmissionBlock.DIRECTION_ACTIVE, dirActive);
+        if (!updated.equals(current)) {
+            level.setBlock(worldPosition, updated, 2);
         }
     }
 
@@ -196,6 +158,7 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         super.write(tag, registries, clientPacket);
         tag.putInt("RedstonePower", redstonePower);
         tag.putInt("InputDirection", inputDirection);
+        tag.putBoolean("DirectionActive", directionActive);
     }
 
     @Override
@@ -203,5 +166,6 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         super.read(tag, registries, clientPacket);
         redstonePower = tag.getInt("RedstonePower");
         inputDirection = tag.contains("InputDirection") ? tag.getInt("InputDirection") : 1;
+        directionActive = tag.contains("DirectionActive") && tag.getBoolean("DirectionActive");
     }
 }

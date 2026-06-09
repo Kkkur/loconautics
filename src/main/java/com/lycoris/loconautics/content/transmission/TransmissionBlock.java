@@ -1,7 +1,7 @@
 package com.lycoris.loconautics.content.transmission;
 
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -13,29 +13,44 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 
 /**
- * Transmission block — a kinetic speed regulator driven by redstone.
+ * Transmission block — a kinetic speed/direction regulator driven by two redstone signals.
  *
  * Blockstate properties:
- *   AXIS  (from RotatedPillarKineticBlock) — X / Y / Z, determines shaft orientation
- *   STAGE — 0 (off) … 5 (full), drives texture variant for visual feedback
+ *   FACING         — the direction the output shaft points (all 6 directions)
+ *   STAGE          — 0 (off) … 5 (full speed), drives speed-side texture
+ *   DIRECTION_ACTIVE — whether the direction-override redstone signal is on
  *
- * The block itself just:
- *   1. Detects redstone neighbour changes and forwards the signal to the BE.
- *   2. Keeps STAGE in sync for the renderer/blockstate variants.
+ * Redstone faces (relative to FACING):
+ *   Plus side  (left when looking at output face)  → direction override
+ *   Minus side (right when looking at output face) → speed signal
+ *
+ * When DIRECTION_ACTIVE is true, output direction is reversed vs input.
+ * When false, output direction follows input shaft direction.
  */
-public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<TransmissionBlockEntity> {
+public class TransmissionBlock extends KineticBlock implements IBE<TransmissionBlockEntity> {
 
-    /** Visual stage: 0 = off, 1–5 = power bands 1-3 / 4-6 / 7-9 / 10-12 / 13-15 */
+    /** Visual speed stage: 0 = off, 1–5 = power bands. */
     public static final IntegerProperty STAGE = IntegerProperty.create("stage", 0, 5);
+
+    /** True when the direction-override redstone signal is powered. */
+    public static final BooleanProperty DIRECTION_ACTIVE = BooleanProperty.create("direction_active");
+
+    /** The direction the output shaft exits the block. */
+    public static final DirectionProperty FACING = BlockStateProperties.FACING;
 
     public TransmissionBlock(BlockBehaviour.Properties properties) {
         super(properties);
         this.registerDefaultState(
                 this.defaultBlockState()
+                        .setValue(FACING, Direction.SOUTH)
                         .setValue(STAGE, 0)
+                        .setValue(DIRECTION_ACTIVE, false)
         );
     }
 
@@ -44,16 +59,19 @@ public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         super.createBlockStateDefinition(builder);
-        builder.add(STAGE);
+        builder.add(FACING, STAGE, DIRECTION_ACTIVE);
     }
 
     // ------------------------------------------------------------------ placement
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext ctx) {
-        BlockState state = super.getStateForPlacement(ctx);
-        if (state == null) return null;
-        return state.setValue(STAGE, 0);
+        // Face the player (output toward player)
+        Direction facing = ctx.getNearestLookingDirection().getOpposite();
+        return this.defaultBlockState()
+                .setValue(FACING, facing)
+                .setValue(STAGE, 0)
+                .setValue(DIRECTION_ACTIVE, false);
     }
 
     // ------------------------------------------------------------------ redstone
@@ -66,9 +84,51 @@ public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof TransmissionBlockEntity tbe) {
-            int signal = level.getBestNeighborSignal(pos);
-            tbe.setRedstonePower(signal);
+            Direction facing = state.getValue(FACING);
+
+            // Speed face: the minus (right) side — clockwise from output face
+            Direction speedFace = getMinusFace(facing);
+            // Direction face: the plus (left) side — opposite of speed face
+            Direction dirFace = speedFace.getOpposite();
+
+            int speedSignal = level.getSignal(pos.relative(speedFace), speedFace);
+            boolean dirSignal = level.getSignal(pos.relative(dirFace), dirFace) > 0;
+
+            tbe.setRedstonePower(speedSignal, dirSignal);
         }
+    }
+
+    /**
+     * Returns the "minus" (speed) face — the face to the right when you look
+     * from behind the block toward its output (FACING direction).
+     * Uses a 90° clockwise rotation of FACING about the Y axis for horizontal
+     * facings, and stable mappings for up/down.
+     */
+    public static Direction getMinusFace(Direction facing) {
+        return switch (facing) {
+            case NORTH -> Direction.EAST;   // looking south→north, right = east
+            case SOUTH -> Direction.WEST;   // looking north→south, right = west
+            case EAST  -> Direction.SOUTH;  // looking west→east,   right = south
+            case WEST  -> Direction.NORTH;  // looking east→west,   right = north
+            case UP    -> Direction.EAST;   // shaft pointing up,   speed on east
+            case DOWN  -> Direction.WEST;   // shaft pointing down, speed on west
+        };
+    }
+
+    // ------------------------------------------------------------------ shaft axis / connections
+
+    @Override
+    public Direction.Axis getRotationAxis(BlockState state) {
+        return state.getValue(FACING).getAxis();
+    }
+
+    @Override
+    public boolean hasShaftTowards(net.minecraft.world.level.LevelReader world, BlockPos pos,
+                                   BlockState state, Direction face) {
+        // Shafts only on the two faces along the block's axis
+        if (face.getAxis() != state.getValue(FACING).getAxis()) return false;
+        // Disengaged: no shaft connections so rotation can't propagate
+        return state.getValue(STAGE) != 0;
     }
 
     // ------------------------------------------------------------------ block entity
@@ -87,36 +147,9 @@ public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<
 
     /**
      * Maps a redstone power value (0–15) to a visual stage (0–5).
-     * Stage 0 = off; stages 1–5 map bands of 3 signal levels each.
      */
     public static int powerToStage(int power) {
         if (power == 0) return 0;
         return (int) Math.ceil(power / 3.0);
-    }
-
-    // ------------------------------------------------------------------ shaft axis
-
-    /**
-     * The transmission has shafts on the back and front faces (along its axis).
-     * RotatedPillarKineticBlock already gives us the AXIS property; we just tell Create
-     * which directions are valid shaft connections. Both ends of the axis are valid.
-     */
-    @Override
-    public Direction.Axis getRotationAxis(BlockState state) {
-        return state.getValue(AXIS);
-    }
-
-    /**
-     * The transmission exposes shaft connections on both faces of its axis.
-     * When disengaged (STAGE 0 / no redstone), we hide both shaft connections so
-     * Create treats the two sides as separate kinetic networks and rotation cannot
-     * pass through. When engaged, both faces are exposed as normal.
-     */
-    @Override
-    public boolean hasShaftTowards(net.minecraft.world.level.LevelReader world, BlockPos pos,
-                                   BlockState state, Direction face) {
-        if (face.getAxis() != state.getValue(AXIS)) return false;
-        // Disengaged: no shaft connections → rotation cannot propagate through
-        return state.getValue(STAGE) != 0;
     }
 }

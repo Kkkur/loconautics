@@ -2,7 +2,7 @@
   "textures": {
     "0": "loconautics:block/railway_gearbox",
     "1": "loconautics:block/transmission_stage_5",
-    "2": "loconautics:block/transmission_plus_off",
+    "2": "loconautics:block/transmission_plus_on",
     "3": "loconautics:block/transmission_minus_on",
     "particle": "loconautics:block/transmission_stage_5"
   },
