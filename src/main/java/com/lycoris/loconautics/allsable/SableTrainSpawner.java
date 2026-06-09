@@ -22,6 +22,9 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.storage.SubLevelRemovalReason;
 
+import org.joml.Vector3d;
+import org.joml.Vector3dc;
+
 import net.createmod.catnip.data.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -62,21 +65,23 @@ public final class SableTrainSpawner {
     /** The train most recently spawned, so {@code addcar} knows which convoy to extend. */
     private static UUID lastTrainId;
 
-    /** Spawns a NEW single-car custom train from the cart the player is looking at. */
-    public static int spawn(ServerPlayer player, double speed) {
+    /** Spawns a NEW single-car custom train from the cart the player is looking at.
+     *  {@code physics=false} = kinematic teleport-pin (smooth, rigid); {@code physics=true} = free body held to
+     *  the rail by bogey spring forces (can derail). */
+    public static int spawn(ServerPlayer player, double speed, boolean physics) {
         ServerLevel level = player.serverLevel();
         SableTrain.Car car = buildCar(player, level);
         if (car == null) {
             return 0;
         }
         UUID id = UUID.randomUUID();
-        SableTrain train = new SableTrain(id, level, List.of(car));
+        SableTrain train = new SableTrain(id, level, List.of(car), physics);
         train.setTargetSpeed(speed);
         SableTrainRegistry.register(train);
         ensureObserver(level);
         lastTrainId = id;
-        msg(player, String.format("custom train spawned speed=%.2f — id %s — add cars with /loconautics sabletrain addcar",
-                speed, id.toString().substring(0, 8)));
+        msg(player, String.format("%s train spawned speed=%.2f — id %s — add cars with /loconautics sabletrain addcar",
+                physics ? "PHYSICS" : "pinned", speed, id.toString().substring(0, 8)));
         return 1;
     }
 
@@ -158,9 +163,18 @@ public final class SableTrainSpawner {
             msg(player, "couldn't seat the rail body (track not in a graph?)");
             return null;
         }
+        // Capture the two bogey attachment points in the sub-level's LOCAL frame (for physics mode: springs
+        // pull these toward the rail targets). transformPositionInverse(Vec3) -> Vec3 (world -> local).
+        Vec3 leadW = carriage.leadingPos();
+        Vec3 trailW = carriage.trailingPos();
+        Vec3 localLeadVec = sub.logicalPose().transformPositionInverse(leadW);
+        Vec3 localTrailVec = sub.logicalPose().transformPositionInverse(trailW);
+        Vector3dc localLead = new Vector3d(localLeadVec.x, localLeadVec.y, localLeadVec.z);
+        Vector3dc localTrail = new Vector3d(localTrailVec.x, localTrailVec.y, localTrailVec.z);
+
         LoconauticsConstants.LOGGER.info("[sabletrain] built car ({} blocks, spacing {}) on graph {}",
                 blocks.size(), spacing, track.location().graph.id);
-        return new SableTrain.Car(sub.getUniqueId(), carriage);
+        return new SableTrain.Car(sub.getUniqueId(), carriage, localLead, localTrail);
     }
 
     /** Sets the target speed of every active custom train (live throttle for testing). Returns the count. */

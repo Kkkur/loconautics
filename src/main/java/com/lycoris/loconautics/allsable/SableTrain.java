@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.joml.Vector3dc;
+
 import net.minecraft.server.level.ServerLevel;
 
 /**
@@ -21,12 +23,20 @@ import net.minecraft.server.level.ServerLevel;
  */
 public final class SableTrain {
 
-    /** One carriage: its Sable sub-level id + the rail body that says where it should be. */
-    public record Car(UUID subLevelId, RailCarriage carriage) {}
+    /**
+     * One carriage: its Sable sub-level id + the rail body (target) that says where it should be.
+     * {@code localLead}/{@code localTrail} are the two bogey attachment points in the sub-level's LOCAL frame
+     * (captured at spawn) — used only in physics mode, where springs pull these points toward the rail
+     * targets. They are {@code null} for pin-mode cars.
+     */
+    public record Car(UUID subLevelId, RailCarriage carriage, Vector3dc localLead, Vector3dc localTrail) {}
 
     private final UUID id;
     private final ServerLevel level;
     private final List<Car> cars;
+    /** When true, cars are free physics bodies held to the rail by bogey spring forces (and can derail);
+     *  when false, cars are kinematically teleport-pinned to the rail (smooth, rigid). */
+    private final boolean physics;
 
     /** Current speed (blocks/tick), ramped toward {@link #targetSpeed}. */
     private double speed = 0.0;
@@ -35,10 +45,15 @@ public final class SableTrain {
     /** Acceleration magnitude (blocks/tick per tick). */
     private double accel = 0.01;
 
-    public SableTrain(UUID id, ServerLevel level, List<Car> cars) {
+    public SableTrain(UUID id, ServerLevel level, List<Car> cars, boolean physics) {
         this.id = id;
         this.level = level;
         this.cars = new ArrayList<>(cars);
+        this.physics = physics;
+    }
+
+    public boolean isPhysics() {
+        return physics;
     }
 
     public UUID id() {

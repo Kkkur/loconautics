@@ -102,10 +102,15 @@ public final class RailDebug {
                                                 DoubleArgumentType.getDouble(ctx, "spacing"),
                                                 DoubleArgumentType.getDouble(ctx, "speed"))))))
                 .then(Commands.literal("sabletrain")
-                        .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(), DEFAULT_SPEED))
+                        .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(), DEFAULT_SPEED, false))
                         .then(Commands.argument("startspeed", DoubleArgumentType.doubleArg(-5.0, 5.0))
                                 .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(),
-                                        DoubleArgumentType.getDouble(ctx, "startspeed"))))
+                                        DoubleArgumentType.getDouble(ctx, "startspeed"), false)))
+                        .then(Commands.literal("physics")
+                                .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(), DEFAULT_SPEED, true))
+                                .then(Commands.argument("pspeed", DoubleArgumentType.doubleArg(-5.0, 5.0))
+                                        .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(),
+                                                DoubleArgumentType.getDouble(ctx, "pspeed"), true))))
                         .then(Commands.literal("speed")
                                 .then(Commands.argument("value", DoubleArgumentType.doubleArg(-5.0, 5.0))
                                         .executes(ctx -> {

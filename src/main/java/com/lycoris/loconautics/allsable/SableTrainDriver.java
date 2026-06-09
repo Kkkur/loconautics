@@ -10,10 +10,13 @@ import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
+import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
+import dev.ryanhcode.sable.api.physics.force.ForceTotal;
+import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
+import dev.ryanhcode.sable.api.physics.mass.MassData;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.platform.SableEventPlatform;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
@@ -21,7 +24,7 @@ import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -53,9 +56,17 @@ public final class SableTrainDriver {
     // Physics tick: pin each car's sub-level pose to its RailCarriage.
     // ---------------------------------------------------------------------------------------------
 
-    /** Pre-step: teleport the body (Rapier + logicalPose) to the rail pose and kill its velocity. */
+    // Bogey spring (physics mode): acceleration coefficients (force is mass-normalised). Tune in-game.
+    private static final double SPRING_K = 150.0; // stiffness: accel per metre of offset toward the rail
+    private static final double SPRING_C = 25.0;  // damping: ~critical for K (2·sqrt(K) ≈ 24.5)
+
+    /** Pre-step: PIN cars teleport to the rail; PHYSICS cars get bogey spring forces (free body, can derail). */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
-        forEachCar(system, (pipeline, sub, car) -> {
+        forEachCar(system, (pipeline, sub, train, car) -> {
+            if (train.isPhysics()) {
+                applyBogeySprings(sub, car, timeStep, system.getLevel());
+                return;
+            }
             Quaterniond q = car.carriage().orientation();
             Vector3d center = car.carriage().center();
             if (center == null) {
@@ -67,9 +78,12 @@ public final class SableTrainDriver {
         });
     }
 
-    /** Post-step: re-pin logicalPose (only) to the rail pose, removing the per-substep gravity sag. */
+    /** Post-step: re-pin PIN cars (removes the gravity sag). PHYSICS cars simulate freely — leave them alone. */
     public static void onPostPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
-        forEachCar(system, (pipeline, sub, car) -> {
+        forEachCar(system, (pipeline, sub, train, car) -> {
+            if (train.isPhysics()) {
+                return;
+            }
             Quaterniond q = car.carriage().orientation();
             Vector3d center = car.carriage().center();
             if (center == null) {
@@ -80,6 +94,43 @@ public final class SableTrainDriver {
             pose.position().set(target);
             pose.orientation().set(q);
         });
+    }
+
+    /**
+     * Physics-mode hold: a stiff spring at each bogey pulls that attachment point on the free car body toward
+     * its advancing rail target (the WheelMount recipe). The car rides the rail by force, not teleport, so it
+     * can lag, bounce and DERAIL when the lateral pull can't hold it through a curve. Drive comes from the
+     * rail targets advancing (RPM/speed) — the springs drag the body along.
+     */
+    private static void applyBogeySprings(ServerSubLevel sub, Car car, double dt, ServerLevel level) {
+        if (car.localLead() == null || car.localTrail() == null) {
+            return;
+        }
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        MassData md = sub.getMassTracker();
+        double mass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
+        ForceTotal forces = new ForceTotal();
+        bogeySpring(forces, sub, car.localLead(), car.carriage().leadingPos(), mass, dt, level);
+        bogeySpring(forces, sub, car.localTrail(), car.carriage().trailingPos(), mass, dt, level);
+        handle.applyForcesAndReset(forces);
+    }
+
+    /** One bogey: spring impulse pulling the local attachment point toward the world rail target, mass-scaled. */
+    private static void bogeySpring(ForceTotal forces, ServerSubLevel sub, Vector3dc localPoint, Vec3 targetVec,
+                                    double mass, double dt, ServerLevel level) {
+        if (targetVec == null) {
+            return;
+        }
+        Vector3d worldPoint = sub.logicalPose().transformPosition(localPoint, new Vector3d());
+        Vector3d delta = new Vector3d(targetVec.x, targetVec.y, targetVec.z).sub(worldPoint);
+        Vector3d vel = Sable.HELPER.getVelocity(level, worldPoint, new Vector3d());
+        // accel = K·delta − C·vel ; impulse = mass · accel · dt
+        Vector3d worldImpulse = new Vector3d(delta).mul(SPRING_K).fma(-SPRING_C, vel).mul(mass * dt);
+        Vector3d localImpulse = sub.logicalPose().transformNormalInverse(worldImpulse, new Vector3d());
+        forces.applyImpulseAtPoint(sub, localPoint, localImpulse);
     }
 
     private static void forEachCar(SubLevelPhysicsSystem system, CarAction action) {
@@ -105,9 +156,9 @@ public final class SableTrainDriver {
                     continue;
                 }
                 try {
-                    action.run(pipeline, sub, car);
+                    action.run(pipeline, sub, train, car);
                 } catch (Throwable t) {
-                    LoconauticsConstants.LOGGER.error("[sabletrain] error pinning sub-level {}", car.subLevelId(), t);
+                    LoconauticsConstants.LOGGER.error("[sabletrain] error driving sub-level {}", car.subLevelId(), t);
                 }
             }
         }
@@ -115,7 +166,7 @@ public final class SableTrainDriver {
 
     @FunctionalInterface
     private interface CarAction {
-        void run(PhysicsPipeline pipeline, ServerSubLevel sub, Car car);
+        void run(PhysicsPipeline pipeline, ServerSubLevel sub, SableTrain train, Car car);
     }
 
     /**
