@@ -6,11 +6,8 @@ import org.joml.Vector3dc;
 
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.allsable.SableTrain.Car;
-import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
-import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
-import com.lycoris.loconautics.content.transmission.TransmissionBlock;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
@@ -171,10 +168,19 @@ public final class SableTrainDriver {
         double dx = lead.x - trail.x, dy = lead.y - trail.y, dz = lead.z - trail.z;
         double yaw = Math.toDegrees(Math.atan2(dz, dx)) + 180.0;
         double pitch = -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+        // Bearing-axle RPM: KEY signal — tells us whether Create's kinetic network produces rotation INSIDE
+        // the sub-level (BEs don't tick there, so this may stay 0 even with a powered chain on board).
+        String axleRpm = "no-axle";
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        if (container != null) {
+            BearingAxleBlockEntity axle = findBearingAxle(train, container);
+            if (axle != null) {
+                axleRpm = f(axle.getSpeed());
+            }
+        }
         LoconauticsConstants.LOGGER.info(
-                "[sabletrain] diag speed={} fwd=({}, {}, {}) yaw={} pitch={} dy={} lead=({},{},{}) trail=({},{},{})",
-                f(train.speed()), f(fwd.x), f(fwd.y), f(fwd.z), f(yaw), f(pitch), f(dy),
-                f(lead.x), f(lead.y), f(lead.z), f(trail.x), f(trail.y), f(trail.z));
+                "[sabletrain] diag speed={} axleRPM={} fwd=({}, {}, {}) yaw={} pitch={} dy={}",
+                f(train.speed()), axleRpm, f(fwd.x), f(fwd.y), f(fwd.z), f(yaw), f(pitch), f(dy));
     }
 
     private static String f(double d) {
@@ -198,24 +204,17 @@ public final class SableTrainDriver {
         if (container == null) {
             return;
         }
-        Controls c = findControls(train, container);
-
+        BearingAxleBlockEntity axle = findBearingAxle(train, container);
+        if (axle == null) {
+            return; // no engine on board — keep the debug/command target speed
+        }
+        // The Bearing Axle is the ONLY thing that drives train velocity. It reads the RPM delivered by the
+        // player's Create kinetic chain: separate generators produce rotation, the Transmission lets through
+        // more/less of it according to the redstone signal from the Analog Controller (1..15), and the shaft
+        // carries that controlled rotation to the axle. Train speed is purely a function of that RPM
+        // (256 RPM = full speed); the sign of the RPM is the travel direction.
         double maxSpeed = maxSpeedBpt();
-        Double target = null;
-        if (c.analog != null) {
-            // Analog Controller = the driver's throttle: power 0..15 maps to 0..maxSpeed (forward).
-            target = (c.analog.getCurrentPower() / 15.0) * maxSpeed;
-        } else if (c.axle != null) {
-            // Bearing Axle = kinetic engine: signed RPM (256 = full) maps to ±maxSpeed.
-            target = (c.axle.getSpeed() / 256.0) * maxSpeed;
-        }
-        if (target == null) {
-            return; // no control block on board — keep the debug/command target speed
-        }
-        // Transmission = gearbox: STAGE 0 (off) .. 5 (full) scales the speed.
-        if (c.transmissionStage >= 0) {
-            target *= c.transmissionStage / 5.0;
-        }
+        double target = (axle.getSpeed() / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
         train.setTargetSpeed(target);
     }
@@ -226,16 +225,8 @@ public final class SableTrainDriver {
         return cfg > 0.0 ? cfg : 1.0;
     }
 
-    /** Control blocks found inside a train's car sub-levels. */
-    private static final class Controls {
-        AnalogControllerBlockEntity analog;
-        BearingAxleBlockEntity axle;
-        int transmissionStage = -1; // -1 = no transmission present
-    }
-
-    /** Single pass over each car's sub-level collecting the Analog Controller / Bearing Axle / Transmission. */
-    private static Controls findControls(SableTrain train, ServerSubLevelContainer container) {
-        Controls c = new Controls();
+    /** Finds the Bearing Axle inside any of the train's car sub-levels (the propulsion engine), or null. */
+    static BearingAxleBlockEntity findBearingAxle(SableTrain train, ServerSubLevelContainer container) {
         for (Car car : train.cars()) {
             if (car.subLevelId() == null
                     || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
@@ -248,21 +239,14 @@ public final class SableTrainDriver {
                 for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
                     for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
                         pos.set(x, y, z);
-                        var state = subLevel.getBlockState(pos);
-                        var block = state.getBlock();
-                        if (c.analog == null && block instanceof AnalogControllerBlock
-                                && subLevel.getBlockEntity(pos) instanceof AnalogControllerBlockEntity a) {
-                            c.analog = a;
-                        } else if (c.axle == null && block instanceof BearingAxleBlock
-                                && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity a) {
-                            c.axle = a;
-                        } else if (c.transmissionStage < 0 && block instanceof TransmissionBlock) {
-                            c.transmissionStage = state.getValue(TransmissionBlock.STAGE);
+                        if (subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock
+                                && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity axle) {
+                            return axle;
                         }
                     }
                 }
             }
         }
-        return c;
+        return null;
     }
 }
