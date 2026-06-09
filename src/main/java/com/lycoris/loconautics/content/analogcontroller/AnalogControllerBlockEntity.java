@@ -146,9 +146,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         float targetSpeed = Math.abs(currentPower) / 15.0f;
         float targetEquip = hasUser() ? 1.0f : 0.0f;
 
-        animSpeed.chase(targetSpeed, 0.4, LerpedFloat.Chaser.EXP);
-        animSteer.chase(0.5,         0.4, LerpedFloat.Chaser.EXP);
-        animEquip.chase(targetEquip, 0.3, LerpedFloat.Chaser.EXP);
+        animSpeed.chase(targetSpeed, 0.15, LerpedFloat.Chaser.EXP);
+        animSteer.chase(0.5,         0.15, LerpedFloat.Chaser.EXP);
+        animEquip.chase(targetEquip, 0.1, LerpedFloat.Chaser.EXP);
 
         animSpeed.tickChaser();
         animSteer.tickChaser();
@@ -171,15 +171,30 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         int negativeCap = getNegativeCap();
 
         // ---- decay (always runs unless locked) ----
-        if (!locked && currentPower != 0) {
-            // Use a persistent decay counter stored as a field
+        // The decay target is 0, but if currentPower is outside the threshold bounds
+        // (e.g. scroll moved maxPower down while at speed), decay toward the bound first.
+        // This mirrors how Create's throttle works: changing the cap changes the target,
+        // actual value converges to it naturally — never teleports.
+        // Decay target: toward 0, but clamped to threshold bounds first.
+        // Also: if a key is actively holding power at a bound, don't decay past it.
+        // maxPower is the scroll threshold — symmetric: forward cap = +maxPower, backward cap = -maxPower.
+        // negativeCap is the hard config floor S can never exceed.
+        int backwardCap = -Math.min(maxPower, negativeCap); // e.g. maxPower=3, negativeCap=5 → -3
+        int decayTarget;
+        if      (currentPower > maxPower)            decayTarget = maxPower;     // above forward threshold: decay down to it
+        else if (currentPower < backwardCap)          decayTarget = backwardCap; // below backward threshold: decay up to it
+        else if (raisingSignal && currentPower > 0)  decayTarget = maxPower;    // W held: freeze at forward cap
+        else if (loweringSignal && currentPower < 0) decayTarget = backwardCap; // S held in reverse: freeze at backward cap
+        else                                          decayTarget = 0;
+
+        if (!locked && currentPower != decayTarget) {
             decayCounter--;
             if (decayCounter <= 0) {
                 decayCounter = decayTicks;
-                currentPower += (currentPower > 0) ? -1 : 1; // step toward 0
+                currentPower += (currentPower > decayTarget) ? -1 : 1;
             }
-        } else {
-            decayCounter = decayTicks; // reset so decay doesn't fire immediately after unlock
+        } else if (locked || currentPower == decayTarget) {
+            decayCounter = decayTicks;
         }
 
         // ---- W / S (only while mounted) ----
@@ -188,25 +203,35 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
             if (!bothHeld) {
                 if (raisingSignal) {
-                    raiseTimer--;
-                    if (raiseTimer <= 0) {
-                        raiseTimer = RAISE_TICKS;
-                        currentPower = Math.min(currentPower + 1, maxPower);
+                    // W blocked if at or above threshold
+                    if (currentPower < maxPower) {
+                        raiseTimer--;
+                        if (raiseTimer <= 0) {
+                            raiseTimer = RAISE_TICKS;
+                            currentPower = Math.min(currentPower + 1, maxPower);
+                        }
+                        // Only suppress decay when within normal range (not being dragged down by threshold)
+                        if (currentPower <= maxPower) decayCounter = decayTicks;
                     }
-                    decayCounter = decayTicks; // suppress decay while actively raising
+                    // If currentPower > maxPower, decay runs freely — don't touch decayCounter
                 }
 
                 if (loweringSignal) {
-                    lowerTimer--;
-                    if (lowerTimer <= 0) {
-                        if (currentPower > 0) {
-                            lowerTimer = RAISE_TICKS + 5; // braking: faster
-                        } else {
-                            lowerTimer = LOWER_TICKS;     // going into/deeper reverse: slower
+                    // S blocked if at or below the backward threshold (symmetric maxPower)
+                    int backCap = -Math.min(maxPower, negativeCap);
+                    if (currentPower > backCap) {
+                        lowerTimer--;
+                        if (lowerTimer <= 0) {
+                            if (currentPower > 0) {
+                                lowerTimer = RAISE_TICKS + 5; // braking: faster
+                            } else {
+                                lowerTimer = LOWER_TICKS;     // going into/deeper reverse: slower
+                            }
+                            currentPower = Math.max(currentPower - 1, backCap);
                         }
-                        currentPower = Math.max(currentPower - 1, -negativeCap);
+                        if (currentPower >= backCap) decayCounter = decayTicks;
                     }
-                    decayCounter = decayTicks;
+                    // If currentPower < backCap, decay runs freely toward backCap
                 }
             }
         }
@@ -491,6 +516,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         tag.putBoolean("Locked", locked);
         tag.putInt("MaxPower", maxPower);
         if (currentUser != null) tag.putUUID("User", currentUser);
+        if (clientPacket) tag.putBoolean("HasUser", currentUser != null);
 
         CompoundTag freq = new CompoundTag();
         freq.put("First",      frequencyFirst.saveOptional(registries));
@@ -506,7 +532,13 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         currentPower = tag.getInt("Power");
         locked       = tag.getBoolean("Locked");
         maxPower     = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
-        currentUser  = null; // never restore stale user UUID
+        // On client packets, restore HasUser so animEquip works; use a sentinel UUID since
+        // the actual UUID is not needed client-side (only hasUser() matters for rendering).
+        if (clientPacket && tag.contains("HasUser")) {
+            currentUser = tag.getBoolean("HasUser") ? java.util.UUID.randomUUID() : null;
+        } else {
+            currentUser = null; // never restore stale user UUID on server
+        }
 
         if (tag.contains("Frequency")) {
             CompoundTag freq = tag.getCompound("Frequency");

@@ -66,9 +66,9 @@ public class AnalogControllerHUD {
 
         // Tick lerped values toward actual targets (same pattern as TrainHUD)
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(true);
-        displayedSpeed.chase(Math.abs(power) / 15.0, 0.5, LerpedFloat.Chaser.EXP);
+        displayedSpeed.chase(Math.abs(power) / 15.0, 0.15, LerpedFloat.Chaser.EXP);
         displayedSpeed.tickChaser();
-        displayedThrottle.chase(maxPower / 15.0, 0.75, LerpedFloat.Chaser.EXP);
+        displayedThrottle.chase(maxPower / 15.0, 0.2, LerpedFloat.Chaser.EXP);
         displayedThrottle.tickChaser();
         float animSpeed    = displayedSpeed.getValue(partialTicks);
         float animThrottle = displayedThrottle.getValue(partialTicks);
