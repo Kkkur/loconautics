@@ -9,7 +9,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
@@ -128,29 +130,55 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     /**
      * Shift right-click → open frequency GUI.
      * Normal right-click → mount / dismount.
+     *
+     * Uses useItemOn (fires for both empty and held hand) instead of useWithoutItem
+     * so the interaction registers reliably in all contexts including Sable sub-levels.
      */
     @Override
-    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
-                                               Player player, BlockHitResult hitResult) {
+    protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level,
+                                              BlockPos pos, Player player, InteractionHand hand,
+                                              BlockHitResult hitResult) {
+        if (hand != InteractionHand.MAIN_HAND) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+
         if (player.isShiftKeyDown()) {
             // Open frequency screen (server side opens menu)
             if (!level.isClientSide && player instanceof ServerPlayer sp) {
-                BlockEntity be = level.getBlockEntity(pos);
-                if (be instanceof AnalogControllerBlockEntity ace) {
+                AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+                if (ace != null) {
                     sp.openMenu(ace, ace::sendToMenu);
                 }
             }
-            return InteractionResult.sidedSuccess(level.isClientSide);
+            return ItemInteractionResult.sidedSuccess(level.isClientSide);
         }
 
         // Normal click — toggle mount
         if (!level.isClientSide) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof AnalogControllerBlockEntity ace) {
+            AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+            if (ace != null) {
                 ace.toggleUser(player);
             }
         }
-        return InteractionResult.sidedSuccess(level.isClientSide);
+        return ItemInteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    /**
+     * Resolves the AnalogControllerBlockEntity at {@code pos} in {@code level},
+     * falling back to the Sable sub-level's own level when the block lives inside one.
+     */
+    @Nullable
+    private static AnalogControllerBlockEntity resolveBlockEntity(Level level, BlockPos pos) {
+        // Fast path: block is in the real world
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof AnalogControllerBlockEntity ace) return ace;
+
+        // Sub-level path: find the sub-level that owns this block pos and query its level
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel =
+                dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
+        if (subLevel != null) {
+            be = subLevel.getLevel().getBlockEntity(pos);
+            if (be instanceof AnalogControllerBlockEntity ace) return ace;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ block entity
@@ -176,8 +204,8 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     protected void onRemove(BlockState state, Level level, BlockPos pos,
                             BlockState newState, boolean movedByPiston) {
         if (!state.is(newState.getBlock())) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof AnalogControllerBlockEntity ace) {
+            AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+            if (ace != null) {
                 ace.onRemoved();
             }
         }

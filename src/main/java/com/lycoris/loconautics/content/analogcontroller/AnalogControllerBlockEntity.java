@@ -463,7 +463,10 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         currentPower = tag.getInt("Power");
         locked = tag.getBoolean("Locked");
         maxPower = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
-        currentUser = tag.contains("User") ? tag.getUUID("User") : null;
+        // Intentionally NOT restoring currentUser — if the chunk unloads mid-ride
+        // the player is already disconnected, restoring a stale UUID would lock the
+        // controller and prevent anyone from mounting it again.
+        currentUser = null;
 
         if (tag.contains("Frequency")) {
             CompoundTag freq = tag.getCompound("Frequency");

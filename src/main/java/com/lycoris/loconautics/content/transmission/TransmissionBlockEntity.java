@@ -73,7 +73,8 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
         if (level == null || level.isClientSide) return;
         boolean wasLive = hasLiveInput;
         readInputDirection();
-        if (hasLiveInput != wasLive) {
+        if (hasLiveInput != wasLive || pendingRotationUpdate) {
+            pendingRotationUpdate = false;
             updateGeneratedRotation();
             setChanged();
         }
@@ -82,6 +83,11 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
     // ------------------------------------------------------------------ API
 
     private boolean updatingPower = false;
+    private boolean pendingRotationUpdate = false;
+
+    private void scheduleRotationUpdate() {
+        pendingRotationUpdate = true;
+    }
 
     /**
      * Called by TransmissionBlock#neighborChanged with both signals.
@@ -99,14 +105,14 @@ public class TransmissionBlockEntity extends GeneratingKineticBlockEntity {
             readInputDirection();
             updateStageBlockstate(speedPower, dirActive);
 
-            if (wasDisengaged && speedPower != 0) {
+            if (wasDisengaged && speedPower != 0 || dirChanged) {
+                // Detach and defer the rotation update to the next tick so Create
+                // fully re-propagates the new speed/direction sign
                 detachKinetics();
-            } else if (dirChanged) {
-                // Direction flip needs a full kinetic rebuild so Create re-propagates signs
-                detachKinetics();
+                scheduleRotationUpdate();
+            } else {
+                updateGeneratedRotation();
             }
-
-            updateGeneratedRotation();
             setChanged();
         } finally {
             updatingPower = false;

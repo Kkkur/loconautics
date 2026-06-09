@@ -1,0 +1,7 @@
+{
+  "parent": "loconautics:block/transmission_direction_active",
+  "textures": {
+    "2": "loconautics:block/transmission_minus_off",
+    "3": "loconautics:block/transmission_plus_on"
+  }
+}
