@@ -81,6 +81,7 @@ public final class SableTrainSpawner {
         SableTrainRegistry.register(train);
         ensureObserver(level);
         lastTrainId = id;
+        SableTrainPersistence.persist(train); // survive restarts
         msg(player, String.format("%s train spawned speed=%.2f — id %s — add cars with /loconautics sabletrain addcar",
                 physics ? "PHYSICS" : "pinned", speed, id.toString().substring(0, 8)));
         return 1;
@@ -101,6 +102,7 @@ public final class SableTrainSpawner {
             return 0;
         }
         train.cars().add(car);
+        SableTrainPersistence.persist(train); // re-snapshot the now-longer consist
         msg(player, "car added — train now has " + train.cars().size() + " cars (each pivots on its own bogeys)");
         return 1;
     }
@@ -216,6 +218,7 @@ public final class SableTrainSpawner {
                 }
             }
             SableTrainRegistry.remove(train.id());
+            SableTrainPersistence.unpersist(train.level().getServer(), train.id()); // forget it on disk too
             n++;
         }
         lastTrainId = null;
@@ -264,9 +267,15 @@ public final class SableTrainSpawner {
         return null;
     }
 
+    /** Records {@code id} as the most-recently-touched train (so {@code addcar} targets a restored consist). */
+    static void noteRestored(UUID id) {
+        lastTrainId = id;
+    }
+
     /** Attach (once per container) an observer that drops only the affected CAR when its sub-level is removed
-     *  (not the whole train — breaking one car must not drop the rest of the convoy). */
-    private static void ensureObserver(ServerLevel level) {
+     *  (not the whole train — breaking one car must not drop the rest of the convoy). Public so the restore
+     *  path can re-attach it for trains rebuilt after a restart. */
+    public static void ensureObserver(ServerLevel level) {
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null || OBSERVED.contains(container)) {
             return;
@@ -274,11 +283,23 @@ public final class SableTrainSpawner {
         container.addObserver(new SubLevelObserver() {
             @Override
             public void onSubLevelRemoved(SubLevel subLevel, SubLevelRemovalReason reason) {
+                // Only a genuine REMOVED (destroyed/disassembled) drops the car. UNLOADED means the sub-level is
+                // just being unloaded (chunk unload / server stop) and will come back — keep the train AND its
+                // saved record, or every shutdown would wipe persistence.
+                if (reason != SubLevelRemovalReason.REMOVED) {
+                    return;
+                }
                 UUID removedId = subLevel.getUniqueId();
                 for (SableTrain train : SableTrainRegistry.all()) {
                     boolean removed = train.cars().removeIf(car -> removedId.equals(car.subLevelId()));
-                    if (removed && train.cars().isEmpty()) {
+                    if (!removed) {
+                        continue;
+                    }
+                    if (train.cars().isEmpty()) {
                         SableTrainRegistry.remove(train.id()); // only drop the train once it has no cars left
+                        SableTrainPersistence.unpersist(train.level().getServer(), train.id());
+                    } else {
+                        SableTrainPersistence.persist(train); // re-snapshot the shortened consist
                     }
                 }
             }

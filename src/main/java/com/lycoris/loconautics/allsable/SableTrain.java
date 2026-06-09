@@ -72,6 +72,12 @@ public final class SableTrain {
         return speed;
     }
 
+    /** Restores the current speed (used by persistence so a reloaded train resumes at its previous speed
+     *  instead of ramping back up from zero). */
+    public void setSpeed(double speed) {
+        this.speed = speed;
+    }
+
     public void setTargetSpeed(double targetSpeed) {
         this.targetSpeed = targetSpeed;
     }
@@ -82,6 +88,10 @@ public final class SableTrain {
 
     public void setAccel(double accel) {
         this.accel = Math.abs(accel);
+    }
+
+    public double accel() {
+        return accel;
     }
 
     /**

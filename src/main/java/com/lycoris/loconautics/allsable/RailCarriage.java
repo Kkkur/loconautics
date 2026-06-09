@@ -1,5 +1,7 @@
 package com.lycoris.loconautics.allsable;
 
+import java.util.UUID;
+
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
@@ -7,9 +9,11 @@ import org.joml.Vector3d;
 import com.simibubi.create.content.trains.entity.TravellingPoint;
 import com.simibubi.create.content.trains.entity.TravellingPoint.ITrackSelector;
 import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
+import com.simibubi.create.content.trains.graph.DimensionPalette;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import com.simibubi.create.content.trains.graph.TrackGraphLocation;
 
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -32,6 +36,8 @@ public final class RailCarriage {
     private final ITrackSelector leadingSelector;
     private final ITrackSelector trailingSelector;
     private final double bogeySpacing;
+    /** Track up-normal used to build the steering selectors (kept so the carriage can be re-serialised). */
+    private final Vec3 upNormal;
     private double speed;
     private boolean stopped;
 
@@ -45,6 +51,7 @@ public final class RailCarriage {
         this.leading = leading;
         this.trailing = trailing;
         this.bogeySpacing = bogeySpacing;
+        this.upNormal = upNormal;
         this.speed = speed;
         this.leadingSelector = leading.steer(SteerDirection.NONE, upNormal);
         this.trailingSelector = trailing.follow(leading);
@@ -196,5 +203,59 @@ public final class RailCarriage {
 
     public void setSpeed(double speed) {
         this.speed = speed;
+    }
+
+    /** The id of the Create track graph this carriage rides (used to re-resolve the graph after a restart). */
+    public UUID graphId() {
+        return graph.id;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Persistence: serialise the two bogey TravellingPoints + the spawn reference frame, so the carriage
+    // can be rebuilt at exactly the same rail position/orientation after a server restart.
+    // ---------------------------------------------------------------------------------------------
+
+    /** Serialises this carriage to NBT (bogey points via {@code dims}, spacing, up-normal, spawn frame). */
+    public CompoundTag writeNbt(DimensionPalette dims) {
+        if (forward0 == null) {
+            captureReference();
+        }
+        CompoundTag tag = new CompoundTag();
+        tag.put("Leading", leading.write(dims));
+        tag.put("Trailing", trailing.write(dims));
+        tag.putDouble("Spacing", bogeySpacing);
+        tag.putBoolean("Stopped", stopped);
+        tag.putDouble("UpX", upNormal.x);
+        tag.putDouble("UpY", upNormal.y);
+        tag.putDouble("UpZ", upNormal.z);
+        if (forward0 != null) {
+            tag.putDouble("FwdX", forward0.x);
+            tag.putDouble("FwdY", forward0.y);
+            tag.putDouble("FwdZ", forward0.z);
+        }
+        return tag;
+    }
+
+    /**
+     * Rebuilds a carriage from {@link #writeNbt} data on the given (already-resolved) graph. Returns
+     * {@code null} if either bogey's track segment no longer exists in the graph (rail was changed while the
+     * server was off). The saved spawn reference frame is restored verbatim so the orientation continues from
+     * exactly where it left off (re-capturing it here would wrongly reset the car to axis-aligned).
+     */
+    public static RailCarriage restore(TrackGraph graph, CompoundTag tag, DimensionPalette dims) {
+        TravellingPoint leading = TravellingPoint.read(tag.getCompound("Leading"), graph, dims);
+        TravellingPoint trailing = TravellingPoint.read(tag.getCompound("Trailing"), graph, dims);
+        if (leading.edge == null || trailing.edge == null) {
+            return null;
+        }
+        Vec3 up = new Vec3(tag.getDouble("UpX"), tag.getDouble("UpY"), tag.getDouble("UpZ"));
+        double spacing = tag.getDouble("Spacing");
+        RailCarriage c = new RailCarriage(graph, leading, trailing, up, spacing, 0.0);
+        if (tag.contains("FwdX")) {
+            c.forward0 = new Vector3d(tag.getDouble("FwdX"), tag.getDouble("FwdY"), tag.getDouble("FwdZ"));
+            c.up0 = perpendicularUp(c.forward0);
+        }
+        c.stopped = tag.getBoolean("Stopped");
+        return c;
     }
 }

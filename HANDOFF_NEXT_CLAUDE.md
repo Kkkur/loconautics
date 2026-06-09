@@ -68,9 +68,20 @@ resolver ese classloader.)
    tren entero — el `SubLevelObserver` quita solo ese vagón.)
 4. **Acople multi-vagón con constraint** (Fixed/Generic, RESEARCH §H.4) — pendiente; ahora los vagones se
    mantienen juntos solo por "misma velocidad" (loose).
-5. **Persistencia**: los SableTrain NO sobreviven reinicios (`SableTrainRegistry` es en memoria). Los
-   sub-levels SÍ persisten en disco → quedan huérfanos. Implementar SavedData + re-seat de bogeys
-   (`TravellingPoint.write/read`).
+5. ~~**Persistencia**~~ **IMPLEMENTADO 2026-06-09 (sin probar in-game todavía).** Nuevo `allsable/
+   SableTrainStore` (SavedData global en el overworld, `loconautics_sable_trains`) + `allsable/
+   SableTrainPersistence` (@EventBusSubscriber): serializa cada tren (id, dimensión, motion, y por coche el
+   `subLevelId` + grafo + 2 `TravellingPoint` vía `write/read` + spacing + upNormal + **frame de referencia
+   forward0** + localLead/localTrail). Persiste en spawn/addcar/clear, periódicamente (cada 200 ticks) y en
+   `ServerStoppingEvent` (captura la posición final). Restaura en `ServerStarted`+tick: reintenta cada tick
+   (ventana 600t) hasta que el grafo (`Create.RAILWAYS.trackNetworks.get(id)`) y el sub-level
+   (`container.getSubLevel(uuid)`) estén cargados, reconstruye el `RailCarriage` (`RailCarriage.restore`, que
+   re-inyecta forward0 para NO resetear la orientación a axis-aligned) y re-registra el `SableTrain`.
+   **FIX clave de paso**: el `SubLevelObserver` de `SableTrainSpawner` ahora ignora `UNLOADED` y solo borra el
+   coche en `REMOVED` (antes un unload de chunk/apagado tiraba el tren — y habría borrado el record en disco
+   cada apagado). Jar `f65c5e5`. **Huérfanos previos** (sub-levels de antes de este cambio) NO tienen record →
+   no se adoptan; probar con trenes nuevos. PENDIENTE: confirmar in-game (spawn → reiniciar → ¿sigue el tren
+   recorriendo la vía?).
 6. Tuning del modo físico (K/C).
 
 ---
