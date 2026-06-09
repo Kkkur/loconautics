@@ -70,16 +70,22 @@ public final class Config {
 
     // ------------------------------------------------------------------ Analog Controller
 
-    public static final ModConfigSpec.DoubleValue ANALOG_BACKWARD_RATIO;
+    public static final ModConfigSpec.IntValue ANALOG_DECAY_TICKS;
+    public static final ModConfigSpec.IntValue ANALOG_NEGATIVE_CAP;
 
     static {
         BUILDER.push("analog_controller");
 
-        ANALOG_BACKWARD_RATIO = BUILDER
-                .comment("Fraction of maxPower sent on the forward frequency while in backward mode.",
-                        "The backward frequency always receives a binary ON signal (15) when reversing.",
-                        "Default: 0.30 → round(maxPower * 0.30) is sent on the forward frequency.")
-                .defineInRange("backwardRatio", 0.30, 0.0, 1.0);
+        ANALOG_DECAY_TICKS = BUILDER
+                .comment("Ticks between each automatic power decay step toward 0.",
+                        "20 ticks = 1 second. Default: 20.")
+                .defineInRange("decayTicks", 30, 1, 200);
+
+        ANALOG_NEGATIVE_CAP = BUILDER
+                .comment("Maximum negative power level the S key can reach.",
+                        "E.g. 5 means S can step down to -5 at most.",
+                        "Default: 5.")
+                .defineInRange("negativeCap", 5, 0, 15);
 
         BUILDER.pop();
     }

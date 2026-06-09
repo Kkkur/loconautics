@@ -60,13 +60,13 @@ public class AnalogControllerHUD {
         BlockEntity be = mc.level.getBlockEntity(pos);
         if (!(be instanceof AnalogControllerBlockEntity ace)) return;
 
-        int power    = ace.isBackwardActive() ? ace.getBackwardPower() : ace.getCurrentPower();
+        int power    = ace.getCurrentPower(); // negative = backward
         boolean locked   = ace.isLocked();
         int maxPower = ace.getMaxPower();
 
         // Tick lerped values toward actual targets (same pattern as TrainHUD)
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(true);
-        displayedSpeed.chase(power / 15.0, 0.5, LerpedFloat.Chaser.EXP);
+        displayedSpeed.chase(Math.abs(power) / 15.0, 0.5, LerpedFloat.Chaser.EXP);
         displayedSpeed.tickChaser();
         displayedThrottle.chase(maxPower / 15.0, 0.75, LerpedFloat.Chaser.EXP);
         displayedThrottle.tickChaser();
@@ -116,7 +116,7 @@ public class AnalogControllerHUD {
                 77, 165, 28, 20, 256, 256);
 
         // Power number — centered over the background
-        String powerText = String.valueOf(power);
+        String powerText = String.valueOf(Math.abs(power));
         int textW = mc.font.width(powerText);
         int textX = dirZoneAbsX + (DIR_ZONE_W - textW) / 2;
         int textY = dirZoneCtrY - mc.font.lineHeight / 2 + 4;

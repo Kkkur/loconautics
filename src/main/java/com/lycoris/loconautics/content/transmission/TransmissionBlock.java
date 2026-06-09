@@ -121,7 +121,7 @@ public class TransmissionBlock extends KineticBlock implements IBE<TransmissionB
             int     speedSignal = level.getSignal(pos.relative(speedFace), speedFace);
             boolean dirSignal   = level.getSignal(pos.relative(dirFace),   dirFace)   > 0;
 
-            tbe.setVanillaRedstonePower(speedSignal, dirSignal);
+            tbe.setRedstonePower(speedSignal, dirSignal);
         }
     }
 

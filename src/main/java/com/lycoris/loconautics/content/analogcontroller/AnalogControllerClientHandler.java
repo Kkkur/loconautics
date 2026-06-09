@@ -38,12 +38,10 @@ public class AnalogControllerClientHandler {
     private static Collection<Integer> currentlyPressed = new HashSet<>();
     private static int packetCooldown = 0;
 
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("AnalogControllerClientHandler");
 
     // ------------------------------------------------------------------ public API
 
     public static void startControlling(BlockPos pos) {
-        LOGGER.info("startControlling called, pos={}", pos);
         mountedPos = pos;
         currentlyPressed.clear();
         packetCooldown = 0;
