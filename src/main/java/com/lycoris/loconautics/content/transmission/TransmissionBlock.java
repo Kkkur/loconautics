@@ -106,9 +106,17 @@ public class TransmissionBlock extends RotatedPillarKineticBlock implements IBE<
         return state.getValue(AXIS);
     }
 
+    /**
+     * The transmission exposes shaft connections on both faces of its axis.
+     * When disengaged (STAGE 0 / no redstone), we hide both shaft connections so
+     * Create treats the two sides as separate kinetic networks and rotation cannot
+     * pass through. When engaged, both faces are exposed as normal.
+     */
     @Override
     public boolean hasShaftTowards(net.minecraft.world.level.LevelReader world, BlockPos pos,
                                    BlockState state, Direction face) {
-        return face.getAxis() == state.getValue(AXIS);
+        if (face.getAxis() != state.getValue(AXIS)) return false;
+        // Disengaged: no shaft connections → rotation cannot propagate through
+        return state.getValue(STAGE) != 0;
     }
 }

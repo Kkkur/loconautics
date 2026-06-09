@@ -6,6 +6,8 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.content.transmission.TransmissionRenderer;
+import com.lycoris.loconautics.content.transmission.TransmissionVisual;
+import dev.engine_room.flywheel.lib.visualization.SimpleBlockEntityVisualizer;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
@@ -57,6 +59,12 @@ public final class LoconauticsClient {
     private void onClientSetup(FMLClientSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics client setup");
         LoconauticsPartialModels.init();
+
+        // Register Flywheel visual for the Transmission
+        SimpleBlockEntityVisualizer.builder(LoconauticsRegistries.TRANSMISSION_BE.get())
+                .factory(TransmissionVisual::new)
+                .skipVanillaRender(be -> true)
+                .apply();
     }
 
     private void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
@@ -67,6 +75,10 @@ public final class LoconauticsClient {
         event.registerBlockEntityRenderer(
                 LoconauticsRegistries.BEARING_AXLE_BE.get(),
                 BearingAxleRenderer::new
+        );
+        event.registerBlockEntityRenderer(
+                LoconauticsRegistries.TRANSMISSION_BE.get(),
+                TransmissionRenderer::new
         );
     }
 

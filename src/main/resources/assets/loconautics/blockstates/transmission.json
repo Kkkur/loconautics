@@ -1,24 +1,24 @@
 {
   "variants": {
-    "axis=x,stage=0": {"model": "loconautics:block/transmission",         "z": 90},
-    "axis=x,stage=1": {"model": "loconautics:block/transmission_stage_1", "z": 90},
-    "axis=x,stage=2": {"model": "loconautics:block/transmission_stage_2", "z": 90},
-    "axis=x,stage=3": {"model": "loconautics:block/transmission_stage_3", "z": 90},
-    "axis=x,stage=4": {"model": "loconautics:block/transmission_stage_4", "z": 90},
-    "axis=x,stage=5": {"model": "loconautics:block/transmission_stage_5", "z": 90},
+    "axis=z,stage=0": {"model": "loconautics:block/transmission"},
+    "axis=z,stage=1": {"model": "loconautics:block/transmission_stage_1"},
+    "axis=z,stage=2": {"model": "loconautics:block/transmission_stage_2"},
+    "axis=z,stage=3": {"model": "loconautics:block/transmission_stage_3"},
+    "axis=z,stage=4": {"model": "loconautics:block/transmission_stage_4"},
+    "axis=z,stage=5": {"model": "loconautics:block/transmission_stage_5"},
 
-    "axis=y,stage=0": {"model": "loconautics:block/transmission"},
-    "axis=y,stage=1": {"model": "loconautics:block/transmission_stage_1"},
-    "axis=y,stage=2": {"model": "loconautics:block/transmission_stage_2"},
-    "axis=y,stage=3": {"model": "loconautics:block/transmission_stage_3"},
-    "axis=y,stage=4": {"model": "loconautics:block/transmission_stage_4"},
-    "axis=y,stage=5": {"model": "loconautics:block/transmission_stage_5"},
+    "axis=x,stage=0": {"model": "loconautics:block/transmission",         "y": 90},
+    "axis=x,stage=1": {"model": "loconautics:block/transmission_stage_1", "y": 90},
+    "axis=x,stage=2": {"model": "loconautics:block/transmission_stage_2", "y": 90},
+    "axis=x,stage=3": {"model": "loconautics:block/transmission_stage_3", "y": 90},
+    "axis=x,stage=4": {"model": "loconautics:block/transmission_stage_4", "y": 90},
+    "axis=x,stage=5": {"model": "loconautics:block/transmission_stage_5", "y": 90},
 
-    "axis=z,stage=0": {"model": "loconautics:block/transmission",         "x": 90},
-    "axis=z,stage=1": {"model": "loconautics:block/transmission_stage_1", "x": 90},
-    "axis=z,stage=2": {"model": "loconautics:block/transmission_stage_2", "x": 90},
-    "axis=z,stage=3": {"model": "loconautics:block/transmission_stage_3", "x": 90},
-    "axis=z,stage=4": {"model": "loconautics:block/transmission_stage_4", "x": 90},
-    "axis=z,stage=5": {"model": "loconautics:block/transmission_stage_5", "x": 90}
+    "axis=y,stage=0": {"model": "loconautics:block/transmission",         "x": 90},
+    "axis=y,stage=1": {"model": "loconautics:block/transmission_stage_1", "x": 90},
+    "axis=y,stage=2": {"model": "loconautics:block/transmission_stage_2", "x": 90},
+    "axis=y,stage=3": {"model": "loconautics:block/transmission_stage_3", "x": 90},
+    "axis=y,stage=4": {"model": "loconautics:block/transmission_stage_4", "x": 90},
+    "axis=y,stage=5": {"model": "loconautics:block/transmission_stage_5", "x": 90}
   }
 }
