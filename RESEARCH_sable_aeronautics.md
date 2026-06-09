@@ -636,6 +636,22 @@ Cleaner than the ad-hoc lifecycle in the hybrid `PhysicsTrainTickHandler`.
 
 ---
 
+## Y. PROPULSION CHAIN (per Lycoris — authoritative) ⭐⭐
+The three control blocks form ONE Create-kinetics chain; only the Bearing Axle touches the train:
+1. **Analog Controller** — player-mounted cab throttle; emits a **redstone signal 1..15** (redstone-link).
+2. **Transmission** — a **redstone link sits on top**; the transmission **lets through more/less rotation**
+   (rotation comes from **separate Create generators**) depending on that 1..15 signal. = a kinetic throttle/valve.
+3. **shaft** → **Bearing Axle** — reads the resulting **RPM** (`getSpeed()`, signed) and **that RPM is the
+   train's velocity** (`target = rpm/256 · maxSpeed`). The axle also computes stress from train mass.
+So: generators → (transmission gated by Analog signal) → shaft → bearing axle RPM → train speed. The Analog
+Controller / Transmission are NOT read directly by the train — they shape the RPM the axle sees, via Create's
+networks. `SableTrainDriver.applyPropulsion` therefore reads ONLY the bearing axle.
+> OPEN QUESTION being tested: do Create's kinetic/redstone networks actually run INSIDE a Sable sub-level?
+> BEs don't tick there (bearing handoff §4). The `[sabletrain] diag axleRPM=…` log answers this: if a powered
+> chain on board still shows axleRPM=0, the network isn't ticking in-sub-level → that's the next thing to solve
+> (manually tick the sub-level's kinetic graph, or drive the chain from the game tick). Bearing-axle handoff
+> with the full RPM→bps spec lives at `Downloads/HANDOFF_BEARING_AXLE_PROPULSION.md` (not in the repo).
+
 ## Z. TODO (remaining, lower value)
 - [x] Sable `api` deep dive (B, H, J, K, L). [x] Aeronautics force/constraint/controls (E, H, I).
       [x] mixin catalogue (M).
