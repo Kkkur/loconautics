@@ -70,7 +70,7 @@ public final class SableTrainSpawner {
      *  the rail by bogey spring forces (can derail). */
     public static int spawn(ServerPlayer player, double speed, boolean physics) {
         ServerLevel level = player.serverLevel();
-        SableTrain.Car car = buildCar(player, level);
+        SableTrain.Car car = buildCar(player, level, null);
         if (car == null) {
             return 0;
         }
@@ -92,7 +92,10 @@ public final class SableTrainSpawner {
             return 0;
         }
         SableTrain train = SableTrainRegistry.get(lastTrainId);
-        SableTrain.Car car = buildCar(player, train.level());
+        // Resolve the new car's travel direction from the train's forward (front car), so it runs the SAME
+        // way as the rest of the convoy instead of flipping based on where the player happened to look.
+        Vec3 trainForward = train.cars().isEmpty() ? null : train.cars().get(0).carriage().forward();
+        SableTrain.Car car = buildCar(player, train.level(), trainForward);
         if (car == null) {
             return 0;
         }
@@ -105,11 +108,11 @@ public final class SableTrainSpawner {
      * Lifts the cart the player is looking at into a sub-level and seats a {@link RailCarriage} under it,
      * returning a {@link SableTrain.Car}. Sends a chat message and returns {@code null} on any failure.
      */
-    private static SableTrain.Car buildCar(ServerPlayer player, ServerLevel level) {
-        // 1) Raycast to the cart block the player is looking at.
+    private static SableTrain.Car buildCar(ServerPlayer player, ServerLevel level, Vec3 dirHint) {
+        // 1) Raycast to the cart block the player is looking at (always the player's actual view).
         Vec3 eye = player.getEyePosition(1.0F);
-        Vec3 look = player.getViewVector(1.0F);
-        Vec3 end = eye.add(look.scale(REACH));
+        Vec3 view = player.getViewVector(1.0F);
+        Vec3 end = eye.add(view.scale(REACH));
         BlockHitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         if (hit.getType() == HitResult.Type.MISS) {
             msg(player, "look at the cart you built (on a rail), within " + (int) REACH + " blocks");
@@ -121,8 +124,12 @@ public final class SableTrainSpawner {
             return null;
         }
 
+        // Direction used to pick the rail's travel axis: the train's forward when extending a consist
+        // (so the new car runs the SAME way), else the player's view for a fresh train.
+        Vec3 dir = dirHint != null ? dirHint : view;
+
         // 2) Find the rail UNDER the cart first (gives us railY for the gather filter + the bogey location).
-        TrackHit track = findRailBelow(level, origin, look);
+        TrackHit track = findRailBelow(level, origin, dir);
         if (track == null) {
             msg(player, "no Create rail found under/near the cart");
             return null;
@@ -151,7 +158,7 @@ public final class SableTrainSpawner {
         // 5) Re-locate the rail under the cart's horizontal CENTRE so the centred bogeys line up with the body.
         int cx = (bounds.minX() + bounds.maxX()) / 2;
         int cz = (bounds.minZ() + bounds.maxZ()) / 2;
-        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), look);
+        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), dir);
         if (centreTrack != null) {
             track = centreTrack;
         }
