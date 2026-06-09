@@ -138,19 +138,44 @@ public final class SableTrainDriver {
     // Game tick: advance train motion (once per tick).
     // ---------------------------------------------------------------------------------------------
 
+    private static int diagCounter = 0;
+
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         if (SableTrainRegistry.isEmpty()) {
             return;
         }
+        boolean diag = (diagCounter++ % 20) == 0;
         for (SableTrain train : SableTrainRegistry.all()) {
             try {
                 applyPropulsion(train);
                 train.tickMotion();
+                if (diag && !train.cars().isEmpty()) {
+                    logOrientation(train);
+                }
             } catch (Throwable t) {
                 LoconauticsConstants.LOGGER.error("[sabletrain] error ticking motion for {}", train.id(), t);
             }
         }
+    }
+
+    /** Diagnostics for the slope/curve orientation issue: forward vector, derived yaw/pitch, bogey positions. */
+    private static void logOrientation(SableTrain train) {
+        RailCarriage c = train.cars().get(0).carriage();
+        var lead = c.leadingPos();
+        var trail = c.trailingPos();
+        var fwd = c.forward();
+        double dx = lead.x - trail.x, dy = lead.y - trail.y, dz = lead.z - trail.z;
+        double yaw = Math.toDegrees(Math.atan2(dz, dx)) + 180.0;
+        double pitch = -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+        LoconauticsConstants.LOGGER.info(
+                "[sabletrain] diag speed={} fwd=({}, {}, {}) yaw={} pitch={} dy={} lead=({},{},{}) trail=({},{},{})",
+                f(train.speed()), f(fwd.x), f(fwd.y), f(fwd.z), f(yaw), f(pitch), f(dy),
+                f(lead.x), f(lead.y), f(lead.z), f(trail.x), f(trail.y), f(trail.z));
+    }
+
+    private static String f(double d) {
+        return String.format("%.2f", d);
     }
 
     // ---------------------------------------------------------------------------------------------

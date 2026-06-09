@@ -103,9 +103,9 @@ public final class RailDebug {
                                                 DoubleArgumentType.getDouble(ctx, "speed"))))))
                 .then(Commands.literal("sabletrain")
                         .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(), DEFAULT_SPEED))
-                        .then(Commands.argument("speed", DoubleArgumentType.doubleArg(-5.0, 5.0))
+                        .then(Commands.argument("startspeed", DoubleArgumentType.doubleArg(-5.0, 5.0))
                                 .executes(ctx -> SableTrainSpawner.spawn(ctx.getSource().getPlayerOrException(),
-                                        DoubleArgumentType.getDouble(ctx, "speed"))))
+                                        DoubleArgumentType.getDouble(ctx, "startspeed"))))
                         .then(Commands.literal("speed")
                                 .then(Commands.argument("value", DoubleArgumentType.doubleArg(-5.0, 5.0))
                                         .executes(ctx -> {
