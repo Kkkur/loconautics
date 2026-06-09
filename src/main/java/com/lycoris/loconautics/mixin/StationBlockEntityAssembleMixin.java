@@ -27,16 +27,19 @@ public class StationBlockEntityAssembleMixin {
                             "removeBlocksFromWorld(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)V")
     )
     private void loconautics$captureToSubLevel(CarriageContraption contraption, Level level, BlockPos offset) {
-        if (PhysicsAssemblyContext.isPending() && level instanceof ServerLevel serverLevel) {
-            try {
+        // The whole physics-divert path is wrapped: a failure here (incl. a class-load error referencing our
+        // PhysicsAssemblyContext) must NEVER break Create's normal assembly. If anything goes wrong we fall
+        // through to vanilla removeBlocksFromWorld so normal trains assemble as usual.
+        try {
+            if (PhysicsAssemblyContext.isPending() && level instanceof ServerLevel serverLevel) {
                 ServerSubLevel subLevel = SubLevelBridge.createFromContraption(serverLevel, contraption);
                 if (subLevel != null) {
                     PhysicsAssemblyContext.addSubLevel(subLevel.getUniqueId(), contraption.anchor);
                     return;
                 }
-            } catch (Throwable t) {
-                LoconauticsConstants.LOGGER.error("Failed to divert carriage to Sable sub-level; falling back", t);
             }
+        } catch (Throwable t) {
+            LoconauticsConstants.LOGGER.error("[loconautics] physics-assembly divert failed; normal assembly", t);
         }
         contraption.removeBlocksFromWorld(level, offset);
     }

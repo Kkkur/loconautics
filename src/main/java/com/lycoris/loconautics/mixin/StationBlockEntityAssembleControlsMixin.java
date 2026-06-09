@@ -48,8 +48,12 @@ public class StationBlockEntityAssembleControlsMixin {
             name = "atLeastOneForwardControls"
     )
     private boolean loconautics$skipControlsCheckForPhysicsTrain(boolean atLeastOneForwardControls) {
-        if (PhysicsAssemblyContext.isPending()) {
-            return true;
+        try {
+            if (PhysicsAssemblyContext.isPending()) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Never let our check break Create's assembly — fall back to the real value.
         }
         return atLeastOneForwardControls;
     }
