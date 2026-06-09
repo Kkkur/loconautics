@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
+import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.graph.TrackGraphHelper;
 import com.simibubi.create.content.trains.graph.TrackGraphLocation;
 import com.simibubi.create.content.trains.track.ITrackBlock;
@@ -148,6 +149,12 @@ public final class SableTrainSpawner {
         Set<BlockPos> blocks = gather.blocks();
         BoundingBox3i bounds = gather.boundingBox();
 
+        // 3b) Require a Create bogey block in the cart — no bogey, no train.
+        if (!hasBogey(level, bounds, railY)) {
+            msg(player, "the cart needs a Create train bogey (the wheels) to be assembled into a train");
+            return null;
+        }
+
         // 4) Lift the cart into a sub-level (MOVES the blocks out of the world).
         ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, origin, blocks, bounds);
         if (sub == null) {
@@ -213,6 +220,22 @@ public final class SableTrainSpawner {
         }
         lastTrainId = null;
         return n;
+    }
+
+    /** True if a Create train bogey block sits in the cart's footprint (scanned down to the rail level). */
+    private static boolean hasBogey(ServerLevel level, BoundingBox3i bounds, int railY) {
+        int minY = Math.min(railY, bounds.minY());
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = minY; y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    if (level.getBlockState(pos.set(x, y, z)).getBlock() instanceof AbstractBogeyBlock) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**
