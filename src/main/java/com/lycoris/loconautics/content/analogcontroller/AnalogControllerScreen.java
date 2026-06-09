@@ -53,31 +53,27 @@ import java.util.List;
  *       widgetY = topPos+1 → relative to our topPos+0: topPos+1. So button y = topPos+1.
  */
 
-// TODO: Fix screen buttons, they're currently 50 pixels up.
-
 public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogControllerMenu> {
 
-    // simulated:textures/gui/linked_typewriter/linked_typewriter.png — 256×256 sheet
+    // Our custom texture: loconautics:textures/gui/frecuency_bind.png — 214×127
     private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(
-            "simulated", "textures/gui/linked_typewriter/linked_typewriter.png");
+            "loconautics", "textures/gui/frecuency_bind.png");
 
-    // LINKED_TYPEWRITER_KEY_MODIFICATION_MENU: UV(0,145) 214×80
+    // Panel region in the texture: full top section, 214×95
     private static final int PANEL_U = 0;
-    private static final int PANEL_V = 145;
+    private static final int PANEL_V = 0;
     private static final int PANEL_W = 214;
-    private static final int PANEL_H = 80;
+    private static final int PANEL_H = 95;
 
-    // Player inventory background is 176×108; rendered at (leftPos+19, topPos+72).
-    // Extends below the panel — getExtraAreas() covers that region.
+    // Player inventory rendered below the panel
     private static final int INV_X = 19;
-    private static final int INV_Y = 72;
+    private static final int INV_Y = 100;
 
-    // Button x = panel_origin + BIND.width - offset  (BIND.width = 212, from SimGUITextures)
-    // confirm: 212 - 56 = 156;  trash: 212 - 33 = 179
-    // Button y = topPos+1  (Aeronautics: widgetHeight = getCenterHeight()+32 = (topPos-31)+32 = topPos+1)
-    private static final int BTN_Y         = 1;
-    private static final int BTN_CONFIRM_X = 212 - 56; // 156
-    private static final int BTN_TRASH_X   = 212 - 33; // 179
+    // Buttons sit inside the backward row right-side area (texture pixels x=157..211, y=60..77)
+    // confirm at x=157, trash at x=175 (each icon is ~16px wide with 2px gap)
+    private static final int BTN_Y         = 60;
+    private static final int BTN_CONFIRM_X = 157;
+    private static final int BTN_TRASH_X   = 175;
 
     private IconButton confirmButton;
     private IconButton trashButton;
@@ -89,9 +85,7 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
 
     @Override
     protected void init() {
-        // Window height must cover the full panel + inventory area so topPos centers correctly.
-        // Panel is 80px, but inventory renders at INV_Y=72 and is 108px tall → total = 72+108 = 180px.
-        // Using PANEL_H (80) here would center only the panel, pushing the inventory off-screen.
+        // Window height: panel (95px) + gap (5px) + inventory (108px) = 208px
         setWindowSize(PANEL_W, INV_Y + 108);
         super.init();
 
@@ -102,32 +96,31 @@ public class AnalogControllerScreen extends AbstractSimiContainerScreen<AnalogCo
         addRenderableWidget(confirmButton);
 
         trashButton = new IconButton(leftPos + BTN_TRASH_X, topPos + BTN_Y, AllIcons.I_TRASH);
-        trashButton.withCallback(this::clearFrequency);
+        trashButton.withCallback(this::clearAllFrequencies);
         addRenderableWidget(trashButton);
 
-        // Full inventory area for getExtraAreas(): 9 cols × 18 = 162 wide, (3 rows + hotbar) = 76 tall
-        // but PLAYER_INVENTORY texture is 176×108, so report the full texture rect.
         inventoryArea = new Rect2i(leftPos + INV_X, topPos + INV_Y, 176, 108);
     }
 
-    private void clearFrequency() {
+    private void clearAllFrequencies() {
         menu.ghostInventory.setStackInSlot(0, ItemStack.EMPTY);
         menu.ghostInventory.setStackInSlot(1, ItemStack.EMPTY);
+        menu.ghostInventory.setStackInSlot(2, ItemStack.EMPTY);
+        menu.ghostInventory.setStackInSlot(3, ItemStack.EMPTY);
     }
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTicks, int mouseX, int mouseY) {
-        // LINKED_TYPEWRITER_KEY_MODIFICATION_MENU: UV(0,145) 214×80, sheet 256×256
-        graphics.blit(TEXTURE, leftPos, topPos, PANEL_U, PANEL_V, PANEL_W, PANEL_H, 256, 256);
+        // Draw our custom panel (214×95) from the texture
+        graphics.blit(TEXTURE, leftPos, topPos, PANEL_U, PANEL_V, PANEL_W, PANEL_H, 214, 127);
 
-        // Player inventory background — same relative offsets as EntryModifierScreen.renderBG()
-        // adjusted for our panel being at (leftPos+0, topPos+0) instead of (leftPos+11, topPos-31)
+        // Player inventory background below the panel
         renderPlayerInventory(graphics, leftPos + INV_X, topPos + INV_Y);
     }
 
     @Override
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
-        // No labels — title is part of the texture
+        // Labels are baked into the texture
     }
 
     @Override

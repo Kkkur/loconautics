@@ -67,26 +67,42 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
 
     @Override
     protected ItemStackHandler createGhostInventory() {
-        ItemStackHandler handler = new ItemStackHandler(2);
+        ItemStackHandler handler = new ItemStackHandler(4);
         if (contentHolder != null) {
             handler.setStackInSlot(0, contentHolder.getFrequencyFirst().copy());
             handler.setStackInSlot(1, contentHolder.getFrequencySecond().copy());
+            handler.setStackInSlot(2, contentHolder.getFrequencyBackFirst().copy());
+            handler.setStackInSlot(3, contentHolder.getFrequencyBackSecond().copy());
         }
         return handler;
     }
 
+    /**
+     * Slot indices:
+     *   0–35  : player inventory (PlayerSlot, gated by slotsActive)
+     *   36    : forward frequency first  (ghost, red slot  — forward row)
+     *   37    : forward frequency second (ghost, blue slot — forward row)
+     *   38    : backward frequency first  (ghost, red slot  — backward row)
+     *   39    : backward frequency second (ghost, blue slot — backward row)
+     *
+     * Ghost slot positions are panel-relative pixel coords from texture analysis:
+     *   Forward row:  red x=93 y=31, blue x=111 y=31
+     *   Backward row: red x=93 y=60, blue x=111 y=60
+     *
+     * Player inventory sits below the panel (panel is 95px tall).
+     * INV_Y=100 → addPlayerSlots base: x=19+8=27, y=100+18=118.
+     */
     @Override
     protected void addSlots() {
-        // Player slots — positions derived so they align with renderPlayerInventory(leftPos+19, topPos+72).
-        // Texture slot grid offset: col 0 at x+8, main row 0 at y+18, hotbar at y+76.
-        // → slotX base = 19+8 = 27, slotY base = 72+18 = 90 (rows), hotbar = 72+76 = 148 → y arg = 90.
-        addPlayerSlots(27, 90);
+        addPlayerSlots(27, 118);
 
-        // Ghost frequency slots — panel-relative positions matching LinkedTypewriterMenuImpl.
-        // Their absolute (105, 1) and (123, 1) relative to panel origin (leftPos+11, topPos-31)
-        // → (105-11, 1+31) = (94, 32) and (112, 32).
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 94, 32));
-        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 112, 32));
+        // Forward frequency slots (top row)
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 0, 93, 31));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 1, 111, 31));
+
+        // Backward frequency slots (bottom row)
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 2, 93, 60));
+        addSlot(new GhostSlot((IItemHandler) ghostInventory, 3, 111, 60));
     }
 
     /**
@@ -111,6 +127,10 @@ public class AnalogControllerMenu extends GhostItemMenu<AnalogControllerBlockEnt
         be.setFrequency(
                 ghostInventory.getStackInSlot(0),
                 ghostInventory.getStackInSlot(1)
+        );
+        be.setBackwardFrequency(
+                ghostInventory.getStackInSlot(2),
+                ghostInventory.getStackInSlot(3)
         );
     }
 

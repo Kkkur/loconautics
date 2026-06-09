@@ -99,6 +99,12 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     private net.minecraft.world.item.ItemStack frequencySecond =
             net.minecraft.world.item.ItemStack.EMPTY;
 
+    /** Backward-direction frequency (binary: ON when in backward mode). */
+    private net.minecraft.world.item.ItemStack frequencyBackFirst =
+            net.minecraft.world.item.ItemStack.EMPTY;
+    private net.minecraft.world.item.ItemStack frequencyBackSecond =
+            net.minecraft.world.item.ItemStack.EMPTY;
+
     /**
      * The linkable delegate that sits in the Create network and transmits our signal.
      * Re-created whenever the frequency or power changes.
@@ -380,13 +386,21 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         sendData();
     }
 
-    public net.minecraft.world.item.ItemStack getFrequencyFirst() {
-        return frequencyFirst;
+    public void setBackwardFrequency(net.minecraft.world.item.ItemStack first,
+                                     net.minecraft.world.item.ItemStack second) {
+        this.frequencyBackFirst = first.copy();
+        this.frequencyBackSecond = second.copy();
+        if (level != null && !level.isClientSide) {
+            updateNetwork(level);
+        }
+        setChanged();
+        sendData();
     }
 
-    public net.minecraft.world.item.ItemStack getFrequencySecond() {
-        return frequencySecond;
-    }
+    public net.minecraft.world.item.ItemStack getFrequencyFirst() { return frequencyFirst; }
+    public net.minecraft.world.item.ItemStack getFrequencySecond() { return frequencySecond; }
+    public net.minecraft.world.item.ItemStack getFrequencyBackFirst() { return frequencyBackFirst; }
+    public net.minecraft.world.item.ItemStack getFrequencyBackSecond() { return frequencyBackSecond; }
 
     // ------------------------------------------------------------------ accessors
 
@@ -457,6 +471,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         CompoundTag freq = new CompoundTag();
         freq.put("First", frequencyFirst.saveOptional(registries));
         freq.put("Second", frequencySecond.saveOptional(registries));
+        freq.put("BackFirst", frequencyBackFirst.saveOptional(registries));
+        freq.put("BackSecond", frequencyBackSecond.saveOptional(registries));
         tag.put("Frequency", freq);
     }
 
@@ -477,6 +493,10 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                     registries, freq.getCompound("First"));
             frequencySecond = net.minecraft.world.item.ItemStack.parseOptional(
                     registries, freq.getCompound("Second"));
+            frequencyBackFirst = net.minecraft.world.item.ItemStack.parseOptional(
+                    registries, freq.getCompound("BackFirst"));
+            frequencyBackSecond = net.minecraft.world.item.ItemStack.parseOptional(
+                    registries, freq.getCompound("BackSecond"));
         }
     }
 
