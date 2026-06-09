@@ -9,8 +9,19 @@
 ---
 
 ## 0a. ACTUALIZACIÓN 2026-06-09 noche (LÉEME PRIMERO — estado más reciente)
-Rama `feature/all-sable-physics-train`, último commit **`d87f932`**, jar desplegado md5 **`2539d13`**.
-Workflow sin cambios (build → copiar jar a `Skybound SMP/mods/` → el usuario reinicia → yo leo `latest.log`).
+Rama `feature/all-sable-physics-train`, jar desplegado md5 **`2539d13`** (último cambio de código `d87f932`;
+este doc por encima). Haz `git switch feature/all-sable-physics-train && git pull` y `git log --oneline -15`
+para el estado exacto. Working tree limpio, todo pusheado.
+
+> **PRIMER PASO sugerido para la nueva Claude:** el problema abierto nº1 es el **Analog Controller** (no
+> conduce dentro del sub-level). Ya hay logs `[analog]` instrumentados — pide al usuario probarlo y **lee
+> `…/Skybound SMP/logs/latest.log`** (busca `[analog]`) para ver si es montaje/rango o enrutado de teclas,
+> antes de tocar nada. NO adivines.
+
+Workflow sin cambios (build `./gradlew build` → copiar jar a `Skybound SMP/mods/` y verificar md5 → el usuario
+reinicia, no hay hot-reload → tú lees `latest.log`). Commit/push solo cuando el usuario lo diga (en esta
+sesión autorizó commit+push tras cada cambio probado). Acabar commits con
+`Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 **Referencia clave nueva: `RESEARCH_sable_aeronautics.md`** (catálogo a fondo de TODA la API de Sable/Aeronautics
 — motion models, fuerzas, constraints, controles, `Sable.HELPER`, etc. Léelo antes de tocar física).
 
