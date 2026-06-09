@@ -126,10 +126,10 @@ public final class SableTrainSpawner {
 
         // Direction used to pick the rail's travel axis: the train's forward when extending a consist
         // (so the new car runs the SAME way), else the player's view for a fresh train.
-        Vec3 dir = dirHint != null ? dirHint : view;
+        Vec3 railDir = dirHint != null ? dirHint : view;
 
         // 2) Find the rail UNDER the cart first (gives us railY for the gather filter + the bogey location).
-        TrackHit track = findRailBelow(level, origin, dir);
+        TrackHit track = findRailBelow(level, origin, railDir);
         if (track == null) {
             msg(player, "no Create rail found under/near the cart");
             return null;
@@ -158,7 +158,7 @@ public final class SableTrainSpawner {
         // 5) Re-locate the rail under the cart's horizontal CENTRE so the centred bogeys line up with the body.
         int cx = (bounds.minX() + bounds.maxX()) / 2;
         int cz = (bounds.minZ() + bounds.maxZ()) / 2;
-        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), dir);
+        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), railDir);
         if (centreTrack != null) {
             track = centreTrack;
         }
