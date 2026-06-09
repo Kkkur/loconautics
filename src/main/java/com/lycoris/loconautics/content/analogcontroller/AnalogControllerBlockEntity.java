@@ -171,20 +171,16 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         int negativeCap = getNegativeCap();
 
         // ---- decay (always runs unless locked) ----
-        // The decay target is 0, but if currentPower is outside the threshold bounds
-        // (e.g. scroll moved maxPower down while at speed), decay toward the bound first.
-        // This mirrors how Create's throttle works: changing the cap changes the target,
-        // actual value converges to it naturally — never teleports.
-        // Decay target: toward 0, but clamped to threshold bounds first.
-        // Also: if a key is actively holding power at a bound, don't decay past it.
-        // maxPower is the scroll threshold — symmetric: forward cap = +maxPower, backward cap = -maxPower.
+        // maxPower is the scroll threshold (symmetric: +maxPower forward, -maxPower backward).
         // negativeCap is the hard config floor S can never exceed.
-        int backwardCap = -Math.min(maxPower, negativeCap); // e.g. maxPower=3, negativeCap=5 → -3
+        // Decay always moves toward 0, but if power is outside bounds, it targets the bound first.
+        // While a key is actively holding power at its cap, decay is frozen at the cap (not 0).
+        int backwardCap = -Math.min(maxPower, negativeCap);
         int decayTarget;
-        if      (currentPower > maxPower)            decayTarget = maxPower;     // above forward threshold: decay down to it
-        else if (currentPower < backwardCap)          decayTarget = backwardCap; // below backward threshold: decay up to it
-        else if (raisingSignal && currentPower > 0)  decayTarget = maxPower;    // W held: freeze at forward cap
-        else if (loweringSignal && currentPower < 0) decayTarget = backwardCap; // S held in reverse: freeze at backward cap
+        if      (currentPower > maxPower)            decayTarget = maxPower;
+        else if (currentPower < backwardCap)          decayTarget = backwardCap;
+        else if (raisingSignal && currentPower > 0)  decayTarget = maxPower;
+        else if (loweringSignal && currentPower < 0) decayTarget = backwardCap;
         else                                          decayTarget = 0;
 
         if (!locked && currentPower != decayTarget) {
@@ -217,9 +213,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                 }
 
                 if (loweringSignal) {
-                    // S blocked if at or below the backward threshold (symmetric maxPower)
-                    int backCap = -Math.min(maxPower, negativeCap);
-                    if (currentPower > backCap) {
+                    // S blocked if at or below the backward threshold
+                    if (currentPower > backwardCap) {
                         lowerTimer--;
                         if (lowerTimer <= 0) {
                             if (currentPower > 0) {
@@ -227,11 +222,11 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                             } else {
                                 lowerTimer = LOWER_TICKS;     // going into/deeper reverse: slower
                             }
-                            currentPower = Math.max(currentPower - 1, backCap);
+                            currentPower = Math.max(currentPower - 1, backwardCap);
                         }
-                        if (currentPower >= backCap) decayCounter = decayTicks;
+                        if (currentPower >= backwardCap) decayCounter = decayTicks;
                     }
-                    // If currentPower < backCap, decay runs freely toward backCap
+                    // If currentPower < backwardCap, decay runs freely toward it
                 }
             }
         }
@@ -246,7 +241,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     }
 
     // Persistent decay counter (not saved to NBT — resets on load, which is fine)
-    private int decayCounter = 20;
+    private int decayCounter = LOWER_TICKS; // reasonable default; recalculated each tick
 
     private int getDecayTicks() {
         try {
@@ -463,10 +458,6 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     public boolean isLocked()           { return locked; }
     public boolean hasUser()            { return currentUser != null; }
     public int     getMaxPower()        { return maxPower; }
-
-    /** @deprecated kept for compatibility; always returns false in new design. */
-    @Deprecated
-    public boolean isBackwardActive()   { return currentPower < 0; }
 
     @Nullable
     public UUID getCurrentUser() { return currentUser; }
