@@ -1,5 +1,7 @@
 package com.lycoris.loconautics.allsable;
 
+import java.util.UUID;
+
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
@@ -12,6 +14,9 @@ import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
+import dev.ryanhcode.sable.api.physics.constraint.ConstraintJointAxis;
+import dev.ryanhcode.sable.api.physics.constraint.PhysicsConstraintHandle;
+import dev.ryanhcode.sable.api.physics.constraint.generic.GenericConstraintConfiguration;
 import dev.ryanhcode.sable.api.physics.force.ForceTotal;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
@@ -55,29 +60,252 @@ public final class SableTrainDriver {
     // Physics tick: pin each car's sub-level pose to its RailCarriage.
     // ---------------------------------------------------------------------------------------------
 
-    // Bogey spring (physics mode): acceleration coefficients (force is mass-normalised). Tune in-game.
+    // Bogey spring (legacy free/derail "physics" mode): acceleration coefficients (force is mass-normalised).
     private static final double SPRING_K = 150.0; // stiffness: accel per metre of offset toward the rail
     private static final double SPRING_C = 25.0;  // damping: ~critical for K (2·sqrt(K) ≈ 24.5)
 
-    /** Pre-step: PIN cars teleport the body AND every loose bogey to the rail; PHYSICS cars get spring forces. */
+    // --- Linear-bearing drive (DEFAULT trains) ----------------------------------------------------
+    // Each car body is threaded onto the rail by a Rapier GENERIC joint configured as a PRISMATIC (linear-bearing)
+    // constraint: the two axes perpendicular to the rail and ALL THREE rotations are HARD-locked (rigid — no
+    // spring, so no wobble and no escaping the rail at speed), while the one axis ALONG the rail is left FREE.
+    // The body therefore cannot leave the track, but slides freely under any force — gravity on a slope, a
+    // propeller, a shove, or the Bearing Axle's drive. The rail point is re-anchored each substep to wherever the
+    // body has slid, so the free axis keeps pointing along the (curving) track.
+    private static final double DRIVE_K = 6.0;        // axle servo gain: along-rail accel per (block/s) of speed error
+    private static final double MAX_DRIVE_ACCEL = 20.0; // cap on axle servo accel (blocks/s²) so throttle isn't jerky
+
+    /** Live constraints, keyed by the sub-level (car body OR loose bogey) they glue to the rail. */
+    private static final java.util.Map<UUID, PhysicsConstraintHandle> CONSTRAINTS = new java.util.HashMap<>();
+
+    /** Debug escape hatch: force the legacy kinematic teleport-pin instead of the constraint-glued drive. */
+    private static final boolean USE_KINEMATIC_PIN = false;
+
+    /** Pre-step: drive each non-legacy car (constraint-glue, or kinematic-pin fallback); legacy cars get springs. */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
         forEachCar(system, (pipeline, container, sub, train, car) -> {
             if (train.isPhysics()) {
                 applyBogeySprings(sub, car, timeStep, system.getLevel());
                 return;
             }
-            pinCar(pipeline, container, sub, car, false);
+            if (useForceGlue(car)) {
+                driveConstraintGlued(pipeline, container, sub, car, timeStep, train);
+            } else {
+                pinCar(pipeline, container, sub, car, false); // fallback: no captured attachment points (old save)
+            }
         });
+        sweepStaleConstraints(); // release joints whose train/sub-level is gone (despawned, unloaded)
     }
 
-    /** Post-step: re-pin the body AND every loose bogey (removes gravity sag, carries orientation to networking). */
+    /** Post-step: only the kinematic-pin fallback needs a re-pin; constraint-glued cars are solved by the engine. */
     public static void onPostPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
         forEachCar(system, (pipeline, container, sub, train, car) -> {
-            if (train.isPhysics()) {
+            if (train.isPhysics() || useForceGlue(car)) {
                 return;
             }
             pinCar(pipeline, container, sub, car, true);
         });
+    }
+
+    /** A car runs the constraint-glued drive when it isn't forced to pin and has its attachment points captured. */
+    private static boolean useForceGlue(Car car) {
+        return !USE_KINEMATIC_PIN && car.localLead() != null && car.localTrail() != null;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Linear-bearing drive: a prismatic joint threads the body onto the rail (free along it, locked off it).
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Drives one default car as a body threaded onto the rail by a prismatic joint, free to slide along the track.
+     *
+     * <p>Each physics substep we: (1) measure how far the body has slid along the rail tangent and advance the
+     * rail point (and the loose bogeys) by exactly that, so the rail re-anchors under the body — this is what lets
+     * external forces move it; (2) re-create the body's prismatic joint at the new rail point (perpendicular +
+     * rotation hard-locked, tangent free); (3) hard-lock each loose bogey to its own rail point; (4) if a Bearing
+     * Axle is driving, apply an along-rail force servoing toward the commanded speed. With no axle, nothing drives
+     * the tangent, so gravity / a propeller / a shove are free to move the train along the track.
+     */
+    private static void driveConstraintGlued(PhysicsPipeline pipeline, ServerSubLevelContainer container,
+                                             ServerSubLevel bodySub, Car car, double dt, SableTrain train) {
+        RailCarriage carriage = car.carriage();
+        Vector3d railPoint = carriage.center();
+        if (railPoint == null) {
+            return;
+        }
+        Vector3d tangent = forwardUnit(carriage);
+        Vector3dc localAnchor = new Vector3d(car.localLead()).add(car.localTrail()).mul(0.5);
+
+        // 1) Measure the body's slide along the tangent (how far its anchor is ahead of the current rail point) and
+        //    advance the rail by it, so the rail point tracks the body. Negative = it slid backwards (also fine).
+        Vector3d anchorWorld = bodySub.logicalPose().transformPosition(localAnchor, new Vector3d());
+        double slide = anchorWorld.sub(railPoint, new Vector3d()).dot(tangent);
+        advanceRail(car, slide);
+
+        // Re-read the pose at the new rail point.
+        railPoint = carriage.center();
+        if (railPoint == null) {
+            return;
+        }
+        tangent = forwardUnit(carriage);
+
+        // 2) Body: prismatic joint — perpendicular + rotation hard-locked, tangent free.
+        glueBodyPrismatic(pipeline, bodySub, localAnchor, railPoint, tangent, carriage.orientation());
+
+        // 3) Each loose bogey: hard-lock fully to its own rail point (it follows the body, advanced above).
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            if (!(container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub) || bsub.isRemoved()) {
+                continue;
+            }
+            Vector3d center = bogey.rail().center();
+            if (center != null) {
+                glueRigid(pipeline, bsub, null, center, bogey.rail().orientation());
+            }
+        }
+
+        // 4) Bearing Axle propulsion: servo the along-rail speed toward the target (external forces add on top).
+        if (train.isPowered()) {
+            applyTangentialDrive(bodySub, tangent, dt, train);
+        }
+        // Record the measured along-rail speed (blocks/tick) for diagnostics / persistence.
+        RigidBodyHandle bodyHandle = RigidBodyHandle.of(bodySub);
+        if (bodyHandle != null) {
+            train.setSpeed(bodyHandle.getLinearVelocity(new Vector3d()).dot(tangent) / 20.0);
+        }
+    }
+
+    /**
+     * (Re)creates the prismatic joint holding {@code sub}'s {@code localAnchor} at {@code railPoint}: the two axes
+     * perpendicular to {@code tangent} and all three rotations are hard-locked (so the body can't leave the rail
+     * or wobble), while the axis along {@code tangent} is left free (so the body slides under any force). We
+     * recreate it each substep because the tangent/orientation rotate as the train follows the curving track.
+     */
+    private static void glueBodyPrismatic(PhysicsPipeline pipeline, ServerSubLevel sub, Vector3dc localAnchor,
+                                          Vector3d railPoint, Vector3d tangent, Quaterniond q) {
+        UUID id = sub.getUniqueId();
+        PhysicsConstraintHandle prev = CONSTRAINTS.remove(id);
+        if (prev != null) {
+            prev.remove();
+        }
+        // World joint frame: local X = tangent (the FREE slide axis), Y = up (perpendicular), Z = lateral.
+        Vector3d up = perpendicularUp(tangent);
+        Vector3d lateral = new Vector3d(tangent).cross(up).normalize();
+        Quaterniond frame1 = basisQuaternion(tangent, up, lateral);
+        // Body-local joint frame so the angular lock holds the body at the rail orientation q: R2 = q⁻¹ · R1.
+        Quaterniond frame2 = new Quaterniond(q).invert().mul(frame1);
+        // Lock everything except LINEAR_X (the tangent): the body is rigidly held off the rail, free along it.
+        java.util.Set<ConstraintJointAxis> locked = java.util.EnumSet.of(
+                ConstraintJointAxis.LINEAR_Y, ConstraintJointAxis.LINEAR_Z,
+                ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y, ConstraintJointAxis.ANGULAR_Z);
+        GenericConstraintConfiguration config = new GenericConstraintConfiguration(
+                new Vector3d(railPoint), new Vector3d(localAnchor), frame1, frame2, locked);
+        PhysicsConstraintHandle handle = pipeline.addConstraint(null, sub, config);
+        if (handle != null) {
+            CONSTRAINTS.put(id, handle);
+        }
+    }
+
+    /**
+     * (Re)creates a fully-rigid joint pinning {@code sub}'s {@code localAnchor} (or its centre of mass when null)
+     * to {@code worldCenter} with orientation {@code q} — all six DOF locked. Used for the loose bogeys, which
+     * just ride under the body.
+     */
+    private static void glueRigid(PhysicsPipeline pipeline, ServerSubLevel sub, Vector3dc localAnchor,
+                                  Vector3d worldCenter, Quaterniond q) {
+        UUID id = sub.getUniqueId();
+        PhysicsConstraintHandle prev = CONSTRAINTS.remove(id);
+        if (prev != null) {
+            prev.remove();
+        }
+        Vector3dc anchor = localAnchor;
+        if (anchor == null) {
+            MassData md = sub.getMassTracker();
+            anchor = (md != null && !md.isInvalid()) ? md.getCenterOfMass() : new Vector3d();
+        }
+        // All axes locked: frame orientations need only agree, so use q on the world side and identity on the body.
+        GenericConstraintConfiguration config = new GenericConstraintConfiguration(
+                new Vector3d(worldCenter), new Vector3d(anchor), new Quaterniond(q), new Quaterniond(),
+                java.util.EnumSet.allOf(ConstraintJointAxis.class));
+        PhysicsConstraintHandle handle = pipeline.addConstraint(null, sub, config);
+        if (handle != null) {
+            CONSTRAINTS.put(id, handle);
+        }
+    }
+
+    /** Along-rail force servo: pushes the body's tangential speed toward the train's commanded target speed. */
+    private static void applyTangentialDrive(ServerSubLevel sub, Vector3d tangent, double dt, SableTrain train) {
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        MassData md = sub.getMassTracker();
+        double mass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
+        double vTarget = train.targetSpeed() * 20.0; // blocks/tick -> blocks/sec
+        double vCurrent = handle.getLinearVelocity(new Vector3d()).dot(tangent);
+        double accel = Math.max(-MAX_DRIVE_ACCEL, Math.min(MAX_DRIVE_ACCEL, DRIVE_K * (vTarget - vCurrent)));
+        Vector3d worldImpulse = new Vector3d(tangent).mul(mass * accel * dt);
+        ForceTotal forces = new ForceTotal();
+        forces.applyLinearImpulse(sub.logicalPose().transformNormalInverse(worldImpulse, new Vector3d()));
+        handle.applyForcesAndReset(forces);
+    }
+
+    /** Unit rail tangent (trailing bogey -> leading bogey) as a JOML vector. */
+    private static Vector3d forwardUnit(RailCarriage carriage) {
+        Vec3 f = carriage.forward();
+        Vector3d v = new Vector3d(f.x, f.y, f.z);
+        return v.lengthSquared() < 1.0e-9 ? new Vector3d(1, 0, 0) : v.normalize();
+    }
+
+    /** World-up projected perpendicular to {@code forward} (Gram-Schmidt), with a fallback near vertical. */
+    private static Vector3d perpendicularUp(Vector3d forward) {
+        Vector3d up = new Vector3d(0, 1, 0).sub(new Vector3d(forward).mul(forward.y));
+        if (up.lengthSquared() < 1.0e-6) { // forward ~ vertical: use world +X instead
+            up = new Vector3d(1, 0, 0).sub(new Vector3d(forward).mul(forward.x));
+        }
+        return up.normalize();
+    }
+
+    /** Quaternion of the right-handed basis whose columns are (X=forward, Y=up, Z=lateral). */
+    private static Quaterniond basisQuaternion(Vector3d forward, Vector3d up, Vector3d lateral) {
+        org.joml.Matrix3d m = new org.joml.Matrix3d();
+        m.setColumn(0, forward);
+        m.setColumn(1, up);
+        m.setColumn(2, lateral);
+        return m.getNormalizedRotation(new Quaterniond());
+    }
+
+    /** Releases joints whose sub-level is no longer part of any live train (despawned / unloaded), so none leak. */
+    private static void sweepStaleConstraints() {
+        if (CONSTRAINTS.isEmpty()) {
+            return;
+        }
+        java.util.Set<UUID> live = new java.util.HashSet<>();
+        for (SableTrain train : SableTrainRegistry.all()) {
+            Car car = train.car();
+            if (car.subLevelId() != null) {
+                live.add(car.subLevelId());
+            }
+            for (SableTrain.Bogey bogey : car.bogeys()) {
+                live.add(bogey.subLevelId());
+            }
+        }
+        var it = CONSTRAINTS.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            if (!live.contains(entry.getKey())) {
+                entry.getValue().remove();
+                it.remove();
+            }
+        }
+    }
+
+    /** Advances a car's body carriage and every loose bogey along the rail by {@code ds} blocks (this substep). */
+    private static void advanceRail(Car car, double ds) {
+        car.carriage().setSpeed(ds);
+        car.carriage().tick();
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            bogey.rail().setSpeed(ds);
+            bogey.rail().tick();
+        }
     }
 
     /** Pins the body (posed FROM its bogeys) and each loose bogey (posed to its own rail point) for one car. */
@@ -191,18 +419,17 @@ public final class SableTrainDriver {
             if (train.level() != level) {
                 continue;
             }
-            for (Car car : train.cars()) {
-                if (car.subLevelId() == null) {
-                    continue;
-                }
-                if (!(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
-                    continue;
-                }
-                try {
-                    action.run(pipeline, container, sub, train, car);
-                } catch (Throwable t) {
-                    LoconauticsConstants.LOGGER.error("[sabletrain] error driving sub-level {}", car.subLevelId(), t);
-                }
+            Car car = train.car();
+            if (car.subLevelId() == null) {
+                continue;
+            }
+            if (!(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+                continue;
+            }
+            try {
+                action.run(pipeline, container, sub, train, car);
+            } catch (Throwable t) {
+                LoconauticsConstants.LOGGER.error("[sabletrain] error driving sub-level {}", car.subLevelId(), t);
             }
         }
     }
@@ -249,7 +476,7 @@ public final class SableTrainDriver {
                 if (updateMass) {
                     updateAxleMass(train);
                 }
-                if (diag && !train.cars().isEmpty()) {
+                if (diag) {
                     logOrientation(train);
                 }
             } catch (Throwable t) {
@@ -268,46 +495,38 @@ public final class SableTrainDriver {
         if (container == null) {
             return;
         }
-        double total = 0.0;
-        boolean readAny = false;
-        BearingAxleBlockEntity axle = null;
-        for (Car car : train.cars()) {
-            if (car.subLevelId() == null
-                    || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
-                continue;
-            }
-            // Recompute mass from the sub-level's CURRENT blocks (not Sable's mass tracker, which is frozen at
-            // assembly and never updates when the player adds/removes a block in a running car). This makes the
-            // Bearing Axle's weight update live as blocks are placed/broken on the moving train.
-            total += liveMass(sub);
-            readAny = true;
-            if (axle == null) {
-                axle = bearingAxleIn(sub);
-            }
-            // Loose bogeys are their own sub-levels now — count their blocks toward the train weight too.
-            for (SableTrain.Bogey bogey : car.bogeys()) {
-                if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
-                    total += liveMass(bsub);
-                }
+        Car car = train.car();
+        if (car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return;
+        }
+        // Recompute mass from the sub-level's CURRENT blocks (not Sable's mass tracker, which is frozen at
+        // assembly and never updates when the player adds/removes a block in a running cart). This makes the
+        // Bearing Axle's weight update live as blocks are placed/broken on the moving cart.
+        double total = liveMass(sub);
+        // Loose bogeys are their own sub-levels — count their blocks toward the cart weight too.
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
+                total += liveMass(bsub);
             }
         }
-        if (axle != null && readAny && total != axle.getTrainMass()) {
+        BearingAxleBlockEntity axle = bearingAxleIn(sub);
+        if (axle != null && total != axle.getTrainMass()) {
             axle.setTrainMass(total);
         }
     }
 
-    /** Diagnostics: per-car centre/stopped state (to see why a car isn't moving) + bearing-axle RPM. */
+    /** Diagnostics: the cart's centre/stopped state (to see why it isn't moving) + bearing-axle RPM. */
     private static void logOrientation(SableTrain train) {
         String axleRpm = "no-axle";
         String axleMass = "n/a";
         double subMass = 0.0;
         ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        Car car = train.car();
         if (container != null) {
-            for (Car car : train.cars()) {
-                if (car.subLevelId() != null
-                        && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub && !sub.isRemoved()) {
-                    subMass += liveMass(sub);
-                }
+            if (car.subLevelId() != null
+                    && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub && !sub.isRemoved()) {
+                subMass += liveMass(sub);
             }
             BearingAxleBlockEntity axle = findBearingAxle(train, container);
             if (axle != null) {
@@ -315,18 +534,13 @@ public final class SableTrainDriver {
                 axleMass = f(axle.getTrainMass());
             }
         }
-        StringBuilder cars = new StringBuilder();
-        for (int i = 0; i < train.cars().size(); i++) {
-            RailCarriage c = train.cars().get(i).carriage();
-            var centre = c.center();
-            var fwd = c.forward(); // chord direction (trailing->leading); shows whether the body yaws on a curve
-            cars.append(" car").append(i)
-                    .append(centre == null ? "=NULL" : "=(" + f(centre.x) + "," + f(centre.y) + "," + f(centre.z) + ")")
-                    .append(" fwd=(" + f(fwd.x) + "," + f(fwd.z) + ")")
-                    .append(c.stopped() ? "[STOPPED]" : "");
-        }
-        LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} subMass={} axleTrainMass={} cars={}:{}",
-                f(train.speed()), f(train.targetSpeed()), axleRpm, f(subMass), axleMass, train.cars().size(), cars);
+        RailCarriage c = car.carriage();
+        var centre = c.center();
+        var fwd = c.forward(); // chord direction (trailing->leading); shows whether the body yaws on a curve
+        String cart = (centre == null ? "NULL" : "(" + f(centre.x) + "," + f(centre.y) + "," + f(centre.z) + ")")
+                + " fwd=(" + f(fwd.x) + "," + f(fwd.z) + ")" + (c.stopped() ? "[STOPPED]" : "");
+        LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} subMass={} axleTrainMass={} cart={}",
+                f(train.speed()), f(train.targetSpeed()), axleRpm, f(subMass), axleMass, cart);
     }
 
     private static String f(double d) {
@@ -352,8 +566,10 @@ public final class SableTrainDriver {
         }
         BearingAxleBlockEntity axle = findBearingAxle(train, container);
         if (axle == null) {
-            return; // no engine on board — keep the debug/command target speed
+            train.setPowered(false); // no engine on board — the train is free to be moved by external forces
+            return; // keep the debug/command target speed
         }
+        train.setPowered(true);
         // The Bearing Axle is the ONLY thing that drives train velocity. It reads the RPM delivered by the
         // player's Create kinetic chain: separate generators produce rotation, the Transmission lets through
         // more/less of it according to the redstone signal from the Analog Controller (1..15), and the shaft
@@ -371,19 +587,14 @@ public final class SableTrainDriver {
         return cfg > 0.0 ? cfg : 1.0;
     }
 
-    /** Finds the Bearing Axle inside any of the train's car sub-levels (the propulsion engine), or null. */
+    /** Finds the Bearing Axle inside the cart's sub-level (the propulsion engine), or null. */
     static BearingAxleBlockEntity findBearingAxle(SableTrain train, ServerSubLevelContainer container) {
-        for (Car car : train.cars()) {
-            if (car.subLevelId() == null
-                    || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
-                continue;
-            }
-            BearingAxleBlockEntity axle = bearingAxleIn(sub);
-            if (axle != null) {
-                return axle;
-            }
+        Car car = train.car();
+        if (car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return null;
         }
-        return null;
+        return bearingAxleIn(sub);
     }
 
     /**

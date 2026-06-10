@@ -162,8 +162,8 @@ public final class SableTrainPersistence {
                 SableTrainSpawner.ensureObserver(train.level());
                 SableTrainSpawner.noteRestored(train.id());
                 it.remove();
-                LoconauticsConstants.LOGGER.info("[sabletrain] restored train {} ({} car(s)) in {}",
-                        train.id(), train.cars().size(), train.level().dimension().location());
+                LoconauticsConstants.LOGGER.info("[sabletrain] restored cart {} in {}",
+                        train.id(), train.level().dimension().location());
             } else if (giveUp) {
                 // Still unresolved after a long window. Stop retrying this session, but KEEP the disk record so a
                 // future launch (e.g. once the player visits that area / dimension) can restore it.
@@ -201,11 +201,8 @@ public final class SableTrainPersistence {
         tag.putDouble("Accel", train.accel());
 
         DimensionPalette dims = new DimensionPalette();
-        ListTag carList = new ListTag();
-        for (SableTrain.Car car : train.cars()) {
-            if (car.subLevelId() == null) {
-                continue;
-            }
+        SableTrain.Car car = train.car();
+        if (car.subLevelId() != null) {
             CompoundTag c = new CompoundTag();
             c.putUUID("SubLevel", car.subLevelId());
             c.putUUID("Graph", car.carriage().graphId());
@@ -226,10 +223,9 @@ public final class SableTrainPersistence {
                 bogeyList.add(bt);
             }
             c.put("Bogeys", bogeyList);
-            carList.add(c);
+            tag.put("Car", c);
         }
-        tag.put("Cars", carList);
-        dims.write(tag); // AFTER the cars, so the palette has gathered every dimension the points reference
+        dims.write(tag); // AFTER the car, so the palette has gathered every dimension the points reference
         return tag;
     }
 
@@ -257,62 +253,65 @@ public final class SableTrainPersistence {
         }
         DimensionPalette dims = DimensionPalette.read(tag);
 
-        List<SableTrain.Car> cars = new ArrayList<>();
-        ListTag carList = tag.getList("Cars", Tag.TAG_COMPOUND);
-        for (int i = 0; i < carList.size(); i++) {
-            CompoundTag c = carList.getCompound(i);
-            UUID subId = c.getUUID("SubLevel");
-            UUID graphId = c.getUUID("Graph");
+        // A cart is a single car. Back-compat: pre-rope saves stored a "Cars" list — read its first entry.
+        CompoundTag c;
+        if (tag.contains("Car")) {
+            c = tag.getCompound("Car");
+        } else {
+            ListTag carList = tag.getList("Cars", Tag.TAG_COMPOUND);
+            if (carList.isEmpty()) {
+                return null;
+            }
+            c = carList.getCompound(0);
+        }
+        UUID subId = c.getUUID("SubLevel");
+        UUID graphId = c.getUUID("Graph");
 
-            TrackGraph graph = Create.RAILWAYS.trackNetworks.get(graphId);
-            if (graph == null) {
-                if (verbose) {
-                    LoconauticsConstants.LOGGER.warn(
-                            "[sabletrain] waiting to restore {}: track graph {} not loaded ({} graphs present)",
-                            trainId, graphId, Create.RAILWAYS.trackNetworks.size());
-                }
-                return null; // track graphs not loaded yet — retry the whole train later
-            }
-            if (!(container.getSubLevel(subId) instanceof ServerSubLevel)) {
-                if (verbose) {
-                    LoconauticsConstants.LOGGER.warn(
-                            "[sabletrain] waiting to restore {}: sub-level {} not active yet (chunk not loaded?)",
-                            trainId, subId);
-                }
-                return null; // the car's sub-level hasn't loaded yet — retry later
-            }
-            RailCarriage carriage = RailCarriage.restore(graph, c.getCompound("Carriage"), dims);
-            if (carriage == null) {
-                // The rail this car sat on no longer exists in the graph — drop just this car.
+        TrackGraph graph = Create.RAILWAYS.trackNetworks.get(graphId);
+        if (graph == null) {
+            if (verbose) {
                 LoconauticsConstants.LOGGER.warn(
-                        "[sabletrain] car {} could not be re-seated (track changed?) — skipping it", subId);
-                continue;
+                        "[sabletrain] waiting to restore {}: track graph {} not loaded ({} graphs present)",
+                        trainId, graphId, Create.RAILWAYS.trackNetworks.size());
             }
-            // Restore the loose bogeys (each its own sub-level + rail). Skip a bogey whose sub-level/track is
-            // gone; wait (retry) if its graph/sub-level just isn't loaded yet.
-            List<SableTrain.Bogey> bogeys = new ArrayList<>();
-            ListTag bogeyList = c.getList("Bogeys", Tag.TAG_COMPOUND);
-            for (int j = 0; j < bogeyList.size(); j++) {
-                CompoundTag bt = bogeyList.getCompound(j);
-                UUID bSub = bt.getUUID("SubLevel");
-                TrackGraph bGraph = Create.RAILWAYS.trackNetworks.get(bt.getUUID("Graph"));
-                if (bGraph == null || !(container.getSubLevel(bSub) instanceof ServerSubLevel)) {
-                    return null; // bogey graph/sub-level not ready yet — retry the whole train
-                }
-                RailCarriage bRail = RailCarriage.restore(bGraph, bt.getCompound("Carriage"), dims);
-                if (bRail != null) {
-                    bogeys.add(new SableTrain.Bogey(bSub, bRail));
-                }
+            return null; // track graphs not loaded yet — retry later
+        }
+        if (!(container.getSubLevel(subId) instanceof ServerSubLevel)) {
+            if (verbose) {
+                LoconauticsConstants.LOGGER.warn(
+                        "[sabletrain] waiting to restore {}: sub-level {} not active yet (chunk not loaded?)",
+                        trainId, subId);
             }
-            Vector3dc localLead = readVec3d(c, "LocalLead");
-            Vector3dc localTrail = readVec3d(c, "LocalTrail");
-            cars.add(new SableTrain.Car(subId, carriage, bogeys, localLead, localTrail));
+            return null; // the cart's sub-level hasn't loaded yet — retry later
         }
-        if (cars.isEmpty()) {
-            return null; // nothing placeable yet (or all cars' track is gone) — retry until the deadline
+        RailCarriage carriage = RailCarriage.restore(graph, c.getCompound("Carriage"), dims);
+        if (carriage == null) {
+            // The rail this cart sat on no longer exists in the graph — it can't be re-seated, drop it.
+            LoconauticsConstants.LOGGER.warn(
+                    "[sabletrain] cart {} could not be re-seated (track changed?) — dropping it", subId);
+            return null;
         }
+        // Restore the loose bogeys (each its own sub-level + rail). Skip a bogey whose sub-level/track is gone;
+        // wait (retry) if its graph/sub-level just isn't loaded yet.
+        List<SableTrain.Bogey> bogeys = new ArrayList<>();
+        ListTag bogeyList = c.getList("Bogeys", Tag.TAG_COMPOUND);
+        for (int j = 0; j < bogeyList.size(); j++) {
+            CompoundTag bt = bogeyList.getCompound(j);
+            UUID bSub = bt.getUUID("SubLevel");
+            TrackGraph bGraph = Create.RAILWAYS.trackNetworks.get(bt.getUUID("Graph"));
+            if (bGraph == null || !(container.getSubLevel(bSub) instanceof ServerSubLevel)) {
+                return null; // bogey graph/sub-level not ready yet — retry
+            }
+            RailCarriage bRail = RailCarriage.restore(bGraph, bt.getCompound("Carriage"), dims);
+            if (bRail != null) {
+                bogeys.add(new SableTrain.Bogey(bSub, bRail));
+            }
+        }
+        Vector3dc localLead = readVec3d(c, "LocalLead");
+        Vector3dc localTrail = readVec3d(c, "LocalTrail");
+        SableTrain.Car car = new SableTrain.Car(subId, carriage, bogeys, localLead, localTrail);
 
-        SableTrain train = new SableTrain(tag.getUUID("Id"), level, cars, tag.getBoolean("Physics"));
+        SableTrain train = new SableTrain(tag.getUUID("Id"), level, car, tag.getBoolean("Physics"));
         train.setTargetSpeed(tag.getDouble("TargetSpeed"));
         train.setSpeed(tag.getDouble("Speed"));
         if (tag.contains("Accel")) {

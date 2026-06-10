@@ -78,34 +78,14 @@ public final class SableTrainSpawner {
             return 0;
         }
         UUID id = UUID.randomUUID();
-        SableTrain train = new SableTrain(id, level, List.of(car), physics);
+        SableTrain train = new SableTrain(id, level, car, physics);
         train.setTargetSpeed(speed);
         SableTrainRegistry.register(train);
         ensureObserver(level);
         lastTrainId = id;
         SableTrainPersistence.persist(train); // survive restarts
-        msg(player, String.format("%s train spawned speed=%.2f — id %s — add cars with /loconautics sabletrain addcar",
+        msg(player, String.format("%s cart spawned speed=%.2f — id %s — join carts together with steel cable",
                 physics ? "PHYSICS" : "pinned", speed, id.toString().substring(0, 8)));
-        return 1;
-    }
-
-    /** Appends the looked-at cart to the most recently spawned train as a new (articulated) car. */
-    public static int addCar(ServerPlayer player) {
-        if (lastTrainId == null || SableTrainRegistry.get(lastTrainId) == null) {
-            msg(player, "no train to add to — spawn one first with /loconautics sabletrain");
-            return 0;
-        }
-        SableTrain train = SableTrainRegistry.get(lastTrainId);
-        // Resolve the new car's travel direction from the train's forward (front car), so it runs the SAME
-        // way as the rest of the convoy instead of flipping based on where the player happened to look.
-        Vec3 trainForward = train.cars().isEmpty() ? null : train.cars().get(0).carriage().forward();
-        SableTrain.Car car = buildCar(player, train.level(), trainForward);
-        if (car == null) {
-            return 0;
-        }
-        train.cars().add(car);
-        SableTrainPersistence.persist(train); // re-snapshot the now-longer consist
-        msg(player, "car added — train now has " + train.cars().size() + " cars (each pivots on its own bogeys)");
         return 1;
     }
 
@@ -250,16 +230,15 @@ public final class SableTrainSpawner {
         for (SableTrain train : SableTrainRegistry.all()) {
             ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
             if (container != null) {
-                for (SableTrain.Car car : train.cars()) {
-                    if (car.subLevelId() != null
-                            && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub
-                            && !sub.isRemoved()) {
-                        container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
-                    }
-                    for (SableTrain.Bogey bogey : car.bogeys()) {
-                        if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
-                            container.removeSubLevel(bsub, SubLevelRemovalReason.REMOVED);
-                        }
+                SableTrain.Car car = train.car();
+                if (car.subLevelId() != null
+                        && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub
+                        && !sub.isRemoved()) {
+                    container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
+                }
+                for (SableTrain.Bogey bogey : car.bogeys()) {
+                    if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
+                        container.removeSubLevel(bsub, SubLevelRemovalReason.REMOVED);
                     }
                 }
             }
@@ -313,14 +292,13 @@ public final class SableTrainSpawner {
         return null;
     }
 
-    /** Records {@code id} as the most-recently-touched train (so {@code addcar} targets a restored consist). */
+    /** Records {@code id} as the most-recently-touched cart (used as the default throttle target, etc.). */
     static void noteRestored(UUID id) {
         lastTrainId = id;
     }
 
-    /** Attach (once per container) an observer that drops only the affected CAR when its sub-level is removed
-     *  (not the whole train — breaking one car must not drop the rest of the convoy). Public so the restore
-     *  path can re-attach it for trains rebuilt after a restart. */
+    /** Attach (once per container) an observer that drops a cart when its body sub-level is destroyed. Public so
+     *  the restore path can re-attach it for carts rebuilt after a restart. */
     public static void ensureObserver(ServerLevel level) {
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null || OBSERVED.contains(container)) {
@@ -329,23 +307,17 @@ public final class SableTrainSpawner {
         container.addObserver(new SubLevelObserver() {
             @Override
             public void onSubLevelRemoved(SubLevel subLevel, SubLevelRemovalReason reason) {
-                // Only a genuine REMOVED (destroyed/disassembled) drops the car. UNLOADED means the sub-level is
-                // just being unloaded (chunk unload / server stop) and will come back — keep the train AND its
+                // Only a genuine REMOVED (destroyed/disassembled) drops the cart. UNLOADED means the sub-level is
+                // just being unloaded (chunk unload / server stop) and will come back — keep the cart AND its
                 // saved record, or every shutdown would wipe persistence.
                 if (reason != SubLevelRemovalReason.REMOVED) {
                     return;
                 }
                 UUID removedId = subLevel.getUniqueId();
                 for (SableTrain train : SableTrainRegistry.all()) {
-                    boolean removed = train.cars().removeIf(car -> removedId.equals(car.subLevelId()));
-                    if (!removed) {
-                        continue;
-                    }
-                    if (train.cars().isEmpty()) {
-                        SableTrainRegistry.remove(train.id()); // only drop the train once it has no cars left
+                    if (removedId.equals(train.car().subLevelId())) {
+                        SableTrainRegistry.remove(train.id());
                         SableTrainPersistence.unpersist(train.level().getServer(), train.id());
-                    } else {
-                        SableTrainPersistence.persist(train); // re-snapshot the shortened consist
                     }
                 }
             }
