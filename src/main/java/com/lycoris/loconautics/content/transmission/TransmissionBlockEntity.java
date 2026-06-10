@@ -182,9 +182,23 @@ public class TransmissionBlockEntity extends SplitShaftBlockEntity implements Me
     public void setDirectionActive(boolean active) {
         if (this.directionActive == active) return;
         this.directionActive = active;
+        updateDirectionBlockstate();
         onKineticStateChanged();
         setChanged();
         sendData();
+    }
+
+    /**
+     * Writes the visual {@code DIRECTION_ACTIVE} property to the blockstate
+     * so the model reflects the current direction signal.
+     */
+    private void updateDirectionBlockstate() {
+        if (level == null || level.isClientSide) return;
+        BlockState state = getBlockState();
+        BlockState updated = state.setValue(TransmissionBlock.DIRECTION_ACTIVE, directionActive);
+        if (!updated.equals(state)) {
+            level.setBlock(worldPosition, updated, 2);
+        }
     }
 
     /**
