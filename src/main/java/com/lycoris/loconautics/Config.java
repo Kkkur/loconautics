@@ -84,6 +84,22 @@ public final class Config {
         BUILDER.pop();
     }
 
+    // ------------------------------------------------------------------ Steel Cable
+
+    public static final ModConfigSpec.DoubleValue STEEL_CABLE_MAX_RANGE;
+
+    static {
+        BUILDER.push("steel_cable");
+
+        STEEL_CABLE_MAX_RANGE = BUILDER
+                .comment("Maximum connection range (in blocks) for the Steel Cable item.",
+                        "Set to -1 (default) to automatically use 2x Simulated's current maxRopeRange.",
+                        "Set to any positive value to override the range directly.")
+                .defineInRange("maxRange", -1.0, -1.0, 10000.0);
+
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
+import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerDismountPacket;
@@ -62,6 +63,13 @@ public final class LoconauticsNetwork {
                 AnalogControllerDismountPacket.STREAM_CODEC,
                 AnalogControllerDismountPacket::handle
         );
+        // Server -> Client: a rope strand was created by a Steel Cable item.
+        registrar.playToClient(
+                SteelCableStrandPacket.TYPE,
+                SteelCableStrandPacket.STREAM_CODEC,
+                SteelCableStrandPacket::handle
+        );
+
         // Server -> Client: a train entered/left physics mode.
         registrar.playToClient(
                 PhysicsTrainSyncPacket.TYPE,

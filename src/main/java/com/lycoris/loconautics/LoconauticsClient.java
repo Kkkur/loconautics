@@ -29,6 +29,15 @@ import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
+import com.lycoris.loconautics.registry.LoconauticsRegistries;
+import com.simibubi.create.foundation.item.ItemDescription;
+import net.createmod.catnip.lang.FontHelper;
+import net.createmod.ponder.foundation.PonderIndex;'''
+        assert old in c
+        c = c.replace(old, new)
+
+
 
 /**
  * Client-only entry point.
@@ -57,9 +66,19 @@ public final class LoconauticsClient {
         NeoForge.EVENT_BUS.addListener(this::onMouseScroll);
     }
 
-    private void onClientSetup(FMLClientSetupEvent event) {
-        LoconauticsConstants.LOGGER.info("Loconautics client setup");
+
+       LoconauticsConstants.LOGGER.info(\"Loconautics client setup\");
         LoconauticsPartialModels.init();
+
+// Steel Cable tooltip
+        ItemDescription.useKey(LoconauticsRegistries.STEEL_CABLE.get(), \"item.loconautics.steel_cable\");
+
+                // Steel Cable ponder scenes (links to Simulated's rope ponder)
+                PonderIndex.addPlugin(new LoconauticsPonderPlugin());'''
+            assert old in c
+            c = c.replace(old, new)
+
+    with open(path, 'w') as f: f.write(c)
 
         // Register Flywheel visual for the Transmission
         SimpleBlockEntityVisualizer.builder(LoconauticsRegistries.TRANSMISSION_BE.get())
