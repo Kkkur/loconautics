@@ -14,6 +14,13 @@ public class LoconauticsPartialModels {
     public static final PartialModel ANALOG_CONTROLLER =
             PartialModel.of(LoconauticsConstants.id("block/analog_controller"));
 
+    // Steel Cable rope strand models — textures provided by the artist under
+    // assets/loconautics/textures/block/steel_cable/
+    public static final PartialModel STEEL_CABLE_ROPE =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/rope"));
+    public static final PartialModel STEEL_CABLE_KNOT =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/knot"));
+
     /** Call from LoconauticsClient during FMLClientSetupEvent to trigger static init. */
     public static void init() {}
 }

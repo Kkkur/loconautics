@@ -25,6 +25,8 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.ticks.TickPriority;
 
+// TODO: Fix all 6 sides rotation
+
 public class TransmissionBlock extends AbstractEncasedShaftBlock
         implements IBE<TransmissionBlockEntity> {
 

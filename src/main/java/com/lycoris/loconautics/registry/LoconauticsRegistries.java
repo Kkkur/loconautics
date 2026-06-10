@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.registry;
 
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
+import com.lycoris.loconautics.content.steelcable.SteelCableItem;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerMenu;
 import com.lycoris.loconautics.content.transmission.TransmissionMenu;
@@ -128,6 +129,11 @@ public final class LoconauticsRegistries {
             IMenuTypeExtension.create((id, inv, buf) ->
                     new TransmissionMenu(LoconauticsRegistries.TRANSMISSION_MENU.get(), id, inv, buf)));
 
+    // ------------------------------------------------------------------ Steel Cable
+
+    public static final DeferredHolder<Item, SteelCableItem> STEEL_CABLE =
+            ITEMS.register("steel_cable", () -> new SteelCableItem(new Item.Properties().stacksTo(16)));
+
     // ------------------------------------------------------------------ Creative tab
 
     public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
@@ -139,6 +145,7 @@ public final class LoconauticsRegistries {
                         output.accept(ANALOG_CONTROLLER_ITEM.get());
                         output.accept(BEARING_AXLE_ITEM.get());
                         output.accept(TRANSMISSION_ITEM.get());
+                        output.accept(STEEL_CABLE.get());
                     })
                     .build());
 
