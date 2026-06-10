@@ -6,7 +6,12 @@
 > task names, not everything.
 
 ## 0. CURRENT STATE
-- **2026-06-10 latest:** HEAD = `69855c3`. Lycoris/Lthiumm's branch (`controller-and-trans-fix`) is fully merged in
+- **2026-06-11:** the old **hybrid Create-contraption train system was REMOVED** (`fece09e`) — the all-Sable train
+  (`allsable/*`) is now the only train system. Deleted: PhysicsTrainTickHandler, the server/assembly orchestrator,
+  Physics(Train)Registry/Pose/Tag, the contraption/station/bogey mixins, the "Assemble as Physics Train" button +
+  packets. **`master` == `feature/all-sable-physics-train` == `fece09e`** (everything merged to main).
+  NOTE: HANDOFF_NEXT_CLAUDE.md §3–§6 describe that removed hybrid — they're now HISTORICAL only.
+- **2026-06-10:** HEAD = `69855c3`. Lycoris/Lthiumm's branch (`controller-and-trans-fix`) is fully merged in
   (steel cable, transmission, analog, Rope mixins, + their fixes: startup crash, knot rendering, TransmissionRenderer).
   The `controller-and-trans-fix` and `transmission` branches were deleted after merging (cleanup). Bogeys pivot on
   curves ✅; persistence ✅; weight→axle ✅; analog→axle propulsion ✅; startup crash ✅ fixed.

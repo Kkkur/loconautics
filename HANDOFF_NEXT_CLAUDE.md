@@ -8,7 +8,15 @@
 
 ---
 
-## 0a. ACTUALIZACIÓN 2026-06-09 noche (LÉEME PRIMERO — estado más reciente)
+## 0aa. ACTUALIZACIÓN 2026-06-11 (LÉEME PRIMERO DE TODO)
+**El sistema HÍBRIDO (tren via `CarriageContraptionEntity` de Create) fue ELIMINADO** (`fece09e`). El tren
+all-Sable (`allsable/*`) es el ÚNICO sistema ahora. Se borraron: `PhysicsTrainTickHandler`, `server/assembly/*`
+(orchestrator/SubLevelBridge/Disassembler), `Physics(Train)Registry/Pose/Tag`, los mixins de contraption/estación/
+bogey, el botón "Assemble as Physics Train" y sus paquetes. **`master` == `feature/all-sable-physics-train`** (todo
+mergeado a main). **⚠️ Las secciones §3, §4, §5, §6 de abajo describen ese híbrido ELIMINADO → son solo HISTÓRICAS.**
+Para el estado vivo del tren all-Sable y la cola de tareas, lee `GUIDE_FABLE5.md`.
+
+## 0a. ACTUALIZACIÓN 2026-06-09 noche (estado del all-Sable; sigue válido salvo lo del híbrido)
 Rama `feature/all-sable-physics-train`, jar desplegado md5 **`2539d13`** (último cambio de código `d87f932`;
 este doc por encima). Haz `git switch feature/all-sable-physics-train && git pull` y `git log --oneline -15`
 para el estado exacto. Working tree limpio, todo pusheado.
