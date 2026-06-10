@@ -152,10 +152,10 @@ public class TransmissionBlock extends KineticBlock implements IBE<TransmissionB
     @Override
     public boolean hasShaftTowards(net.minecraft.world.level.LevelReader world, BlockPos pos,
                                    BlockState state, Direction face) {
-        // Shafts only on the two faces along the block's axis
-        if (face.getAxis() != state.getValue(FACING).getAxis()) return false;
-        // Disengaged: no shaft connections so rotation can't propagate
-        return state.getValue(STAGE) != 0;
+        // Both faces along the rotation axis are always open.
+        // Disengagement (signal == 0) is handled in propagateRotationTo, not here,
+        // so Create can always discover and connect to both shafts.
+        return face.getAxis() == state.getValue(FACING).getAxis();
     }
 
     // ------------------------------------------------------------------ block entity

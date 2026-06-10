@@ -29,7 +29,7 @@ public class TransmissionVisual extends KineticBlockEntityVisual<TransmissionBlo
                 .createInstance();
         outputShaft
                 .rotateToFace(Direction.SOUTH, outputDir)
-                .setup(be, axis, be.getGeneratedSpeed())
+                .setup(be, axis, be.getTargetSpeed())
                 .setPosition((Vec3i) getVisualPosition())
                 .setChanged();
     }
@@ -37,7 +37,7 @@ public class TransmissionVisual extends KineticBlockEntityVisual<TransmissionBlo
     @Override
     public void update(float pt) {
         Direction.Axis axis = rotationAxis();
-        outputShaft.setup(blockEntity, axis, blockEntity.getGeneratedSpeed()).setChanged();
+        outputShaft.setup(blockEntity, axis, blockEntity.getTargetSpeed()).setChanged();
     }
 
     @Override

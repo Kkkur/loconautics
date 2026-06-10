@@ -10,7 +10,8 @@
     "StationBlockEntityAssembleMixin",
     "StationBlockEntityAssembleControlsMixin",
     "StationBlockEntityAccessor",
-    "TrainDisassembleMixin"
+    "TrainDisassembleMixin",
+    "RotationPropagatorMixin"
   ],
   "client": [
     "client.AssemblyScreenMixin",

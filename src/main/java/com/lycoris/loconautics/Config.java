@@ -50,7 +50,6 @@ public final class Config {
     // ------------------------------------------------------------------ Transmission
 
     public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT;
-    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_CAPACITY;
 
     static {
         BUILDER.push("transmission");
@@ -59,11 +58,6 @@ public final class Config {
                 .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
                         "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
                 .defineInRange("suImpact", 4.0, 0.0, 100.0);
-
-        TRANSMISSION_SU_CAPACITY = BUILDER
-                .comment("Stress Units capacity provided by the Transmission to its output network.",
-                        "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
-                .defineInRange("suCapacity", 262144.0, 0.0, Double.MAX_VALUE);
 
         BUILDER.pop();
     }
