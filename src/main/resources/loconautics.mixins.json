@@ -11,7 +11,8 @@
     "StationBlockEntityAssembleControlsMixin",
     "StationBlockEntityAccessor",
     "RopeStrandHolderBehaviorAccessor",
-    "TrainDisassembleMixin",
+    "RopeStrandHolderDestroyMixin",
+    "TrainDisassembleMixin"
   ],
   "client": [
     "client.AssemblyScreenMixin",

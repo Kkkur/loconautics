@@ -1,6 +1,7 @@
 package com.lycoris.loconautics;
 
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
+import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHandler;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
@@ -8,17 +9,21 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerScreen;
 import com.lycoris.loconautics.content.transmission.TransmissionRenderer;
 import com.lycoris.loconautics.content.transmission.TransmissionScreen;
 import com.lycoris.loconautics.content.transmission.TransmissionVisual;
-import dev.engine_room.flywheel.lib.visualization.SimpleBlockEntityVisualizer;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleRenderer;
+import com.simibubi.create.foundation.item.ItemDescription;
+import com.simibubi.create.foundation.item.TooltipModifier;
+import dev.engine_room.flywheel.lib.visualization.SimpleBlockEntityVisualizer;
 import net.createmod.catnip.platform.CatnipServices;
+import net.createmod.ponder.foundation.PonderIndex;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.InputEvent;
@@ -28,16 +33,6 @@ import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
-import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import com.simibubi.create.foundation.item.ItemDescription;
-import net.createmod.catnip.lang.FontHelper;
-import net.createmod.ponder.foundation.PonderIndex;'''
-        assert old in c
-        c = c.replace(old, new)
-
-
 
 /**
  * Client-only entry point.
@@ -66,19 +61,18 @@ public final class LoconauticsClient {
         NeoForge.EVENT_BUS.addListener(this::onMouseScroll);
     }
 
-
-       LoconauticsConstants.LOGGER.info(\"Loconautics client setup\");
+    private void onClientSetup(FMLClientSetupEvent event) {
+        LoconauticsConstants.LOGGER.info("Loconautics client setup");
         LoconauticsPartialModels.init();
 
-// Steel Cable tooltip
-        ItemDescription.useKey(LoconauticsRegistries.STEEL_CABLE.get(), \"item.loconautics.steel_cable\");
+        // Steel Cable tooltip (drives item.loconautics.steel_cable.tooltip.* lang keys)
+        ItemDescription.useKey(LoconauticsRegistries.STEEL_CABLE.get(), "item.loconautics.steel_cable");
+        TooltipModifier.REGISTRY.register(LoconauticsRegistries.STEEL_CABLE.get(),
+                new ItemDescription.Modifier(LoconauticsRegistries.STEEL_CABLE.get(),
+                        net.createmod.catnip.lang.FontHelper.Palette.STANDARD_CREATE));
 
-                // Steel Cable ponder scenes (links to Simulated's rope ponder)
-                PonderIndex.addPlugin(new LoconauticsPonderPlugin());'''
-            assert old in c
-            c = c.replace(old, new)
-
-    with open(path, 'w') as f: f.write(c)
+        // Steel Cable ponder scenes (reuses Simulated's rope scenes)
+        PonderIndex.addPlugin(new LoconauticsPonderPlugin());
 
         // Register Flywheel visual for the Transmission
         SimpleBlockEntityVisualizer.builder(LoconauticsRegistries.TRANSMISSION_BE.get())
@@ -122,8 +116,6 @@ public final class LoconauticsClient {
     private void onKeyInput(InputEvent.Key event) {
         if (!AnalogControllerClientHandler.isControlling()) return;
         // ESC (256) key press -- close any open screen and dismount.
-        // InputEvent.Key is not cancellable, so ESC will still open the pause menu;
-        // we immediately close it again and dismount.
         if (event.getKey() == 256 && event.getAction() == 1) {
             AnalogControllerClientHandler.stopControllingClient();
             Minecraft.getInstance().setScreen(null);

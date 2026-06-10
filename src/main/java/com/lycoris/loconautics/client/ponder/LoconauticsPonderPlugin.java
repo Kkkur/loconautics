@@ -25,7 +25,8 @@ public class LoconauticsPonderPlugin extends CreatePonderPlugin {
 
     @Override
     public void registerScenes(PonderSceneRegistrationHelper<ResourceLocation> helper) {
-        helper.forComponents(LoconauticsRegistries.STEEL_CABLE)
+        // forComponents(ResourceLocation...) — pass the item's registry location directly
+        helper.forComponents(LoconauticsRegistries.STEEL_CABLE.getId())
                 .addStoryBoard("rope", RopeScenes::ropeIntro)
                 .addStoryBoard("rope", RopeScenes::ropeConnections);
     }
