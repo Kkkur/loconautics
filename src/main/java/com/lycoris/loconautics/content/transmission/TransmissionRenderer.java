@@ -50,9 +50,8 @@ public class TransmissionRenderer extends SplitShaftRenderer {
                     (PartialModel) AllPartialModels.SHAFT_HALF,
                     (BlockState) be.getBlockState(),
                     direction);
-            SplitShaftRenderer.kineticRotationTransform(superByteBuffer, be, boxAxis, angle,
-                    LightTexture.FULL_BRIGHT);
-            superByteBuffer.renderInto(ms, buffer.getBuffer(RenderType.cutoutMipped()));
+            SplitShaftRenderer.kineticRotationTransform(superByteBuffer, be, boxAxis, angle, light);
+            superByteBuffer.renderInto(ms, buffer.getBuffer(RenderType.solid()));
         }
     }
 }
