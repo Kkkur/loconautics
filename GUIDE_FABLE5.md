@@ -6,10 +6,13 @@
 > task names, not everything.
 
 ## 0. CURRENT STATE
-- **2026-06-10 latest:** HEAD = `6013cc7` (loose pivoting bogeys, see #2). Bogeys pivot on curves ✅; persistence ✅;
-  weight→axle ✅; analog→axle propulsion ✅. Active work = bogey/body **cohesion** fine-tune (#2, visual) and the
-  **disconnected-block fall** feature (#2b, to implement). The crash never reproduced in the Loconautics instance.
-- Branch `feature/all-sable-physics-train`, base = merge `9f9b85f` (merged Lycoris' `feature/controller-and-trans-fix`
+- **2026-06-10 latest:** HEAD = `69855c3`. Lycoris/Lthiumm's branch (`controller-and-trans-fix`) is fully merged in
+  (steel cable, transmission, analog, Rope mixins, + their fixes: startup crash, knot rendering, TransmissionRenderer).
+  The `controller-and-trans-fix` and `transmission` branches were deleted after merging (cleanup). Bogeys pivot on
+  curves ✅; persistence ✅; weight→axle ✅; analog→axle propulsion ✅; startup crash ✅ fixed.
+  Active work = bogey/body **cohesion** fine-tune (#2, visual) and the **disconnected-block fall** feature (#2b).
+- Branch `feature/all-sable-physics-train` (the ONLY active branch; `master` is the stable base, `backup/collision-fix-stable`
+  is a safety backup). Built on the earlier merge `9f9b85f` (`controller-and-trans-fix`
   cleanly — no conflicts; his work and the persistence work touch disjoint files). **Builds OK** (`./gradlew build`).
 - Merged jar **`c89df05`** deployed to the NEW test instance (see workflow).
 - The merge brought in Lycoris' NEW code: **steel cable** (`content/steelcable/*`), **transmission** rework
@@ -17,7 +20,6 @@
   (`foundation/menu|screen/BindFrequency*`), and new **Rope\*** mixins (`mixin/Rope*`, `mixin/client/Rope*`) targeting
   Aeronautics' rope blocks (`dev.simulated_team.simulated.content.blocks.rope.*`). Build also gained an
   `extractSimulated` gradle task (new Aeronautics/Simulated source dep).
-- **This merged build is reported to CRASH ON LAUNCH** — that's task #1.
 
 ## 1. WORKFLOW (CHANGED — new test instance)
 - Build: `./gradlew build` → jar at `build/libs/loconautics-1.0.0.jar`. Verify md5.
@@ -32,18 +34,10 @@
 
 ## 2. TASK QUEUE (priority order, from Lycoris)
 
-### #1 — FIX THE STARTUP CRASH ⛔ (do first)
-The merged build compiles but crashes when the game opens. **Get the log first, don't guess** (HANDOFF rule).
-- Launch the Loconautics instance → read `logs/latest.log` + newest `crash-reports/*.txt`. Look for
-  `Mixin apply failed` / `was not found` / a registration NPE / `NoClassDefFound`.
-- **Prime suspects** (new in the merge, `defaultRequire:1` so a bad one is fatal):
-  `mixin/RopeStrandHolderDestroyMixin`, `mixin/RopeStrandHolderBehaviorAccessor`,
-  `mixin/client/RopeConnectorRendererMixin`, `mixin/client/RopeWinchRendererMixin`,
-  `mixin/client/RopeWinchBlockEntityAccessor` (in `loconautics.mixins.json`). They target Aeronautics rope classes —
-  an injection point / signature that doesn't match the modpack's Aeronautics version will crash. Also check steel
-  cable / transmission **registration** (`registry/LoconauticsRegistries`) and any missing model/texture.
-- Fix the offending mixin selector / registration. Re-build, re-deploy, confirm clean start (`[sabletrain]
-  persistence active` line should appear = our code loaded).
+### #1 — Startup crash ✅ FIXED (Lycoris/Lthiumm, commit `a242df2`)
+The "crash upon joining a world" was the new Rope mixins (`RopeStrandHolderBehaviorAccessor`,
+`RopeStrandHolderDestroyMixin`); Lthiumm fixed their selectors. Merged into all-sable. The build starts clean now
+(`[sabletrain] persistence active` confirms our code loaded). Nothing to do here.
 
 ### #2 — Loose pivoting bogeys ✅ DONE (pivoting); 🟡 cohesion fine-tuning remains (visual)
 **DONE (commit `6013cc7`, confirmed in-game 2026-06-10):** Implemented the **multi-body** approach (option B, the

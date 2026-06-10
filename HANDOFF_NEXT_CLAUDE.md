@@ -124,15 +124,16 @@ de Create. Autores: Lycoris (usuario) + MDLOP. Repo `github.com:Kkkur/loconautic
 - El usuario está MUY cansado de reiniciar → **acertar a la primera**, batch de cambios, e instrumentar con
   logs (`[poses]`, `[ctrl]`, …) cuando no estés seguro: la AUSENCIA de un log también es dato.
 
-## 2. ESTADO DE RAMAS (todo en origin)
+## 2. ESTADO DE RAMAS (LIMPIADO 2026-06-10 — solo quedan 3)
 | Rama | Commit | Qué es |
 |---|---|---|
-| `master` | `4da2b29` | Fix de colisión **+ analog-controller** (mergeado 2026-06-07). Base estable. |
-| `backup/collision-fix-stable` | `e7696e5` | Copia de seguridad del fix de colisión puro (pre-analog). |
-| `feature/sable-train-controls` | `2430d2a` | Enfoque **híbrido** de controles (WIP, medio-funciona — ver §4). |
-| `feature/analog-controller` | `4da2b29` | Bloque "analog controller" (GUI/red/modelos) de Lycoris/MDLOP. Ya mergeado en master y all-sable. |
-| `feature/all-sable-physics-train` | `61c0afa` | **AQUÍ AHORA.** Pivote "todo Sable" (§7) + Fase 1/2a + analog-controller. |
-| `new-main` | — | preexistente del compa. |
+| `feature/all-sable-physics-train` | `69855c3` | **AQUÍ — única rama activa.** Todo el trabajo: all-Sable + bogeys sueltos + persistencia + controles/steel-cable/transmission de Lycoris/Lthiumm (ya mergeado). |
+| `master` | `4da2b29` | Base estable (fix de colisión + analog-controller, 2026-06-07). |
+| `backup/collision-fix-stable` | `e7696e5` | Copia de seguridad del fix de colisión puro (pre-analog). NO borrar. |
+
+> **Borradas 2026-06-10** (ya mergeadas/obsoletas, su contenido vive en `all-sable`): `feature/controller-and-trans-fix`
+> (trabajo de Lycoris/Lthiumm, cherry-picked a all-sable), `feature/transmission` (ancestro de all-sable), `new-main`.
+> También históricas y ya inexistentes: `feature/sable-train-controls`, `feature/analog-controller` (su contenido está en master/all-sable).
 
 ---
 
