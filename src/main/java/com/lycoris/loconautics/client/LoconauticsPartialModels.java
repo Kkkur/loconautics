@@ -14,6 +14,19 @@ public class LoconauticsPartialModels {
     public static final PartialModel ANALOG_CONTROLLER =
             PartialModel.of(LoconauticsConstants.id("block/analog_controller"));
 
+    // Steel Cable rope strand models — textures provided by the artist under
+    // assets/loconautics/textures/block/steel_cable/
+    public static final PartialModel STEEL_CABLE_ROPE =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/rope"));
+    public static final PartialModel STEEL_CABLE_KNOT =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/knot"));
+
+    // Steel Cable winch partial models — shaft rotates with kinetics, coil scrolls
+    public static final PartialModel STEEL_CABLE_WINCH_SHAFT =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/winch_shaft"));
+    public static final PartialModel STEEL_CABLE_WINCH_COIL =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/winch_coil"));
+
     /** Call from LoconauticsClient during FMLClientSetupEvent to trigger static init. */
     public static void init() {}
 }

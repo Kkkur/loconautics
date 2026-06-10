@@ -21,7 +21,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
+import net.createmod.catnip.animation.LerpedFloat;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -30,81 +30,89 @@ import java.util.UUID;
 /**
  * Block entity for the Analog Controller.
  *
- * Key responsibilities:
- *  1. Track which player is currently "mounted" (has right-clicked to use it).
- *  2. Receive key events from {@link AnalogControllerInputPacket} and adjust signal:
- *       W (key 0) → raise signal by 1 (up to 15)
- *       S (key 1) → lower signal by 1 (down to 0)
- *       Shift (key 5) → toggle lock; while locked, signal doesn't decay
- *  3. If not locked and user is idle (no W/S), decay signal by 1 every DECAY_TICKS ticks.
- *  4. Broadcast signal via Create's {@link RedstoneLinkNetworkHandler} on the frequency
- *     configured in the GUI (two item slots, like a standard redstone link).
- *  5. Also write the power value into the block state so adjacent blocks see a vanilla
- *     comparator-compatible output.
+ * Power range: [-negativeCap, +maxPower] (single continuous integer, no mode flag).
+ *
+ * W held  → step power up   by 1 every RAISE_TICKS
+ * S held  → step power down by 1 every LOWER_TICKS (= RAISE_TICKS + 30)
+ * Shift   → toggle lock; while locked, decay is disabled
+ * Scroll  → adjusts maxPower (absolute: caps both +maxPower and -maxPower)
+ *
+ * Decay: always active (mounted or not), nudges power one step toward 0
+ * every DECAY_TICKS (configurable). Lock disables it entirely.
+ *
+ * Network output:
+ *   power > 0 → send power on forward freq; backward freq silent
+ *   power < 0 → send abs(power) on forward freq AND binary 15 on backward freq
+ *   power == 0 → both freqs silent
+ *
+ * powered blockstate: true iff power != 0
  */
 public class AnalogControllerBlockEntity extends SmartBlockEntity implements MenuProvider {
 
     // ------------------------------------------------------------------ constants
 
-    /** Ticks between each W raise step (~0.5 seconds). */
-    private static final int RAISE_TICKS  = 10;
+    /** Ticks between each W raise step. */
+    private static final int RAISE_TICKS = 10;
 
-    /** Ticks between each S lower step (~0.5 seconds). */
-    private static final int LOWER_TICKS  = 10;
+    /** Ticks between each S lower step (slower feel than raising). */
+    private static final int LOWER_TICKS = RAISE_TICKS + 30; // 40
 
-    /** Ticks between automatic signal decay steps (~1 second). */
-    private static final int DECAY_TICKS  = 20;
-
-    /** Maximum redstone signal value. */
+    /** Maximum positive redstone signal. */
     private static final int MAX_POWER = 15;
+
+    // ------------------------------------------------------------------ client animation
+
+    /** Lerps toward abs(currentPower) / 15 — drives the speed/throttle lever. */
+    public final LerpedFloat animSpeed = LerpedFloat.linear().startWithValue(0.0);
+
+    /** Lerps toward 0.5 (centre) — reserved for steering. */
+    public final LerpedFloat animSteer = LerpedFloat.linear().startWithValue(0.5);
+
+    /** Lerps toward 1 when mounted, 0 when idle. */
+    public final LerpedFloat animEquip = LerpedFloat.linear().startWithValue(0.0);
 
     // ------------------------------------------------------------------ state
 
-    /** UUID of the player currently using this controller, or null. */
     @Nullable
     private UUID currentUser;
 
-    /** Whether the signal is locked (won't decay). Toggled by Shift while mounted. */
+    /** While locked, decay is disabled and power is frozen. */
     private boolean locked = false;
 
-    /** Whether W is currently held (raise signal). */
-    private boolean raisingSignal = false;
-
-    /** Whether S is currently held (lower signal). */
+    private boolean raisingSignal  = false;
     private boolean loweringSignal = false;
 
-    /** Countdown to next raise step. */
     private int raiseTimer = RAISE_TICKS;
-
-    /** Countdown to next lower step. */
     private int lowerTimer = LOWER_TICKS;
 
-    /** Countdown to next decay step. */
-    private int decayTimer = DECAY_TICKS;
-
-    /** Current redstone power (0-15). */
+    /**
+     * Current power level. Negative = reverse.
+     * Range: [-negativeCap .. +maxPower]
+     */
     private int currentPower = 0;
 
-    /** Maximum allowed power — set by scroll wheel, shown as the throttle cap. */
+    /**
+     * Absolute cap set by scroll wheel.
+     * Forward:  0 .. +maxPower
+     * Backward: 0 .. -maxPower  (symmetric)
+     */
     private int maxPower = MAX_POWER;
 
     // ------------------------------------------------------------------ frequency
 
-    /**
-     * The two frequency slots for the redstone link network key.
-     * Stored as ItemStacks in NBT; exposed via the GUI.
-     */
     private net.minecraft.world.item.ItemStack frequencyFirst =
             net.minecraft.world.item.ItemStack.EMPTY;
     private net.minecraft.world.item.ItemStack frequencySecond =
             net.minecraft.world.item.ItemStack.EMPTY;
 
-    /**
-     * The linkable delegate that sits in the Create network and transmits our signal.
-     * Re-created whenever the frequency or power changes.
-     */
-    @Nullable
-    private AnalogLinkEntry linkEntry;
+    /** Backward frequency — receives binary ON (15) when power is negative. */
+    private net.minecraft.world.item.ItemStack frequencyBackFirst =
+            net.minecraft.world.item.ItemStack.EMPTY;
+    private net.minecraft.world.item.ItemStack frequencyBackSecond =
+            net.minecraft.world.item.ItemStack.EMPTY;
+
+    @Nullable private AnalogLinkEntry linkEntry;
+    @Nullable private AnalogLinkEntry backLinkEntry;
 
     // ------------------------------------------------------------------ constructor
 
@@ -113,74 +121,117 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     }
 
     @Override
-    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-        // No standard Create behaviours needed; we manage the network manually.
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level == null || level.isClientSide) return;
+        updateNetwork(level);
+        updateBlockState(level, getBlockState());
     }
 
     // ------------------------------------------------------------------ tick
 
-    /**
-     * Static ticker target (called from {@link AnalogControllerBlock#getTicker}).
-     */
     public static void tick(Level level, BlockPos pos, BlockState state,
                             AnalogControllerBlockEntity be) {
+        if (level.isClientSide) {
+            be.clientTick();
+            return;
+        }
         be.serverTick(level, state);
     }
 
-    private void serverTick(Level level, BlockState state) {
-        if (level.isClientSide) return;
+    private void clientTick() {
+        float targetSpeed = Math.abs(currentPower) / 15.0f;
+        float targetEquip = hasUser() ? 1.0f : 0.0f;
 
-        // --- sanity check: disconnect stale user ---
+        animSpeed.chase(targetSpeed, 0.15, LerpedFloat.Chaser.EXP);
+        animSteer.chase(0.5,         0.15, LerpedFloat.Chaser.EXP);
+        animEquip.chase(targetEquip, 0.1, LerpedFloat.Chaser.EXP);
+
+        animSpeed.tickChaser();
+        animSteer.tickChaser();
+        animEquip.tickChaser();
+    }
+
+    private void serverTick(Level level, BlockState state) {
+        // --- sanity: disconnect stale user ---
         if (currentUser != null) {
             Player player = level.getPlayerByUUID(currentUser);
             if (player == null || !playerInRange(player)) {
-                com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
-                        "[analog] sanity-disconnect: playerNull={} inRange={}",
-                        player == null, player != null && playerInRange(player));
                 disconnectUser(level);
             }
         }
 
         int previousPower = currentPower;
 
-        // --- apply held keys at rate-limited intervals ---
-        if (raisingSignal) {
-            // W is blocked if locked and already at or above the throttle cap
-            boolean blockedByLock = locked && currentPower >= maxPower;
-            if (!blockedByLock) {
-                raiseTimer--;
-                if (raiseTimer <= 0) {
-                    raiseTimer = RAISE_TICKS;
-                    currentPower = Math.min(currentPower + 1, maxPower);
+        // Decay timer from config (falls back to DECAY_TICKS constant if config not yet loaded)
+        int decayTicks = getDecayTicks();
+        int negativeCap = getNegativeCap();
+
+        // ---- decay (always runs unless locked) ----
+        // maxPower is the scroll threshold (symmetric: +maxPower forward, -maxPower backward).
+        // negativeCap is the hard config floor S can never exceed.
+        // Decay always moves toward 0, but if power is outside bounds, it targets the bound first.
+        // While a key is actively holding power at its cap, decay is frozen at the cap (not 0).
+        int backwardCap = -Math.min(maxPower, negativeCap);
+        int decayTarget;
+        if      (currentPower > maxPower)            decayTarget = maxPower;
+        else if (currentPower < backwardCap)          decayTarget = backwardCap;
+        else if (raisingSignal && currentPower > 0)  decayTarget = maxPower;
+        else if (loweringSignal && currentPower < 0) decayTarget = backwardCap;
+        else                                          decayTarget = 0;
+
+        if (!locked && currentPower != decayTarget) {
+            decayCounter--;
+            if (decayCounter <= 0) {
+                decayCounter = decayTicks;
+                currentPower += (currentPower > decayTarget) ? -1 : 1;
+            }
+        } else if (locked || currentPower == decayTarget) {
+            decayCounter = decayTicks;
+        }
+
+        // ---- W / S (only while mounted) ----
+        if (currentUser != null) {
+            boolean bothHeld = raisingSignal && loweringSignal;
+
+            if (!bothHeld) {
+                if (raisingSignal) {
+                    // W blocked if at or above threshold
+                    if (currentPower < maxPower) {
+                        raiseTimer--;
+                        if (raiseTimer <= 0) {
+                            raiseTimer = RAISE_TICKS;
+                            currentPower = Math.min(currentPower + 1, maxPower);
+                        }
+                        // Only suppress decay when within normal range (not being dragged down by threshold)
+                        if (currentPower <= maxPower) decayCounter = decayTicks;
+                    }
+                    // If currentPower > maxPower, decay runs freely — don't touch decayCounter
+                }
+
+                if (loweringSignal) {
+                    // S blocked if at or below the backward threshold
+                    if (currentPower > backwardCap) {
+                        lowerTimer--;
+                        if (lowerTimer <= 0) {
+                            if (currentPower > 0) {
+                                lowerTimer = RAISE_TICKS + 5; // braking: faster
+                            } else {
+                                lowerTimer = LOWER_TICKS;     // going into/deeper reverse: slower
+                            }
+                            currentPower = Math.max(currentPower - 1, backwardCap);
+                        }
+                        if (currentPower >= backwardCap) decayCounter = decayTicks;
+                    }
+                    // If currentPower < backwardCap, decay runs freely toward it
                 }
             }
-            decayTimer = DECAY_TICKS; // reset decay whenever player is actively pushing
         }
 
-        if (loweringSignal) {
-            lowerTimer--;
-            if (lowerTimer <= 0) {
-                lowerTimer = LOWER_TICKS;
-                currentPower = Math.max(currentPower - 1, 0);
-            }
-            decayTimer = DECAY_TICKS;
-        }
-
-        // --- decay runs when not actively controlling ---
-        // When locked: decays down to maxPower (the throttle cap), not to 0.
-        // When unlocked: decays all the way to 0.
-        if (!raisingSignal && !loweringSignal) {
-            int decayFloor = locked ? maxPower : 0;
-            if (currentPower > decayFloor) {
-                decayTimer--;
-                if (decayTimer <= 0) {
-                    decayTimer = DECAY_TICKS;
-                    currentPower = Math.max(currentPower - 1, decayFloor);
-                }
-            }
-        }
-
-        // --- propagate to network if changed ---
+        // ---- propagate if changed ----
         if (currentPower != previousPower) {
             updateNetwork(level);
             updateBlockState(level, state);
@@ -189,47 +240,55 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         }
     }
 
+    // Persistent decay counter (not saved to NBT — resets on load, which is fine)
+    private int decayCounter = LOWER_TICKS; // reasonable default; recalculated each tick
+
+    private int getDecayTicks() {
+        try {
+            return com.lycoris.loconautics.Config.ANALOG_DECAY_TICKS.get();
+        } catch (Exception e) {
+            return 30;
+        }
+    }
+
+    private int getNegativeCap() {
+        try {
+            return com.lycoris.loconautics.Config.ANALOG_NEGATIVE_CAP.get();
+        } catch (Exception e) {
+            return 5;
+        }
+    }
+
     // ------------------------------------------------------------------ user management
 
-    /** Debounce for the mount toggle (ticks). A click on a block INSIDE a Sable sub-level can be delivered
-     *  twice in one click (e.g. both hands), which would mount then instantly dismount — swallow the echo. */
     private static final long TOGGLE_DEBOUNCE_TICKS = 3;
-    private long lastToggleTick = Long.MIN_VALUE;
+    private long lastToggleTick = -TOGGLE_DEBOUNCE_TICKS;
 
     public void toggleUser(Player player) {
         if (level == null) return;
         long now = level.getGameTime();
-        if (now - lastToggleTick < TOGGLE_DEBOUNCE_TICKS) {
-            return; // duplicate interaction from the same click — ignore so we don't mount-then-release
-        }
+        if (now - lastToggleTick < TOGGLE_DEBOUNCE_TICKS) return;
         lastToggleTick = now;
+
         if (currentUser != null) {
-            if (currentUser.equals(player.getUUID())) {
-                // Same player clicks again → dismount
-                disconnectUser(level);
-            }
-            // Another player already using it → ignore
+            if (currentUser.equals(player.getUUID())) disconnectUser(level);
         } else {
             connectUser(player);
         }
     }
 
     private void connectUser(Player player) {
-        currentUser = player.getUUID();
-        // locked intentionally NOT reset — player may have locked before dismounting
-        raisingSignal = false;
+        currentUser    = player.getUUID();
+        raisingSignal  = false;
         loweringSignal = false;
-        raiseTimer = 0;
-        lowerTimer = 0;
-        decayTimer = DECAY_TICKS;
+        raiseTimer     = RAISE_TICKS;
+        lowerTimer     = LOWER_TICKS;
         updateBlockState(level, getBlockState());
         setChanged();
-        sendData(); // always send so client HUD gets initial power+locked state
+        sendData();
         if (!level.isClientSide && player instanceof ServerPlayer sp) {
             sp.displayClientMessage(
-                    Component.translatable("block.loconautics.analog_controller.start"),
-                    true
-            );
+                    Component.translatable("block.loconautics.analog_controller.start"), true);
             com.lycoris.loconautics.network.LoconauticsNetwork.sendMount(sp, true, worldPosition);
         }
     }
@@ -239,18 +298,14 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             Player player = level.getPlayerByUUID(currentUser);
             if (player instanceof ServerPlayer sp) {
                 sp.displayClientMessage(
-                        Component.translatable("block.loconautics.analog_controller.stop"),
-                        true
-                );
+                        Component.translatable("block.loconautics.analog_controller.stop"), true);
                 com.lycoris.loconautics.network.LoconauticsNetwork.sendMount(
                         sp, false, net.minecraft.core.BlockPos.ZERO);
             }
         }
-        currentUser = null;
-        // locked intentionally preserved — block remembers lock state between uses
-        raisingSignal = false;
+        currentUser    = null;
+        raisingSignal  = false;
         loweringSignal = false;
-        // Signal stays at its last value — player can lock it before dismounting.
         updateBlockState(level, getBlockState());
         setChanged();
         sendData();
@@ -258,84 +313,93 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     // ------------------------------------------------------------------ key events
 
-    /**
-     * Called from {@link AnalogControllerInputPacket} on the server thread.
-     *
-     * @param user    UUID of the sender
-     * @param keyIndex Create controls index: 0=W, 1=S, 4=Space, 5=Shift
-     * @param pressed  true = key down, false = key up
-     */
     public void onKeyEvent(UUID user, int keyIndex, boolean pressed) {
-        com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
-                "[analog] key keyIndex={} pressed={} fromCurrentUser={}", keyIndex, pressed, user.equals(currentUser));
         if (!user.equals(currentUser)) return;
-
         switch (keyIndex) {
             case 0 -> { // W → raise
                 raisingSignal = pressed;
-                if (pressed) loweringSignal = false;
-                // raiseTimer intentionally NOT reset on release — keeps counting so
-                // spamming W cannot bypass the rate limit
+                if (pressed) { loweringSignal = false; }
             }
             case 1 -> { // S → lower
+                boolean wasLowering = loweringSignal;
                 loweringSignal = pressed;
-                if (pressed) raisingSignal = false;
-                // lowerTimer intentionally NOT reset on release
+                if (pressed) {
+                    raisingSignal = false;
+                    // Only prime the timer on the initial press, not on keepalive packets
+                    if (!wasLowering) {
+                        lowerTimer = (currentPower > 0) ? RAISE_TICKS + 5 : LOWER_TICKS;
+                    }
+                }
             }
-            case 5 -> { // Shift → toggle lock on key-down only
+            case 5 -> { // Shift → toggle lock
                 if (pressed) {
                     locked = !locked;
                     setChanged();
                     sendData();
                 }
             }
-            // Other keys ignored
         }
     }
 
     // ------------------------------------------------------------------ network
 
-    /**
-     * Pushes the current power value through the Create redstone link network under
-     * the configured frequency.
-     */
     private void updateNetwork(Level level) {
         if (level == null || level.isClientSide) return;
 
-        // Remove old entry if present
+        RedstoneLinkNetworkHandler.Frequency fwdFirst  =
+                RedstoneLinkNetworkHandler.Frequency.of(frequencyFirst);
+        RedstoneLinkNetworkHandler.Frequency fwdSecond =
+                RedstoneLinkNetworkHandler.Frequency.of(frequencySecond);
+        RedstoneLinkNetworkHandler.Frequency backFirst  =
+                RedstoneLinkNetworkHandler.Frequency.of(frequencyBackFirst);
+        RedstoneLinkNetworkHandler.Frequency backSecond =
+                RedstoneLinkNetworkHandler.Frequency.of(frequencyBackSecond);
+
+        boolean hasFwdFreq  = fwdFirst  != RedstoneLinkNetworkHandler.Frequency.EMPTY
+                || fwdSecond != RedstoneLinkNetworkHandler.Frequency.EMPTY;
+        boolean hasBackFreq = backFirst  != RedstoneLinkNetworkHandler.Frequency.EMPTY
+                || backSecond != RedstoneLinkNetworkHandler.Frequency.EMPTY;
+
+        int fwdPower  = (currentPower != 0) ? Math.abs(currentPower) : 0;
+        boolean goingBack = currentPower < 0;
+
+        // Build new entries before removing old ones — avoids zero-power gap in network
+        AnalogLinkEntry newLink = null;
+        AnalogLinkEntry newBackLink = null;
+
+        if (hasFwdFreq && fwdPower > 0) {
+            newLink = new AnalogLinkEntry(worldPosition,
+                    Couple.create(fwdFirst, fwdSecond), fwdPower);
+            Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, newLink);
+        }
+
+        if (hasBackFreq && goingBack) {
+            newBackLink = new AnalogLinkEntry(worldPosition,
+                    Couple.create(backFirst, backSecond), 15);
+            Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, newBackLink);
+        }
+
+        // Now remove old entries
         if (linkEntry != null) {
             Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, linkEntry);
         }
-
-        // Don't transmit at power 0
-        if (currentPower <= 0) {
-            linkEntry = null;
-            return;
+        if (backLinkEntry != null) {
+            Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, backLinkEntry);
         }
 
-        RedstoneLinkNetworkHandler.Frequency first =
-                RedstoneLinkNetworkHandler.Frequency.of(frequencyFirst);
-        RedstoneLinkNetworkHandler.Frequency second =
-                RedstoneLinkNetworkHandler.Frequency.of(frequencySecond);
-
-        // Both slots empty → no frequency configured, don't transmit
-        if (first == RedstoneLinkNetworkHandler.Frequency.EMPTY
-                && second == RedstoneLinkNetworkHandler.Frequency.EMPTY) {
-            linkEntry = null;
-            return;
-        }
-
-        linkEntry = new AnalogLinkEntry(worldPosition, Couple.create(first, second), currentPower);
-        Create.REDSTONE_LINK_NETWORK_HANDLER.addToNetwork(level, linkEntry);
+        linkEntry     = newLink;
+        backLinkEntry = newBackLink;
     }
 
     private void updateBlockState(Level level, BlockState state) {
-        boolean active = currentUser != null;
-        int power = currentPower;
+        boolean active  = currentUser != null;
+        boolean powered = currentPower != 0;
+        int power = Math.abs(currentPower);
 
         BlockState newState = state
-                .setValue(AnalogControllerBlock.POWER, power)
-                .setValue(AnalogControllerBlock.ACTIVE, active);
+                .setValue(AnalogControllerBlock.POWER,   power)
+                .setValue(AnalogControllerBlock.ACTIVE,  active)
+                .setValue(AnalogControllerBlock.POWERED, powered);
 
         if (!newState.equals(state)) {
             level.setBlockAndUpdate(worldPosition, newState);
@@ -345,11 +409,6 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     public void onRemoved() {
         if (level == null) return;
-        // Send the dismount packet directly -- do NOT call disconnectUser() here.
-        // disconnectUser() calls updateBlockState() -> level.setBlockAndUpdate(), which
-        // would re-place the block that was just destroyed, causing it to reappear.
-        // We only need to notify the mounted client; all other server-side state is
-        // already being discarded along with this block entity.
         if (currentUser != null && !level.isClientSide) {
             Player player = level.getPlayerByUUID(currentUser);
             if (player instanceof ServerPlayer sp) {
@@ -362,66 +421,57 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
             Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, linkEntry);
             linkEntry = null;
         }
+        if (backLinkEntry != null) {
+            Create.REDSTONE_LINK_NETWORK_HANDLER.removeFromNetwork(level, backLinkEntry);
+            backLinkEntry = null;
+        }
     }
 
     // ------------------------------------------------------------------ frequency GUI
 
     public void setFrequency(net.minecraft.world.item.ItemStack first,
                              net.minecraft.world.item.ItemStack second) {
-        this.frequencyFirst = first.copy();
+        this.frequencyFirst  = first.copy();
         this.frequencySecond = second.copy();
-        if (level != null && !level.isClientSide) {
-            updateNetwork(level);
-        }
+        if (level != null && !level.isClientSide) updateNetwork(level);
         setChanged();
         sendData();
     }
 
-    public net.minecraft.world.item.ItemStack getFrequencyFirst() {
-        return frequencyFirst;
+    public void setBackwardFrequency(net.minecraft.world.item.ItemStack first,
+                                     net.minecraft.world.item.ItemStack second) {
+        this.frequencyBackFirst  = first.copy();
+        this.frequencyBackSecond = second.copy();
+        if (level != null && !level.isClientSide) updateNetwork(level);
+        setChanged();
+        sendData();
     }
 
-    public net.minecraft.world.item.ItemStack getFrequencySecond() {
-        return frequencySecond;
-    }
+    public net.minecraft.world.item.ItemStack getFrequencyFirst()      { return frequencyFirst; }
+    public net.minecraft.world.item.ItemStack getFrequencySecond()     { return frequencySecond; }
+    public net.minecraft.world.item.ItemStack getFrequencyBackFirst()  { return frequencyBackFirst; }
+    public net.minecraft.world.item.ItemStack getFrequencyBackSecond() { return frequencyBackSecond; }
 
     // ------------------------------------------------------------------ accessors
 
-    public int getCurrentPower() { return currentPower; }
-
-    public boolean isLocked() { return locked; }
-
-    public boolean hasUser() { return currentUser != null; }
+    public int     getCurrentPower()    { return currentPower; }
+    public boolean isLocked()           { return locked; }
+    public boolean hasUser()            { return currentUser != null; }
+    public int     getMaxPower()        { return maxPower; }
 
     @Nullable
     public UUID getCurrentUser() { return currentUser; }
 
-    public int getMaxPower() { return maxPower; }
-
-    /** Called when the player scrolls while mounted. Delta: +1 or -1. */
     public void onScroll(UUID user, int delta) {
         if (!user.equals(currentUser)) return;
         maxPower = Math.max(0, Math.min(MAX_POWER, maxPower + delta));
-        // Only snap currentPower down immediately when NOT locked.
-        // When locked, decay will bring it down to the new maxPower gradually.
-        if (!locked && currentPower > maxPower) {
-            currentPower = maxPower;
-            updateNetwork(level);
-            updateBlockState(level, getBlockState());
-        }
         setChanged();
         sendData();
     }
 
     private boolean playerInRange(Player player) {
-        if (level == null) {
-            return true;
-        }
+        if (level == null) return true;
         double range = player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE) * 2.0;
-        // The controller may live inside a Sable sub-level, where worldPosition is a far-away plot-grid
-        // coordinate — so a raw distance to the player always reads "out of range" and instantly dismounts
-        // them. Project the block's position OUT of the sub-level to its real-world location first. When the
-        // block isn't in a sub-level, projectOutOfSubLevel returns the point unchanged (normal behaviour).
         net.minecraft.world.phys.Vec3 blockWorld = dev.ryanhcode.sable.Sable.HELPER.projectOutOfSubLevel(
                 level, net.minecraft.world.phys.Vec3.atCenterOf(worldPosition));
         return blockWorld.distanceToSqr(player.position()) < range * range;
@@ -439,21 +489,31 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         return new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inventory, this);
     }
 
+    @Override
+    public void sendToMenu(net.minecraft.network.RegistryFriendlyByteBuf buffer) {
+        net.minecraft.network.chat.ComponentSerialization.TRUSTED_STREAM_CODEC
+                .encode(buffer, Component.translatable(AnalogControllerMenu.FORWARD_KEY));
+        net.minecraft.network.chat.ComponentSerialization.TRUSTED_STREAM_CODEC
+                .encode(buffer, Component.translatable(AnalogControllerMenu.BACKWARD_KEY));
+        super.sendToMenu(buffer);
+    }
+
     // ------------------------------------------------------------------ NBT
 
     @Override
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
-        tag.putInt("Power", currentPower);
+        tag.putInt("Power",    currentPower);
         tag.putBoolean("Locked", locked);
         tag.putInt("MaxPower", maxPower);
-        if (currentUser != null) {
-            tag.putUUID("User", currentUser);
-        }
+        if (currentUser != null) tag.putUUID("User", currentUser);
+        if (clientPacket) tag.putBoolean("HasUser", currentUser != null);
 
         CompoundTag freq = new CompoundTag();
-        freq.put("First", frequencyFirst.saveOptional(registries));
-        freq.put("Second", frequencySecond.saveOptional(registries));
+        freq.put("First",      frequencyFirst.saveOptional(registries));
+        freq.put("Second",     frequencySecond.saveOptional(registries));
+        freq.put("BackFirst",  frequencyBackFirst.saveOptional(registries));
+        freq.put("BackSecond", frequencyBackSecond.saveOptional(registries));
         tag.put("Frequency", freq);
     }
 
@@ -461,28 +521,27 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
         currentPower = tag.getInt("Power");
-        locked = tag.getBoolean("Locked");
-        maxPower = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
-        currentUser = tag.contains("User") ? tag.getUUID("User") : null;
+        locked       = tag.getBoolean("Locked");
+        maxPower     = tag.contains("MaxPower") ? tag.getInt("MaxPower") : MAX_POWER;
+        // On client packets, restore HasUser so animEquip works; use a sentinel UUID since
+        // the actual UUID is not needed client-side (only hasUser() matters for rendering).
+        if (clientPacket && tag.contains("HasUser")) {
+            currentUser = tag.getBoolean("HasUser") ? java.util.UUID.randomUUID() : null;
+        } else {
+            currentUser = null; // never restore stale user UUID on server
+        }
 
         if (tag.contains("Frequency")) {
             CompoundTag freq = tag.getCompound("Frequency");
-            frequencyFirst = net.minecraft.world.item.ItemStack.parseOptional(
-                    registries, freq.getCompound("First"));
-            frequencySecond = net.minecraft.world.item.ItemStack.parseOptional(
-                    registries, freq.getCompound("Second"));
+            frequencyFirst      = net.minecraft.world.item.ItemStack.parseOptional(registries, freq.getCompound("First"));
+            frequencySecond     = net.minecraft.world.item.ItemStack.parseOptional(registries, freq.getCompound("Second"));
+            frequencyBackFirst  = net.minecraft.world.item.ItemStack.parseOptional(registries, freq.getCompound("BackFirst"));
+            frequencyBackSecond = net.minecraft.world.item.ItemStack.parseOptional(registries, freq.getCompound("BackSecond"));
         }
     }
 
-    // ------------------------------------------------------------------ Inner: link entry
+    // ------------------------------------------------------------------ AnalogLinkEntry
 
-    /**
-     * A lightweight {@link IRedstoneLinkable} transmitter that carries our variable power
-     * level (0-15) into the Create redstone link network.
-     *
-     * Unlike the typewriter's {@code KeyboardEntry} (which only sends 15 or 0), this one
-     * sends whatever {@code power} is set to, enabling true analog control.
-     */
     public static class AnalogLinkEntry implements IRedstoneLinkable {
 
         private final BlockPos pos;
@@ -492,39 +551,16 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         public AnalogLinkEntry(BlockPos pos,
                                Couple<RedstoneLinkNetworkHandler.Frequency> key,
                                int power) {
-            this.pos = pos;
-            this.key = key;
+            this.pos   = pos;
+            this.key   = key;
             this.power = power;
         }
 
-        @Override
-        public int getTransmittedStrength() {
-            return power;
-        }
-
-        @Override
-        public void setReceivedStrength(int strength) {
-            // Transmitter only; ignore.
-        }
-
-        @Override
-        public boolean isListening() {
-            return false;
-        }
-
-        @Override
-        public boolean isAlive() {
-            return true;
-        }
-
-        @Override
-        public Couple<RedstoneLinkNetworkHandler.Frequency> getNetworkKey() {
-            return key;
-        }
-
-        @Override
-        public BlockPos getLocation() {
-            return pos;
-        }
+        @Override public int     getTransmittedStrength()          { return power; }
+        @Override public void    setReceivedStrength(int strength) {}
+        @Override public boolean isListening()                     { return false; }
+        @Override public boolean isAlive()                         { return true; }
+        @Override public Couple<RedstoneLinkNetworkHandler.Frequency> getNetworkKey() { return key; }
+        @Override public BlockPos getLocation()                    { return pos; }
     }
 }

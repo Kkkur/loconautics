@@ -34,9 +34,20 @@ public record AnalogControllerDismountPacket(BlockPos controllerPos)
     public static void handle(AnalogControllerDismountPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            BlockEntity be = player.level().getBlockEntity(packet.controllerPos());
+
+            BlockPos pos = packet.controllerPos();
+            net.minecraft.world.level.Level level = player.level();
+
+            net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(pos);
+            if (!(be instanceof AnalogControllerBlockEntity)) {
+                dev.ryanhcode.sable.sublevel.SubLevel subLevel =
+                        dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
+                if (subLevel != null) {
+                    be = subLevel.getLevel().getBlockEntity(pos);
+                }
+            }
             if (be instanceof AnalogControllerBlockEntity ace) {
-                ace.toggleUser(player); // toggleUser dismounts if this player is the current user
+                ace.toggleUser(player);
             }
         });
     }

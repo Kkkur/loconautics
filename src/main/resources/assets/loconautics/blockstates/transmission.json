@@ -1,24 +1,268 @@
 {
   "variants": {
-    "axis=z,stage=0": {"model": "loconautics:block/transmission"},
-    "axis=z,stage=1": {"model": "loconautics:block/transmission_stage_1"},
-    "axis=z,stage=2": {"model": "loconautics:block/transmission_stage_2"},
-    "axis=z,stage=3": {"model": "loconautics:block/transmission_stage_3"},
-    "axis=z,stage=4": {"model": "loconautics:block/transmission_stage_4"},
-    "axis=z,stage=5": {"model": "loconautics:block/transmission_stage_5"},
-
-    "axis=x,stage=0": {"model": "loconautics:block/transmission",         "y": 90},
-    "axis=x,stage=1": {"model": "loconautics:block/transmission_stage_1", "y": 90},
-    "axis=x,stage=2": {"model": "loconautics:block/transmission_stage_2", "y": 90},
-    "axis=x,stage=3": {"model": "loconautics:block/transmission_stage_3", "y": 90},
-    "axis=x,stage=4": {"model": "loconautics:block/transmission_stage_4", "y": 90},
-    "axis=x,stage=5": {"model": "loconautics:block/transmission_stage_5", "y": 90},
-
-    "axis=y,stage=0": {"model": "loconautics:block/transmission",         "x": 90},
-    "axis=y,stage=1": {"model": "loconautics:block/transmission_stage_1", "x": 90},
-    "axis=y,stage=2": {"model": "loconautics:block/transmission_stage_2", "x": 90},
-    "axis=y,stage=3": {"model": "loconautics:block/transmission_stage_3", "x": 90},
-    "axis=y,stage=4": {"model": "loconautics:block/transmission_stage_4", "x": 90},
-    "axis=y,stage=5": {"model": "loconautics:block/transmission_stage_5", "x": 90}
+    "axis=z,direction_active=false,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5"
+    },
+    "axis=z,direction_active=true,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_direction_active_flipped"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active_flipped"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active_flipped"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active_flipped"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active_flipped"
+    },
+    "axis=z,direction_active=false,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_flipped"
+    },
+    "axis=z,direction_active=true,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active_flipped"
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_direction_active_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=false,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_flipped",
+      "y": 90
+    },
+    "axis=x,direction_active=true,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active_flipped",
+      "y": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=0": {
+      "model": "loconautics:block/transmission_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=false,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=0": {
+      "model": "loconautics:block/transmission_direction_active_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=1": {
+      "model": "loconautics:block/transmission_stage_1_direction_active_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=2": {
+      "model": "loconautics:block/transmission_stage_2_direction_active_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=3": {
+      "model": "loconautics:block/transmission_stage_3_direction_active_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=4": {
+      "model": "loconautics:block/transmission_stage_4_direction_active_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=false,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_flipped",
+      "x": 90
+    },
+    "axis=y,direction_active=true,plus_side=true,stage=5": {
+      "model": "loconautics:block/transmission_stage_5_direction_active_flipped",
+      "x": 90
+    }
   }
 }

@@ -9,7 +9,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
@@ -28,6 +30,8 @@ import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Analog Controller — a stationary block that behaves like the Create train controls,
@@ -46,11 +50,16 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     public static final MapCodec<AnalogControllerBlock> CODEC =
             AnalogControllerBlock.simpleCodec(AnalogControllerBlock::new);
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("AnalogControllerBlock");
+
     /** Current redstone output power (0-15). Stored in block state so neighbours update cheaply. */
     public static final IntegerProperty POWER = BlockStateProperties.POWER;
 
     /** Whether the block has an active user mounted on it. */
     public static final BooleanProperty ACTIVE = BooleanProperty.create("active");
+
+    /** Whether the block is transmitting a non-zero signal (power > 0, no user required). */
+    public static final BooleanProperty POWERED = BooleanProperty.create("powered");
 
     public AnalogControllerBlock(BlockBehaviour.Properties properties) {
         super(properties);
@@ -59,6 +68,7 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
                         .setValue(FACING, Direction.NORTH)
                         .setValue(POWER, 0)
                         .setValue(ACTIVE, false)
+                        .setValue(POWERED, false)
         );
     }
 
@@ -73,7 +83,7 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        super.createBlockStateDefinition(builder.add(FACING, POWER, ACTIVE));
+        super.createBlockStateDefinition(builder.add(FACING, POWER, ACTIVE, POWERED));
     }
 
     @Override
@@ -128,29 +138,67 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     /**
      * Shift right-click → open frequency GUI.
      * Normal right-click → mount / dismount.
+     *
+     * Uses useItemOn (fires for both empty and held hand) instead of useWithoutItem
+     * so the interaction registers reliably in all contexts including Sable sub-levels.
      */
     @Override
-    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
-                                               Player player, BlockHitResult hitResult) {
+    protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level,
+                                              BlockPos pos, Player player, InteractionHand hand,
+                                              BlockHitResult hitResult) {
+        LOGGER.info("[analog-block] useItemOn fired: hand={} side={} pos={} player={} shift={}",
+                hand, level.isClientSide ? "CLIENT" : "SERVER", pos, player.getName().getString(), player.isShiftKeyDown());
+
+        if (hand != InteractionHand.MAIN_HAND) {
+            LOGGER.info("[analog-block] ignoring off-hand click");
+            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        }
+
         if (player.isShiftKeyDown()) {
             // Open frequency screen (server side opens menu)
             if (!level.isClientSide && player instanceof ServerPlayer sp) {
-                BlockEntity be = level.getBlockEntity(pos);
-                if (be instanceof AnalogControllerBlockEntity ace) {
+                AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+                LOGGER.info("[analog-block] shift+click: resolved BE={}", ace);
+                if (ace != null) {
                     sp.openMenu(ace, ace::sendToMenu);
                 }
             }
-            return InteractionResult.sidedSuccess(level.isClientSide);
+            return ItemInteractionResult.sidedSuccess(level.isClientSide);
         }
 
         // Normal click — toggle mount
         if (!level.isClientSide) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof AnalogControllerBlockEntity ace) {
+            AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+            LOGGER.info("[analog-block] normal click: resolved BE={}", ace);
+            if (ace != null) {
                 ace.toggleUser(player);
             }
         }
-        return InteractionResult.sidedSuccess(level.isClientSide);
+        return ItemInteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    /**
+     * Resolves the AnalogControllerBlockEntity at {@code pos} in {@code level},
+     * falling back to the Sable sub-level's own level when the block lives inside one.
+     */
+    @Nullable
+    private static AnalogControllerBlockEntity resolveBlockEntity(Level level, BlockPos pos) {
+        // Fast path: block is in the real world
+        BlockEntity be = level.getBlockEntity(pos);
+        LOGGER.info("[analog-block] resolveBlockEntity pos={} directBE={}", pos, be);
+        if (be instanceof AnalogControllerBlockEntity ace) return ace;
+
+        // Sub-level path: find the sub-level that owns this block pos and query its level
+        dev.ryanhcode.sable.sublevel.SubLevel subLevel =
+                dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
+        LOGGER.info("[analog-block] subLevel lookup result={}", subLevel);
+        if (subLevel != null) {
+            be = subLevel.getLevel().getBlockEntity(pos);
+            LOGGER.info("[analog-block] subLevel BE={}", be);
+            if (be instanceof AnalogControllerBlockEntity ace) return ace;
+        }
+        LOGGER.warn("[analog-block] resolveBlockEntity returned null for pos={}", pos);
+        return null;
     }
 
     // ------------------------------------------------------------------ block entity
@@ -161,13 +209,12 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public @Nullable <T extends BlockEntity> BlockEntityTicker<T> getTicker(
             Level level, BlockState state, BlockEntityType<T> type) {
-        if (type == LoconauticsRegistries.ANALOG_CONTROLLER_BE.get()) {
-            //noinspection unchecked
-            return (BlockEntityTicker<T>) (BlockEntityTicker<AnalogControllerBlockEntity>) AnalogControllerBlockEntity::tick;
-        }
-        return null;
+        return type == LoconauticsRegistries.ANALOG_CONTROLLER_BE.get()
+                ? (BlockEntityTicker<T>) (BlockEntityTicker<AnalogControllerBlockEntity>) AnalogControllerBlockEntity::tick
+                : null;
     }
 
     // ------------------------------------------------------------------ misc
@@ -176,8 +223,8 @@ public class AnalogControllerBlock extends HorizontalDirectionalBlock implements
     protected void onRemove(BlockState state, Level level, BlockPos pos,
                             BlockState newState, boolean movedByPiston) {
         if (!state.is(newState.getBlock())) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof AnalogControllerBlockEntity ace) {
+            AnalogControllerBlockEntity ace = resolveBlockEntity(level, pos);
+            if (ace != null) {
                 ace.onRemoved();
             }
         }

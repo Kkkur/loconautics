@@ -10,6 +10,8 @@
     "StationBlockEntityAssembleMixin",
     "StationBlockEntityAssembleControlsMixin",
     "StationBlockEntityAccessor",
+    "RopeStrandHolderBehaviorAccessor",
+    "RopeStrandHolderDestroyMixin",
     "TrainDisassembleMixin"
   ],
   "client": [
@@ -18,7 +20,10 @@
     "client.CarriageBogeyRenderMixin",
     "client.CarriageBogeyVisualMixin",
     "client.ContraptionVisualChildrenMixin",
-    "client.ClientSubLevelRenderMixin"
+    "client.ClientSubLevelRenderMixin",
+    "client.RopeConnectorRendererMixin",
+    "client.RopeWinchRendererMixin",
+    "client.RopeWinchBlockEntityAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

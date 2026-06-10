@@ -9,6 +9,7 @@ import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -50,14 +51,27 @@ public record AnalogControllerInputPacket(
 
     /** Runs on the server main thread. */
     public static void handle(AnalogControllerInputPacket packet, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player)) return;
-        if (player.isSpectator() && packet.pressed()) return;
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            if (player.isSpectator() && packet.pressed()) return;
 
-        BlockEntity be = player.level().getBlockEntity(packet.controllerPos());
-        if (!(be instanceof AnalogControllerBlockEntity ace)) return;
+            BlockPos pos = packet.controllerPos();
+            Level level = player.level();
 
-        for (int key : packet.keys()) {
-            ace.onKeyEvent(player.getUUID(), key, packet.pressed());
-        }
+            // Try real world first, then fall back to the Sable sub-level that owns this pos
+            BlockEntity be = level.getBlockEntity(pos);
+            if (!(be instanceof AnalogControllerBlockEntity)) {
+                dev.ryanhcode.sable.sublevel.SubLevel subLevel =
+                        dev.ryanhcode.sable.Sable.HELPER.getContaining(level, pos);
+                if (subLevel != null) {
+                    be = subLevel.getLevel().getBlockEntity(pos);
+                }
+            }
+            if (!(be instanceof AnalogControllerBlockEntity ace)) return;
+
+            for (int key : packet.keys()) {
+                ace.onKeyEvent(player.getUUID(), key, packet.pressed());
+            }
+        });
     }
 }

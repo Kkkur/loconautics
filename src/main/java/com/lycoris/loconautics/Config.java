@@ -49,15 +49,56 @@ public final class Config {
 
     // ------------------------------------------------------------------ Transmission
 
-    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT = BUILDER
-            .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
-                    "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
-            .defineInRange("transmissionSuImpact", 4.0, 0.0, 100.0);
+    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_IMPACT;
 
-    public static final ModConfigSpec.DoubleValue TRANSMISSION_SU_CAPACITY = BUILDER
-            .comment("Stress Units capacity provided by the Transmission to its output network.",
-                    "Should be large enough to cover whatever machines are downstream. Default: 262144.0 (256 * 1024).")
-            .defineInRange("transmissionSuCapacity", 262144.0, 0.0, Double.MAX_VALUE);
+    static {
+        BUILDER.push("transmission");
+
+        TRANSMISSION_SU_IMPACT = BUILDER
+                .comment("Stress Units per RPM applied by the Transmission block's output shaft.",
+                        "Full SU cost = TRANSMISSION_SU_IMPACT * abs(outputRPM). Default: 4.0.")
+                .defineInRange("suImpact", 4.0, 0.0, 100.0);
+
+        BUILDER.pop();
+    }
+
+    // ------------------------------------------------------------------ Analog Controller
+
+    public static final ModConfigSpec.IntValue ANALOG_DECAY_TICKS;
+    public static final ModConfigSpec.IntValue ANALOG_NEGATIVE_CAP;
+
+    static {
+        BUILDER.push("analog_controller");
+
+        ANALOG_DECAY_TICKS = BUILDER
+                .comment("Ticks between each automatic power decay step toward 0.",
+                        "20 ticks = 1 second. Default: 20.")
+                .defineInRange("decayTicks", 30, 1, 200);
+
+        ANALOG_NEGATIVE_CAP = BUILDER
+                .comment("Maximum negative power level the S key can reach.",
+                        "E.g. 5 means S can step down to -5 at most.",
+                        "Default: 5.")
+                .defineInRange("negativeCap", 5, 0, 15);
+
+        BUILDER.pop();
+    }
+
+    // ------------------------------------------------------------------ Steel Cable
+
+    public static final ModConfigSpec.DoubleValue STEEL_CABLE_MAX_RANGE;
+
+    static {
+        BUILDER.push("steel_cable");
+
+        STEEL_CABLE_MAX_RANGE = BUILDER
+                .comment("Maximum connection range (in blocks) for the Steel Cable item.",
+                        "Set to -1 (default) to automatically use 2x Simulated's current maxRopeRange.",
+                        "Set to any positive value to override the range directly.")
+                .defineInRange("maxRange", -1.0, -1.0, 10000.0);
+
+        BUILDER.pop();
+    }
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 

@@ -1,0 +1,8 @@
+{
+  "parent": "loconautics:block/transmission_flipped",
+  "textures": {
+    "0": "loconautics:block/transmission_stage_3",
+    "particle": "loconautics:block/transmission_stage_3",
+    "3": "loconautics:block/transmission_minus_on"
+  }
+}

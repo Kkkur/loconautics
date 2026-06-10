@@ -1,46 +1,63 @@
 package com.lycoris.loconautics;
 
+import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import com.lycoris.loconautics.server.tick.PhysicsTrainTickHandler;
 
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 
 /**
  * Main mod entry point.
- *
- * Loconautics turns Create trains into physical Sable sub-levels that still follow Create's tracks.
- * This class only wires up registration and lifecycle; actual feature logic lives in the
- * server/, client/, network/ and mixin/ packages.
  */
 @Mod(LoconauticsConstants.MOD_ID)
 public final class Loconautics {
 
     public Loconautics(IEventBus modEventBus, ModContainer modContainer) {
-        // Deferred registers (blocks/items) — currently empty stubs, see LoconauticsRegistries.
         LoconauticsRegistries.register(modEventBus);
 
-        // Lifecycle
         modEventBus.addListener(this::commonSetup);
 
-        // Config
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+
+        // Game bus — runtime events
+        NeoForge.EVENT_BUS.addListener(this::onPlayerLogin);
+        NeoForge.EVENT_BUS.addListener(this::onServerStopped);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
         PhysicsTrainTickHandler.register();
-
-        // All-Sable (Option B) custom trains: drive sub-levels along Create rails with no Create Train.
-        // Sable's event platform accumulates listeners, so this coexists with the hybrid driver above.
         com.lycoris.loconautics.allsable.SableTrainDriver.register();
+    }
 
-        // NOTE: BlockStressValues.IMPACTS placeholder for the Bearing Axle was removed in Phase 5.
-        // Stress is now computed dynamically in BearingAxleBlockEntity.calculateStressApplied()
-        // using the train mass set by PhysicsAssemblyOrchestrator after assembly.
+    /**
+     * When a player logs in, load the SavedData (which also populates the static set)
+     * and send all tracked steel cable UUIDs to them.
+     */
+    private void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        ServerLevel overworld = player.getServer().overworld();
+        // Ensures the SavedData is loaded and static set is populated
+        SteelCableTracker.getOrCreate(overworld);
+        // Send the full set to this player
+        SteelCableTracker.syncToPlayer(player);
+    }
+
+    /**
+     * When the server stops, drop the cached SavedData instance so it gets
+     * reloaded fresh on the next start (important for integrated/LAN servers).
+     */
+    private void onServerStopped(ServerStoppedEvent event) {
+        SteelCableTracker.invalidateServer();
     }
 }

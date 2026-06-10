@@ -1,0 +1,6 @@
+{
+  "parent": "loconautics:block/transmission",
+  "textures": {
+    "1": "loconautics:block/transmission_minus_on"
+  }
+}
