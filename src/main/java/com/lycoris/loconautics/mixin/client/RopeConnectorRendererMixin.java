@@ -1,16 +1,15 @@
 package com.lycoris.loconautics.mixin.client;
 
+import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.content.steelcable.SteelCableStrandRenderer;
 import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.AllBlocks;
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
 import dev.simulated_team.simulated.content.blocks.rope.RopeStrandHolderBehavior;
 import dev.simulated_team.simulated.content.blocks.rope.rope_connector.RopeConnectorBlock;
 import dev.simulated_team.simulated.content.blocks.rope.rope_connector.RopeConnectorBlockEntity;
 import dev.simulated_team.simulated.content.blocks.rope.rope_connector.RopeConnectorRenderer;
 import dev.simulated_team.simulated.content.blocks.rope.strand.client.ClientRopeStrand;
-import dev.simulated_team.simulated.index.SimPartialModels;
 import net.createmod.catnip.math.AngleHelper;
 import net.createmod.catnip.render.CachedBuffers;
 import net.createmod.catnip.render.SuperByteBuffer;
@@ -26,13 +25,12 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Intercepts {@link RopeConnectorRenderer#renderSafe} and redirects to
- * {@link SteelCableStrandRenderer} when the strand was created by the Steel Cable item.
+ * Intercepts {@link RopeConnectorRenderer#renderSafe} for both the owning and
+ * non-owning connector when the strand is a Steel Cable.
  *
- * Also renders the connector knot on the owning connector, mirroring the knot block
- * in Simulated's renderSafe that we bypass. Uses SimPartialModels.ROPE_CONNECTOR_KNOT
- * (the connector block's own knot geometry) — NOT STEEL_CABLE_KNOT which is the
- * inline strand knot and has completely different geometry/positioning.
+ * - Owning connector:     renders the full strand + steel knot, cancels original.
+ * - Non-owning connector: renders only the steel knot (strand already drawn by owner),
+ *                         cancels original so the rope knot is never drawn.
  */
 @Mixin(value = RopeConnectorRenderer.class, remap = false)
 public class RopeConnectorRendererMixin {
@@ -53,23 +51,21 @@ public class RopeConnectorRendererMixin {
     ) {
         RopeStrandHolderBehavior holder = be.getRopeHolder();
 
-        // Only intercept on the owning connector — non-owners have no strand to identify
-        if (!holder.ownsRope()) return;
-
         ClientRopeStrand clientStrand = holder.getClientStrand();
         if (clientStrand == null) return;
 
         if (!SteelCableTracker.isSteelCable(clientStrand.getUuid())) return;
 
-        // Render the strand with our textures
-        SteelCableStrandRenderer.render(be, holder, partialTicks, ms, buffer);
+        // Owning connector: render the full strand with our textures.
+        // Non-owning connector: strand is already rendered by the owner, skip it.
+        if (holder.ownsRope()) {
+            SteelCableStrandRenderer.render(be, holder, partialTicks, ms, buffer);
+        }
 
-        // Render the connector knot — same model as Simulated uses for the knob
-        // on the block itself. STEEL_CABLE_KNOT is the inline strand knot and has
-        // different geometry; the connector knob uses ROPE_CONNECTOR_KNOT.
+        // Both connectors: render steel knot instead of the default rope knot.
         if (holder.isAttached() || be.isVirtual() && holder.renderAttached) {
             SuperByteBuffer knot = CachedBuffers.partialFacing(
-                    (PartialModel) SimPartialModels.ROPE_CONNECTOR_KNOT,
+                    LoconauticsPartialModels.STEEL_CABLE_CONNECTOR_KNOT,
                     (BlockState) AllBlocks.ROPE.getDefaultState(),
                     Direction.NORTH);
 

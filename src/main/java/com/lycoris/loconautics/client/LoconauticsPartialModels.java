@@ -21,6 +21,11 @@ public class LoconauticsPartialModels {
     public static final PartialModel STEEL_CABLE_KNOT =
             PartialModel.of(LoconauticsConstants.id("block/steel_cable/knot"));
 
+    // Steel Cable connector knot — rope_connector geometry with the steel knob texture
+    // (replaces SimPartialModels.ROPE_CONNECTOR_KNOT which uses the rope_particle texture)
+    public static final PartialModel STEEL_CABLE_CONNECTOR_KNOT =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/connector_knot"));
+
     // Steel Cable winch partial models — shaft rotates with kinetics, coil scrolls
     public static final PartialModel STEEL_CABLE_WINCH_SHAFT =
             PartialModel.of(LoconauticsConstants.id("block/steel_cable/winch_shaft"));
