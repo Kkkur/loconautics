@@ -15,6 +15,7 @@ import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.force.ForceTotal;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
+import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertyHelper;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.Pose3d;
@@ -198,7 +199,7 @@ public final class SableTrainDriver {
             return;
         }
         boolean diag = (diagCounter++ % 20) == 0;
-        boolean updateMass = (massCounter++ % 30) == 0; // re-poll the Bearing Axle's train weight every 30 ticks
+        boolean updateMass = (massCounter++ % 10) == 0; // re-poll live train weight every 10 ticks (~0.5s) so placing a block updates the axle promptly
         for (SableTrain train : SableTrainRegistry.all()) {
             try {
                 applyPropulsion(train);
@@ -233,11 +234,11 @@ public final class SableTrainDriver {
                     || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
                 continue;
             }
-            MassData md = sub.getMassTracker();
-            if (md != null) {
-                total += md.getMass();
-                readAny = true;
-            }
+            // Recompute mass from the sub-level's CURRENT blocks (not Sable's mass tracker, which is frozen at
+            // assembly and never updates when the player adds/removes a block in a running car). This makes the
+            // Bearing Axle's weight update live as blocks are placed/broken on the moving train.
+            total += liveMass(sub);
+            readAny = true;
             if (axle == null) {
                 axle = bearingAxleIn(sub);
             }
@@ -257,10 +258,7 @@ public final class SableTrainDriver {
             for (Car car : train.cars()) {
                 if (car.subLevelId() != null
                         && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub && !sub.isRemoved()) {
-                    MassData md = sub.getMassTracker();
-                    if (md != null) {
-                        subMass += md.getMass();
-                    }
+                    subMass += liveMass(sub);
                 }
             }
             BearingAxleBlockEntity axle = findBearingAxle(train, container);
@@ -336,6 +334,28 @@ public final class SableTrainDriver {
             }
         }
         return null;
+    }
+
+    /**
+     * Sums the mass of all blocks currently in a car's sub-level, using Sable's own per-block weight
+     * ({@link PhysicsBlockPropertyHelper#getMass}, which returns 0 for non-solid/air). Recomputed from live
+     * blocks so the weight reflects blocks added/removed AFTER assembly — Sable's built-in mass tracker is frozen
+     * at assembly and never picks those up. Cheap: the same plot bounds are already scanned for the axle.
+     */
+    private static double liveMass(ServerSubLevel sub) {
+        ServerLevel subLevel = sub.getLevel();
+        var bounds = sub.getPlot().getBoundingBox();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        double mass = 0.0;
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    mass += PhysicsBlockPropertyHelper.getMass(subLevel, pos.set(x, y, z),
+                            subLevel.getBlockState(pos));
+                }
+            }
+        }
+        return mass;
     }
 
     /** Scans one sub-level's own level for a {@link BearingAxleBlockEntity}, or null. */

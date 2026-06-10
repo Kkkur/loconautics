@@ -42,13 +42,25 @@ The merged build compiles but crashes when the game opens. **Get the log first, 
 - Fix the offending mixin selector / registration. Re-build, re-deploy, confirm clean start (`[sabletrain]
   persistence active` line should appear = our code loaded).
 
-### #2 — Bogeys don't turn + breaks with >2 bogeys
-- `allsable/RailCarriage` models a car as exactly **2** bogeys (leading+trailing). Orientation = delta of bases
-  (`orientation()`), which already yaws on curves *if the bogeys move* — so "don't turn" likely means the render/pose
-  isn't applying, or the bogey visual is the Create ghost (see `mixin/client/CarriageBogey*Mixin`). Reproduce, log
-  `[sabletrain] diag` (now prints per-car centre + mass), check `orientation()` output on a curve.
-- ">2 bogeys bugs out": multi-bogey car not supported — `RailCarriage` assumes 2. Generalise to N bogeys (Create's
-  `Carriage` supports a bogey list) OR clamp/validate. Decide with user.
+### #2 — Bogeys must each rotate on their OWN axis (Create-style), and support N>2 bogeys
+**Requirement (Lycoris + screenshots):** like Create, **each bogey pivots at its own position to the rail tangent
+under it** (NOT the whole car rotating about its centre), and with 2 bogeys both turn, with 3 all three turn.
+**Root cause:** our car is ONE rigid Sable sub-level posed by a single orientation (`RailCarriage.orientation()` =
+chord of the 2 bogeys). The bogey *blocks* are rigid inside it → they point along the chord, not their local tangent;
+and `RailCarriage` only models 2 `TravellingPoint`s (3rd+ bogey ignored → the >2 "bug").
+**Plan (pick with user):**
+- (A) **Render-side articulation** (closest to Create, lowest physics risk): keep the body one sub-level posed by the
+  chord, but at render time rotate the bogey blocks to their local rail tangent. Needs: identify bogey blocks
+  (`AbstractBogeyBlock`) in the sub-level, give each a `TravellingPoint` for its tangent, and a CLIENT mixin into
+  Sable's sub-level block render to apply a per-bogey transform around the bogey's pivot. Cosmetic only (collision
+  unaffected). See `mixin/client/CarriageBogey*Mixin` (we already hide Create's ghost bogey) + Create's
+  `BogeyRenderer` for the rotation it applies.
+- (B) **Multi-body articulation** (physically real, bigger): each bogey = its own small sub-level pinned to its
+  `TravellingPoint` (local tangent); body = sub-level linked to the bogeys by rotary constraints
+  (`RESEARCH_sable_aeronautics.md` §H.4). True pivoting + derail; large rework, risk to the working train.
+- **N bogeys:** generalise `RailCarriage` to a LIST of bogey `TravellingPoint`s (Create's `Carriage` has a bogey
+  list) spaced along the car; body pose = best-fit (e.g. first↔last) and each bogey gets its own tangent (for A or B).
+- Recommendation: do **(A)** first (gets the Create look with least risk), generalise to N bogeys at the same time.
 
 ### #3 — Trains "die" (stop being a Sable train) when you leave & re-enter the world = PERSISTENCE ✅ DONE
 - **CONFIRMED WORKING in-game 2026-06-10** (Loconautics instance): spawn → exit to title → re-enter → log showed
