@@ -191,8 +191,8 @@ public class SteelCableItem extends Item {
         // Write ownership flags via accessor mixin (mirrors the assignments in createRope())
         UUID strandUUID = strand.getUUID();
 
-        // Mark this strand as steel cable so the client renderer can identify it
-        SteelCableTracker.register(strandUUID);
+        // Mark this strand as steel cable — persists to disk and broadcasts to all players
+        SteelCableTracker.registerServer((ServerLevel) level, strandUUID);
         RopeStrandHolderBehaviorAccessor accessorA = (RopeStrandHolderBehaviorAccessor) holderA;
         RopeStrandHolderBehaviorAccessor accessorB = (RopeStrandHolderBehaviorAccessor) holderB;
 
@@ -207,11 +207,6 @@ public class SteelCableItem extends Item {
 
         holderA.blockEntity.notifyUpdate();
         holderB.blockEntity.notifyUpdate();
-
-        // Tell all tracking clients this strand is a steel cable so they use our renderer
-        PacketDistributor.sendToPlayersTrackingChunk(
-                (ServerLevel) level, new net.minecraft.world.level.ChunkPos(posA),
-                new SteelCableStrandPacket(strandUUID));
 
         level.playSound(null, posA, SoundEvents.CHAIN_PLACE, SoundSource.BLOCKS, 0.5f, 1.0f);
         level.playSound(null, posB, SoundEvents.CHAIN_PLACE, SoundSource.BLOCKS, 0.5f, 1.0f);

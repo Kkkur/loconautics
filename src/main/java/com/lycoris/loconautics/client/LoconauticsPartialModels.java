@@ -21,6 +21,12 @@ public class LoconauticsPartialModels {
     public static final PartialModel STEEL_CABLE_KNOT =
             PartialModel.of(LoconauticsConstants.id("block/steel_cable/knot"));
 
+    // Steel Cable winch partial models — shaft rotates with kinetics, coil scrolls
+    public static final PartialModel STEEL_CABLE_WINCH_SHAFT =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/winch_shaft"));
+    public static final PartialModel STEEL_CABLE_WINCH_COIL =
+            PartialModel.of(LoconauticsConstants.id("block/steel_cable/winch_coil"));
+
     /** Call from LoconauticsClient during FMLClientSetupEvent to trigger static init. */
     public static void init() {}
 }

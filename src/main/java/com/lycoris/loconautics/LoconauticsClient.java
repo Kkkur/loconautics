@@ -1,7 +1,9 @@
 package com.lycoris.loconautics;
 
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
+import com.lycoris.loconautics.client.LoconauticsSpriteShifts;
 import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
+import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHandler;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerHUD;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerRenderer;
@@ -24,6 +26,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.InputEvent;
@@ -59,11 +62,13 @@ public final class LoconauticsClient {
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
         NeoForge.EVENT_BUS.addListener(this::onKeyInput);
         NeoForge.EVENT_BUS.addListener(this::onMouseScroll);
+        NeoForge.EVENT_BUS.addListener(this::onClientDisconnect);
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics client setup");
         LoconauticsPartialModels.init();
+        LoconauticsSpriteShifts.init();
 
         // Steel Cable tooltip (drives item.loconautics.steel_cable.tooltip.* lang keys)
         ItemDescription.useKey(LoconauticsRegistries.STEEL_CABLE.get(), "item.loconautics.steel_cable");
@@ -129,5 +134,9 @@ public final class LoconauticsClient {
         CatnipServices.NETWORK.sendToServer(
                 new AnalogControllerScrollPacket(delta, AnalogControllerClientHandler.getMountedPos()));
         event.setCanceled(true);
+    }
+
+    private void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
+        SteelCableTracker.clearClient();
     }
 }

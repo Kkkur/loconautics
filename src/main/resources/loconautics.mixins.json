@@ -21,7 +21,9 @@
     "client.CarriageBogeyVisualMixin",
     "client.ContraptionVisualChildrenMixin",
     "client.ClientSubLevelRenderMixin",
-    "client.RopeConnectorRendererMixin"
+    "client.RopeConnectorRendererMixin",
+    "client.RopeWinchRendererMixin",
+    "client.RopeWinchBlockEntityAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
