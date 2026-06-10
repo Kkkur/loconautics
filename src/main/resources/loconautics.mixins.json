@@ -3,24 +3,10 @@
   "package": "com.lycoris.loconautics.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "ContraptionColliderMixin",
-    "ContraptionColliderSkipMixin",
-    "EntityNoContraptionCollisionMixin",
-    "MovingInteractionBehaviourMixin",
-    "StationBlockEntityAssembleMixin",
-    "StationBlockEntityAssembleControlsMixin",
-    "StationBlockEntityAccessor",
     "RopeStrandHolderBehaviorAccessor",
-    "RopeStrandHolderDestroyMixin",
-    "TrainDisassembleMixin"
+    "RopeStrandHolderDestroyMixin"
   ],
   "client": [
-    "client.AssemblyScreenMixin",
-    "client.ClientContraptionRenderMixin",
-    "client.CarriageBogeyRenderMixin",
-    "client.CarriageBogeyVisualMixin",
-    "client.ContraptionVisualChildrenMixin",
-    "client.ClientSubLevelRenderMixin",
     "client.RopeConnectorRendererMixin",
     "client.RopeWinchRendererMixin",
     "client.RopeWinchBlockEntityAccessor"

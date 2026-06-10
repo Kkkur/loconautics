@@ -34,11 +34,9 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * Drives the Option-B custom trains ({@link SableTrain}): advances their motion once per game tick and pins
  * each carriage sub-level's pose to its {@link RailCarriage} every physics substep.
  *
- * <p>The pinning is the exact collision-correct mechanism the hybrid {@code PhysicsTrainTickHandler} uses
- * (teleport + resetVelocity pre-step, re-pin {@code logicalPose} post-step), but the target pose comes from
- * our rail math instead of a {@code CarriageContraptionEntity}. Sable's event platform accumulates listeners
- * (it does {@code NeoForge.EVENT_BUS.addListener} per call), so registering here does not disturb the hybrid
- * driver — the two operate on disjoint sub-levels.
+ * <p>The pinning is collision-correct (teleport + resetVelocity pre-step, re-pin {@code logicalPose} post-step),
+ * with the target pose coming from our rail math (no {@code CarriageContraptionEntity}). This is the ONLY train
+ * driver now — the old Create-contraption-based hybrid system was removed in favour of this all-Sable approach.
  */
 @EventBusSubscriber(modid = LoconauticsConstants.MOD_ID)
 public final class SableTrainDriver {

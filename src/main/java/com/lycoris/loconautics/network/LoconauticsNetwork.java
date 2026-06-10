@@ -29,13 +29,6 @@ public final class LoconauticsNetwork {
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar(String.valueOf(LoconauticsConstants.NETWORK_VERSION));
 
-        // Client -> Server: request to assemble the imminent train as a physics train.
-        registrar.playToServer(
-                AssembleAsPhysicsTrainPacket.TYPE,
-                AssembleAsPhysicsTrainPacket.STREAM_CODEC,
-                AssembleAsPhysicsTrainPacket::handle
-        );
-
         // Client -> Server: key event from a mounted Analog Controller.
         registrar.playToServer(
                 AnalogControllerInputPacket.TYPE,
@@ -69,26 +62,9 @@ public final class LoconauticsNetwork {
                 SteelCableStrandPacket.STREAM_CODEC,
                 SteelCableStrandPacket::handle
         );
-
-        // Server -> Client: a train entered/left physics mode.
-        registrar.playToClient(
-                PhysicsTrainSyncPacket.TYPE,
-                PhysicsTrainSyncPacket.STREAM_CODEC,
-                PhysicsTrainSyncPacket::handle
-        );
     }
 
     // ----- Convenience senders -----
-
-    /** Sends a physics-train sync to a single player (e.g. on login / chunk track). */
-    public static void sendTo(ServerPlayer player, PhysicsTrainSyncPacket packet) {
-        PacketDistributor.sendToPlayer(player, packet);
-    }
-
-    /** Broadcasts a physics-train sync to every connected player. */
-    public static void sendToAll(PhysicsTrainSyncPacket packet) {
-        PacketDistributor.sendToAllPlayers(packet);
-    }
 
     /** Tells a specific client player they have mounted/dismounted an Analog Controller. */
     public static void sendMount(ServerPlayer player, boolean mounted, BlockPos pos) {

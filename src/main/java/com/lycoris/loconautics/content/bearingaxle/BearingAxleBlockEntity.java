@@ -18,7 +18,7 @@ import java.util.List;
 public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveGoggleInformation {
 
     // ---------------------------------------------------------------------------
-    // Mass — pushed by PhysicsTrainTickHandler every 30 ticks.
+    // Mass — pushed by SableTrainDriver.updateAxleMass from the server game tick.
     // Block entities inside Sable sub-levels do not tick normally, so mass updates
     // come from the server game tick handler, not from this BE's own tick().
     // ---------------------------------------------------------------------------

@@ -3,7 +3,6 @@ package com.lycoris.loconautics;
 import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
-import com.lycoris.loconautics.server.tick.PhysicsTrainTickHandler;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -36,7 +35,6 @@ public final class Loconautics {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
-        PhysicsTrainTickHandler.register();
         com.lycoris.loconautics.allsable.SableTrainDriver.register();
     }
 
