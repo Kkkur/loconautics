@@ -3,6 +3,7 @@ package com.lycoris.loconautics.mixin.client;
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.content.steelcable.SteelCableStrandRenderer;
 import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
+import com.lycoris.loconautics.mixin.RopeStrandHolderBehaviorAccessor;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.AllBlocks;
 import dev.simulated_team.simulated.content.blocks.rope.RopeStrandHolderBehavior;
@@ -19,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import java.util.UUID;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -51,15 +53,21 @@ public class RopeConnectorRendererMixin {
     ) {
         RopeStrandHolderBehavior holder = be.getRopeHolder();
 
-        ClientRopeStrand clientStrand = holder.getClientStrand();
-        if (clientStrand == null) return;
-
-        if (!SteelCableTracker.isSteelCable(clientStrand.getUuid())) return;
+        // Use attachedRopeID for steel cable detection — it is set on BOTH the owning
+        // and non-owning connector.  getClientStrand() returns null on the non-owning
+        // end, so relying on it caused an early return before ci.cancel(), which let
+        // the original renderer run and draw the brown rope-knot texture on that end.
+        UUID attachedID = ((RopeStrandHolderBehaviorAccessor) holder).loconautics$getAttachedRopeID();
+        if (attachedID == null) return;
+        if (!SteelCableTracker.isSteelCable(attachedID)) return;
 
         // Owning connector: render the full strand with our textures.
         // Non-owning connector: strand is already rendered by the owner, skip it.
         if (holder.ownsRope()) {
-            SteelCableStrandRenderer.render(be, holder, partialTicks, ms, buffer);
+            ClientRopeStrand clientStrand = holder.getClientStrand();
+            if (clientStrand != null) {
+                SteelCableStrandRenderer.render(be, holder, partialTicks, ms, buffer);
+            }
         }
 
         // Both connectors: render steel knot instead of the default rope knot.
