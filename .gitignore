@@ -1,9 +1,11 @@
 ### Gradle ###
 .gradle
-build/
+build/*
+!build/libs/
+build/libs/*
+!build/libs/*.jar
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/**/build/
-!build/libs/*.jar
 
 ### IntelliJ IDEA ###
 .idea/

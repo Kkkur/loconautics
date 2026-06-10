@@ -63,8 +63,8 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder); // adds AXIS first
         builder.add(STAGE, DIRECTION_ACTIVE, PLUS_SIDE);
-        super.createBlockStateDefinition(builder); // adds AXIS
     }
 
     @Override
