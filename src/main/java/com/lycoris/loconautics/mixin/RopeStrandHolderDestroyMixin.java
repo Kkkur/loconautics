@@ -5,6 +5,7 @@ import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import dev.simulated_team.simulated.content.blocks.rope.RopeStrandHolderBehavior;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -31,8 +32,8 @@ public class RopeStrandHolderDestroyMixin {
         UUID ropeId = ((RopeStrandHolderBehaviorAccessor) self).loconautics$getAttachedRopeID();
 
         if (ropeId != null && SteelCableTracker.isSteelCable(ropeId)) {
-            ServerLevel serverLevel = ((RopeStrandHolderBehaviorAccessor) self).loconautics$getLevel();
-            if (serverLevel != null) {
+            Level level = ((RopeStrandHolderBehaviorAccessor) self).loconautics$getLevel();
+            if (level instanceof ServerLevel serverLevel) {
                 SteelCableTracker.unregisterServer(serverLevel, ropeId);
             } else {
                 SteelCableTracker.unregister(ropeId);

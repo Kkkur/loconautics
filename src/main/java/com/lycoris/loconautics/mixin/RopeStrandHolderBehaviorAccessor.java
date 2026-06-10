@@ -1,7 +1,7 @@
 package com.lycoris.loconautics.mixin;
 
 import dev.simulated_team.simulated.content.blocks.rope.RopeStrandHolderBehavior;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.gen.Invoker;
@@ -30,5 +30,5 @@ public interface RopeStrandHolderBehaviorAccessor {
     UUID loconautics$getAttachedRopeID();
 
     @Invoker("getLevel")
-    ServerLevel loconautics$getLevel();
+    Level loconautics$getLevel();
 }
