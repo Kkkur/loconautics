@@ -26,14 +26,26 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     private double totalMassKg = 0.0;
 
     /**
-     * Called by PhysicsTrainTickHandler every 30 ticks (and once at assembly time
-     * by PhysicsAssemblyOrchestrator) to update the train mass and recompute stress.
+     * Called by {@code SableTrainDriver.updateAxleMass} (every 10 ticks, when the summed block mass changes) to
+     * update the train weight and recompute stress.
+     *
+     * <p>BEs inside Sable sub-levels do NOT tick, so the usual {@code networkDirty} → {@code tick()} refresh never
+     * runs — that's why the weight previously only "took effect" when an RPM change happened to re-evaluate the
+     * kinetic network. Here we do what {@code tick()} would: force the network to recompute stress NOW, and
+     * {@code sendData()} so the client goggle tooltip updates live as blocks are placed/broken.
      */
     public void setTrainMass(double massKg) {
+        if (massKg == this.totalMassKg) {
+            return;
+        }
         this.totalMassKg = massKg;
         this.lastStressApplied = calculateStressApplied();
-        this.networkDirty = true;
+        if (this.hasNetwork()) {
+            this.getOrCreateNetwork().updateNetwork();
+        }
+        this.networkDirty = false;
         this.setChanged();
+        this.sendData();
     }
 
     public double getTrainMass() {
