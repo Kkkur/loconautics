@@ -1,6 +1,8 @@
 package com.lycoris.loconautics.allsable;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
@@ -157,30 +159,69 @@ public final class SableTrainSpawner {
             return null;
         }
 
-        // 4) Lift the cart into a sub-level (MOVES the blocks out of the world).
-        ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, origin, blocks, bounds);
+        // 4) Separate the LOOSE bogeys from the body. Each Create bogey block becomes its OWN sub-level that
+        //    rides the rail and pivots to the local tangent; the body is the cart MINUS the bogeys. (Detect the
+        //    bogeys NOW, while everything is still in the world.)
+        List<BlockPos> bogeyPositions = new ArrayList<>();
+        for (BlockPos p : blocks) {
+            if (level.getBlockState(p).getBlock() instanceof AbstractBogeyBlock) {
+                bogeyPositions.add(p.immutable());
+            }
+        }
+        // Order bogeys front-to-back along the travel direction, so the body's chord (first->last bogey) points
+        // the same way as the body's own reference and the cars stay consistent.
+        bogeyPositions.sort(java.util.Comparator.comparingDouble(p -> p.getX() * railDir.x + p.getZ() * railDir.z));
+        Set<BlockPos> bodyBlocks = new HashSet<>(blocks);
+        bodyBlocks.removeAll(bogeyPositions);
+        if (bodyBlocks.isEmpty()) { // degenerate cart (only bogeys): keep it whole, no separation
+            bodyBlocks = blocks;
+            bogeyPositions.clear();
+        }
+        BoundingBox3i bodyBounds = BoundingBox3i.from(bodyBlocks);
+
+        // Body sub-level (cart minus bogeys). MOVES the body blocks out of the world; bogey blocks stay for now.
+        BlockPos bodyAnchor = bodyBlocks.contains(origin) ? origin : bodyBlocks.iterator().next();
+        ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, bodyAnchor, bodyBlocks, bodyBounds);
         if (sub == null) {
             msg(player, "sub-level creation failed");
             return null;
         }
 
-        // 5) Re-locate the rail under the cart's horizontal CENTRE so the centred bogeys line up with the body.
-        int cx = (bounds.minX() + bounds.maxX()) / 2;
-        int cz = (bounds.minZ() + bounds.maxZ()) / 2;
-        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), railDir);
+        // One sub-level per bogey, each seated on the rail directly under it (so it rides + pivots on its own).
+        List<SableTrain.Bogey> bogeys = new ArrayList<>();
+        for (BlockPos bp : bogeyPositions) {
+            TrackHit bogeyTrack = findRailBelow(level, bp, railDir);
+            if (bogeyTrack == null) {
+                continue; // no rail under this bogey — skip it
+            }
+            RailCarriage bogeyRail = RailCarriage.at(bogeyTrack.location(), bogeyTrack.upNormal(), 1.0, 0.0);
+            if (bogeyRail == null) {
+                continue;
+            }
+            BoundingBox3i bbBounds = new BoundingBox3i(bp.getX(), bp.getY(), bp.getZ(), bp.getX(), bp.getY(), bp.getZ());
+            ServerSubLevel bogeySub = SubLevelAssemblyHelper.assembleBlocks(level, bp, List.of(bp), bbBounds);
+            if (bogeySub != null) {
+                bogeys.add(new SableTrain.Bogey(bogeySub.getUniqueId(), bogeyRail));
+            }
+        }
+
+        // 5) Re-locate the rail under the BODY's horizontal CENTRE so the body lines up over its bogeys.
+        int cx = (bodyBounds.minX() + bodyBounds.maxX()) / 2;
+        int cz = (bodyBounds.minZ() + bodyBounds.maxZ()) / 2;
+        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bodyBounds.minY(), cz), railDir);
         if (centreTrack != null) {
             track = centreTrack;
         }
 
-        // 6) Bogey spacing from the cart's longer horizontal extent (bogeys near its ends → it pivots properly).
-        double spacing = Math.max(1.0, Math.max(bounds.maxX() - bounds.minX(), bounds.maxZ() - bounds.minZ()));
+        // 6) Body pose: a RailCarriage spanning the body's longer horizontal extent (it follows the rail; its
+        //    orientation is the chord between its ends — so the body turns according to where its bogeys are).
+        double spacing = Math.max(1.0, Math.max(bodyBounds.maxX() - bodyBounds.minX(), bodyBounds.maxZ() - bodyBounds.minZ()));
         RailCarriage carriage = RailCarriage.at(track.location(), track.upNormal(), spacing, 0.0);
         if (carriage == null) {
             msg(player, "couldn't seat the rail body (track not in a graph?)");
             return null;
         }
-        // Capture the two bogey attachment points in the sub-level's LOCAL frame (for physics mode: springs
-        // pull these toward the rail targets). transformPositionInverse(Vec3) -> Vec3 (world -> local).
+        // Capture the two bogey attachment points in the body sub-level's LOCAL frame (physics mode only).
         Vec3 leadW = carriage.leadingPos();
         Vec3 trailW = carriage.trailingPos();
         Vec3 localLeadVec = sub.logicalPose().transformPositionInverse(leadW);
@@ -188,9 +229,9 @@ public final class SableTrainSpawner {
         Vector3dc localLead = new Vector3d(localLeadVec.x, localLeadVec.y, localLeadVec.z);
         Vector3dc localTrail = new Vector3d(localTrailVec.x, localTrailVec.y, localTrailVec.z);
 
-        LoconauticsConstants.LOGGER.info("[sabletrain] built car ({} blocks, spacing {}) on graph {}",
-                blocks.size(), spacing, track.location().graph.id);
-        return new SableTrain.Car(sub.getUniqueId(), carriage, localLead, localTrail);
+        LoconauticsConstants.LOGGER.info("[sabletrain] built car (body {} blocks, {} loose bogeys, spacing {}) on graph {}",
+                bodyBlocks.size(), bogeys.size(), spacing, track.location().graph.id);
+        return new SableTrain.Car(sub.getUniqueId(), carriage, bogeys, localLead, localTrail);
     }
 
     /** Sets the target speed of every active custom train (live throttle for testing). Returns the count. */
@@ -214,6 +255,11 @@ public final class SableTrainSpawner {
                             && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub
                             && !sub.isRemoved()) {
                         container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
+                    }
+                    for (SableTrain.Bogey bogey : car.bogeys()) {
+                        if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
+                            container.removeSubLevel(bsub, SubLevelRemovalReason.REMOVED);
+                        }
                     }
                 }
             }

@@ -120,30 +120,47 @@ public final class RailCarriage {
      * car whenever it travelled along the world X axis (the ramp bug seen in-game).
      */
     public Quaterniond orientation() {
+        return orientationTo(forwardVec());
+    }
+
+    /**
+     * Absolute orientation that maps this carriage's spawn reference frame (the grid axis it was built along)
+     * to an arbitrary {@code forward} direction. Used both for this carriage's own rail tangent
+     * ({@link #orientation()}) and to orient a BODY to the chord between its loose bogeys (so the body follows
+     * wherever its bogeys are, instead of travelling independently and drifting out of sync).
+     */
+    public Quaterniond orientationTo(Vector3d forward) {
         if (forward0 == null) {
             captureReference();
             if (forward0 == null) {
                 return new Quaterniond();
             }
         }
-        Vector3d forward = forwardVec();
-        if (forward == null) {
+        if (forward == null || forward.lengthSquared() < 1.0e-9) {
             return new Quaterniond();
         }
-        Vector3d up = perpendicularUp(forward);
-
+        Vector3d f = new Vector3d(forward).normalize();
+        Vector3d up = perpendicularUp(f);
         Matrix3d ref = basis(forward0, up0);
-        Matrix3d now = basis(forward, up);
+        Matrix3d now = basis(f, up);
         Matrix3d delta = now.mul(ref.transpose(new Matrix3d()), new Matrix3d());
         return delta.getNormalizedRotation(new Quaterniond()).normalize();
     }
 
-    /** Captures the spawn reference frame from the current bogey positions (no-op if not yet placed). */
+    /**
+     * Captures the spawn reference frame. The car's blocks are built on the world grid (axis-aligned), so the
+     * reference forward is the dominant horizontal GRID axis the car is longest along — NOT the raw spawn rail
+     * chord. This makes {@link #orientation()} an ABSOLUTE map (grid → current rail), so the body follows the
+     * rail like Create even when spawned/parked on a curve. (Using the raw spawn chord made orientation relative
+     * to wherever it spawned, so a car parked on a curve stayed grid-aligned instead of turning with the track.)
+     */
     private void captureReference() {
         Vector3d f = forwardVec();
         if (f != null) {
-            this.forward0 = f;
-            this.up0 = perpendicularUp(f);
+            this.forward0 = Math.abs(f.x) >= Math.abs(f.z)
+                    ? new Vector3d(Math.signum(f.x), 0, 0)
+                    : new Vector3d(0, 0, Math.signum(f.z));
+            this.up0 = perpendicularUp(this.forward0);
         }
     }
 

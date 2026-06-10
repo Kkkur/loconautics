@@ -216,6 +216,16 @@ public final class SableTrainPersistence {
             if (car.localTrail() != null) {
                 writeVec3d(c, "LocalTrail", car.localTrail());
             }
+            // Loose bogeys: each its own sub-level + rail carriage.
+            ListTag bogeyList = new ListTag();
+            for (SableTrain.Bogey bogey : car.bogeys()) {
+                CompoundTag bt = new CompoundTag();
+                bt.putUUID("SubLevel", bogey.subLevelId());
+                bt.putUUID("Graph", bogey.rail().graphId());
+                bt.put("Carriage", bogey.rail().writeNbt(dims));
+                bogeyList.add(bt);
+            }
+            c.put("Bogeys", bogeyList);
             carList.add(c);
         }
         tag.put("Cars", carList);
@@ -278,9 +288,25 @@ public final class SableTrainPersistence {
                         "[sabletrain] car {} could not be re-seated (track changed?) — skipping it", subId);
                 continue;
             }
+            // Restore the loose bogeys (each its own sub-level + rail). Skip a bogey whose sub-level/track is
+            // gone; wait (retry) if its graph/sub-level just isn't loaded yet.
+            List<SableTrain.Bogey> bogeys = new ArrayList<>();
+            ListTag bogeyList = c.getList("Bogeys", Tag.TAG_COMPOUND);
+            for (int j = 0; j < bogeyList.size(); j++) {
+                CompoundTag bt = bogeyList.getCompound(j);
+                UUID bSub = bt.getUUID("SubLevel");
+                TrackGraph bGraph = Create.RAILWAYS.trackNetworks.get(bt.getUUID("Graph"));
+                if (bGraph == null || !(container.getSubLevel(bSub) instanceof ServerSubLevel)) {
+                    return null; // bogey graph/sub-level not ready yet — retry the whole train
+                }
+                RailCarriage bRail = RailCarriage.restore(bGraph, bt.getCompound("Carriage"), dims);
+                if (bRail != null) {
+                    bogeys.add(new SableTrain.Bogey(bSub, bRail));
+                }
+            }
             Vector3dc localLead = readVec3d(c, "LocalLead");
             Vector3dc localTrail = readVec3d(c, "LocalTrail");
-            cars.add(new SableTrain.Car(subId, carriage, localLead, localTrail));
+            cars.add(new SableTrain.Car(subId, carriage, bogeys, localLead, localTrail));
         }
         if (cars.isEmpty()) {
             return null; // nothing placeable yet (or all cars' track is gone) — retry until the deadline

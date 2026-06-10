@@ -24,12 +24,20 @@ import net.minecraft.server.level.ServerLevel;
 public final class SableTrain {
 
     /**
-     * One carriage: its Sable sub-level id + the rail body (target) that says where it should be.
-     * {@code localLead}/{@code localTrail} are the two bogey attachment points in the sub-level's LOCAL frame
-     * (captured at spawn) — used only in physics mode, where springs pull these points toward the rail
-     * targets. They are {@code null} for pin-mode cars.
+     * One LOOSE bogey: its own Sable sub-level (just the bogey block(s)) and a small {@link RailCarriage} that
+     * rides the rail so the bogey sits at its rail point and pivots to the local tangent — independently of the
+     * body. This is what makes bogeys turn on curves like Create (instead of being rigid with the body).
      */
-    public record Car(UUID subLevelId, RailCarriage carriage, Vector3dc localLead, Vector3dc localTrail) {}
+    public record Bogey(UUID subLevelId, RailCarriage rail) {}
+
+    /**
+     * One carriage: the BODY sub-level id (the cart minus its bogeys) + the rail body (target) that says where
+     * the body should be, plus the car's {@link Bogey loose bogeys} (each its own sub-level riding the rail).
+     * {@code localLead}/{@code localTrail} are the two bogey attachment points in the sub-level's LOCAL frame
+     * (captured at spawn) — used only in physics mode. They are {@code null} for pin-mode cars.
+     */
+    public record Car(UUID subLevelId, RailCarriage carriage, List<Bogey> bogeys,
+                      Vector3dc localLead, Vector3dc localTrail) {}
 
     private final UUID id;
     private final ServerLevel level;
@@ -113,6 +121,12 @@ public final class SableTrain {
         for (Car car : cars) {
             car.carriage().setSpeed(speed);
             car.carriage().tick();
+            // Advance each loose bogey along the rail by the same speed, so it stays under the body while
+            // riding its own rail point (and thus pivots to the local tangent on curves).
+            for (Bogey bogey : car.bogeys()) {
+                bogey.rail().setSpeed(speed);
+                bogey.rail().tick();
+            }
         }
     }
 }

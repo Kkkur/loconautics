@@ -61,40 +61,84 @@ public final class SableTrainDriver {
     private static final double SPRING_K = 150.0; // stiffness: accel per metre of offset toward the rail
     private static final double SPRING_C = 25.0;  // damping: ~critical for K (2·sqrt(K) ≈ 24.5)
 
-    /** Pre-step: PIN cars teleport to the rail; PHYSICS cars get bogey spring forces (free body, can derail). */
+    /** Pre-step: PIN cars teleport the body AND every loose bogey to the rail; PHYSICS cars get spring forces. */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
-        forEachCar(system, (pipeline, sub, train, car) -> {
+        forEachCar(system, (pipeline, container, sub, train, car) -> {
             if (train.isPhysics()) {
                 applyBogeySprings(sub, car, timeStep, system.getLevel());
                 return;
             }
-            Quaterniond q = car.carriage().orientation();
-            Vector3d center = car.carriage().center();
-            if (center == null) {
-                return;
-            }
-            Vector3d target = targetPosition(sub, center, q);
-            pipeline.teleport(sub, target, q);
-            pipeline.resetVelocity(sub);
+            pinCar(pipeline, container, sub, car, false);
         });
     }
 
-    /** Post-step: re-pin PIN cars (removes the gravity sag). PHYSICS cars simulate freely — leave them alone. */
+    /** Post-step: re-pin the body AND every loose bogey (removes gravity sag, carries orientation to networking). */
     public static void onPostPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
-        forEachCar(system, (pipeline, sub, train, car) -> {
+        forEachCar(system, (pipeline, container, sub, train, car) -> {
             if (train.isPhysics()) {
                 return;
             }
-            Quaterniond q = car.carriage().orientation();
-            Vector3d center = car.carriage().center();
-            if (center == null) {
-                return;
+            pinCar(pipeline, container, sub, car, true);
+        });
+    }
+
+    /** Pins the body (posed FROM its bogeys) and each loose bogey (posed to its own rail point) for one car. */
+    private static void pinCar(PhysicsPipeline pipeline, ServerSubLevelContainer container, ServerSubLevel bodySub,
+                               Car car, boolean post) {
+        // Body: derive its pose from the bogeys so it always sits exactly on them (no independent drift / spawn TP).
+        Vector3d bodyCenter = new Vector3d();
+        Quaterniond bodyQ = bodyPose(car, bodyCenter);
+        if (bodyQ != null) {
+            pin(pipeline, bodySub, bodyCenter, bodyQ, post);
+        }
+        // Each loose bogey: its own rail point + local tangent (this is what makes them pivot on curves).
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            if (!(container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub) || bsub.isRemoved()) {
+                continue;
             }
-            Vector3d target = targetPosition(sub, center, q);
+            Vector3d center = bogey.rail().center();
+            if (center != null) {
+                pin(pipeline, bsub, center, bogey.rail().orientation(), post);
+            }
+        }
+    }
+
+    /**
+     * The BODY pose: midpoint of the two end bogeys, oriented to the chord between them (the body "hangs" on its
+     * bogeys, like Create). Falls back to the body's own {@link RailCarriage} when there are fewer than 2 bogeys.
+     * Fills {@code centerDst} and returns the orientation (or {@code null} if no pose is available).
+     */
+    private static Quaterniond bodyPose(Car car, Vector3d centerDst) {
+        var bogeys = car.bogeys();
+        if (bogeys.size() >= 2) {
+            Vector3d first = bogeys.get(0).rail().center();
+            Vector3d last = bogeys.get(bogeys.size() - 1).rail().center();
+            if (first != null && last != null) {
+                Vector3d forward = new Vector3d(last).sub(first);
+                centerDst.set(first).add(last).mul(0.5);
+                return car.carriage().orientationTo(forward);
+            }
+        }
+        Vector3d c = car.carriage().center();
+        if (c == null) {
+            return null;
+        }
+        centerDst.set(c);
+        return car.carriage().orientation();
+    }
+
+    /** Teleport a sub-level's physics body to a rail pose. Post also re-fixes the Java logicalPose (collision). */
+    private static void pin(PhysicsPipeline pipeline, ServerSubLevel sub, Vector3d center, Quaterniond q, boolean post) {
+        Vector3d target = targetPosition(sub, center, q);
+        if (post) {
             Pose3d pose = sub.logicalPose();
             pose.position().set(target);
             pose.orientation().set(q);
-        });
+        }
+        // Teleport the physics body in BOTH phases. Sable networks the pose to clients from the rigid body, so the
+        // body's orientation must be set on the body itself (pinning only the Java logicalPose left it un-rotated).
+        pipeline.teleport(sub, target, q);
+        pipeline.resetVelocity(sub);
     }
 
     /**
@@ -157,7 +201,7 @@ public final class SableTrainDriver {
                     continue;
                 }
                 try {
-                    action.run(pipeline, sub, train, car);
+                    action.run(pipeline, container, sub, train, car);
                 } catch (Throwable t) {
                     LoconauticsConstants.LOGGER.error("[sabletrain] error driving sub-level {}", car.subLevelId(), t);
                 }
@@ -167,7 +211,7 @@ public final class SableTrainDriver {
 
     @FunctionalInterface
     private interface CarAction {
-        void run(PhysicsPipeline pipeline, ServerSubLevel sub, SableTrain train, Car car);
+        void run(PhysicsPipeline pipeline, ServerSubLevelContainer container, ServerSubLevel sub, SableTrain train, Car car);
     }
 
     /**
@@ -242,6 +286,12 @@ public final class SableTrainDriver {
             if (axle == null) {
                 axle = bearingAxleIn(sub);
             }
+            // Loose bogeys are their own sub-levels now — count their blocks toward the train weight too.
+            for (SableTrain.Bogey bogey : car.bogeys()) {
+                if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
+                    total += liveMass(bsub);
+                }
+            }
         }
         if (axle != null && readAny && total != axle.getTrainMass()) {
             axle.setTrainMass(total);
@@ -271,8 +321,10 @@ public final class SableTrainDriver {
         for (int i = 0; i < train.cars().size(); i++) {
             RailCarriage c = train.cars().get(i).carriage();
             var centre = c.center();
+            var fwd = c.forward(); // chord direction (trailing->leading); shows whether the body yaws on a curve
             cars.append(" car").append(i)
                     .append(centre == null ? "=NULL" : "=(" + f(centre.x) + "," + f(centre.y) + "," + f(centre.z) + ")")
+                    .append(" fwd=(" + f(fwd.x) + "," + f(fwd.z) + ")")
                     .append(c.stopped() ? "[STOPPED]" : "");
         }
         LoconauticsConstants.LOGGER.info("[sabletrain] diag speed={} target={} axleRPM={} subMass={} axleTrainMass={} cars={}:{}",
