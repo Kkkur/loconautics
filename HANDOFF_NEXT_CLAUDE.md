@@ -68,7 +68,10 @@ resolver ese classloader.)
    tren entero — el `SubLevelObserver` quita solo ese vagón.)
 4. **Acople multi-vagón con constraint** (Fixed/Generic, RESEARCH §H.4) — pendiente; ahora los vagones se
    mantienen juntos solo por "misma velocidad" (loose).
-5. ~~**Persistencia**~~ **IMPLEMENTADO 2026-06-09 (sin probar in-game todavía).** Nuevo `allsable/
+5. ~~**Persistencia**~~ ✅ **CONFIRMADO IN-GAME 2026-06-10** (instancia Loconautics, jar `c89df05`): spawn → salir
+   al menú → volver → log `restored train … (1 car(s)) in minecraft:overworld` y el tren sigue recorriendo la vía.
+   La masa llega al axle (`subMass==axleTrainMass`). Detalle de impl abajo:
+   **IMPLEMENTADO 2026-06-09.** Nuevo `allsable/
    SableTrainStore` (SavedData global en el overworld, `loconautics_sable_trains`) + `allsable/
    SableTrainPersistence` (@EventBusSubscriber): serializa cada tren (id, dimensión, motion, y por coche el
    `subLevelId` + grafo + 2 `TravellingPoint` vía `write/read` + spacing + upNormal + **frame de referencia

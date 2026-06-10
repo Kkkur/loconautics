@@ -50,7 +50,11 @@ The merged build compiles but crashes when the game opens. **Get the log first, 
 - ">2 bogeys bugs out": multi-bogey car not supported — `RailCarriage` assumes 2. Generalise to N bogeys (Create's
   `Carriage` supports a bogey list) OR clamp/validate. Decide with user.
 
-### #3 — Trains "die" (stop being a Sable train) when you leave & re-enter the world = PERSISTENCE
+### #3 — Trains "die" (stop being a Sable train) when you leave & re-enter the world = PERSISTENCE ✅ DONE
+- **CONFIRMED WORKING in-game 2026-06-10** (Loconautics instance): spawn → exit to title → re-enter → log showed
+  `persistence active — 1 saved train(s)` → `restored train <id> (1 car(s)) in minecraft:overworld`, and the train
+  kept riding the rail (diag positions advancing). Mass also reaches the axle (`subMass==axleTrainMass`). Nothing left
+  here unless multi-car/edge cases surface.
 - **Already implemented & merged**: `allsable/SableTrainPersistence` + `SableTrainStore` (global SavedData
   `loconautics_sable_trains`). Saves on spawn/addcar/clear/periodic/ServerStopping; restores on ServerStarted+tick by
   retrying until the track graph (`Create.RAILWAYS.trackNetworks`) + sub-level (`container.getSubLevel(uuid)`) are
