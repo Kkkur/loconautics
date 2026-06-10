@@ -17,7 +17,7 @@
 ## A. Sable — package map (where things live)
 
 `dev.ryanhcode.sable.*`
-- **`api/`** — the public extension surface (the intended hooks). Most valuable section. See §B.
+- **`api/`** — the public extension suraface (the intended hooks). Most valuable section. See §B.
 - `sublevel/` — the sub-level impl: `ServerSubLevel`, `SubLevel`, `plot/`, `system/` (physics system),
   `entity_collision/`, `render/`, `tracking_points/`, `storage/`.
 - `physics/` — physics engine glue: `impl/rapier/` (Rapier pipeline), `chunk/`, `floating_block/`,

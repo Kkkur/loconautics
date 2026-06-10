@@ -6,6 +6,7 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEnt
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerMenu;
 import com.lycoris.loconautics.content.transmission.TransmissionMenu;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
+import com.lycoris.loconautics.content.knuckle.KnuckleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.content.transmission.TransmissionBlock;
 import com.lycoris.loconautics.content.transmission.TransmissionBlockEntity;
@@ -100,6 +101,21 @@ public final class LoconauticsRegistries {
                             BEARING_AXLE.get())
                     .build(null));
 
+    // ------------------------------------------------------------------ Knuckle
+
+    public static final DeferredHolder<Block, KnuckleBlock> KNUCKLE =
+            BLOCKS.register("knuckle", () -> new KnuckleBlock(
+                    BlockBehaviour.Properties.of()
+                            .mapColor(MapColor.METAL)
+                            .strength(3.5f)
+                            .sound(SoundType.NETHERITE_BLOCK)
+                            .requiresCorrectToolForDrops()
+            ));
+
+    public static final DeferredHolder<Item, BlockItem> KNUCKLE_ITEM =
+            ITEMS.register("knuckle", () ->
+                    new BlockItem(KNUCKLE.get(), new Item.Properties().stacksTo(64)));
+
     // ------------------------------------------------------------------ Transmission
 
     public static final DeferredHolder<Block, TransmissionBlock> TRANSMISSION =
@@ -144,6 +160,7 @@ public final class LoconauticsRegistries {
                     .displayItems((params, output) -> {
                         output.accept(ANALOG_CONTROLLER_ITEM.get());
                         output.accept(BEARING_AXLE_ITEM.get());
+                        output.accept(KNUCKLE_ITEM.get());
                         output.accept(TRANSMISSION_ITEM.get());
                         output.accept(STEEL_CABLE.get());
                     })

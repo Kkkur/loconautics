@@ -48,3 +48,6 @@ repo/
 deps/
 # Local Claude/agent settings
 .claude/
+
+### Markdown ###
+*.md

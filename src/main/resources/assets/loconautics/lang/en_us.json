@@ -1,6 +1,7 @@
 {
   "block.loconautics.analog_controller": "Analog Controller",
   "block.loconautics.bearing_axle": "Bearing Axle",
+  "block.loconautics.knuckle": "Knuckle",
   "block.loconautics.transmission": "Transmission",
   "item.loconautics.steel_cable": "Steel Cable",
   "item.loconautics.steel_cable.tooltip.summary": "A heavy-gauge cable for connecting rope holders over long distances",
