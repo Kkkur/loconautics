@@ -1,5 +1,5 @@
 {
-  "parent": "loconautics:block/transmission",
+  "parent": "loconautics:block/transmission_flipped",
   "textures": {
     "0": "loconautics:block/transmission_stage_1",
     "particle": "loconautics:block/transmission_stage_1"

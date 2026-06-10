@@ -20,7 +20,6 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
@@ -38,6 +37,17 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
      */
     public static final BooleanProperty DIRECTION_ACTIVE = BooleanProperty.create("direction_active");
 
+    /**
+     * Flips which perpendicular face is PLUS (speed) vs MINUS (direction).
+     * false = default side, true = opposite side.
+     * Toggled by right-clicking without sneaking.
+     *
+     * axis=Z: false→PLUS=WEST,  true→PLUS=EAST
+     * axis=X: false→PLUS=NORTH, true→PLUS=SOUTH
+     * axis=Y: false→PLUS=WEST,  true→PLUS=EAST
+     */
+    public static final BooleanProperty PLUS_SIDE = BooleanProperty.create("plus_side");
+
     // ------------------------------------------------------------------ constructor
 
     public TransmissionBlock(BlockBehaviour.Properties properties) {
@@ -45,14 +55,15 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
         this.registerDefaultState(
                 this.defaultBlockState()
                         .setValue(STAGE, 0)
-                        .setValue(DIRECTION_ACTIVE, false));
+                        .setValue(DIRECTION_ACTIVE, false)
+                        .setValue(PLUS_SIDE, false));
     }
 
     // ------------------------------------------------------------------ blockstate
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(STAGE, DIRECTION_ACTIVE);
+        builder.add(STAGE, DIRECTION_ACTIVE, PLUS_SIDE);
         super.createBlockStateDefinition(builder); // adds AXIS
     }
 
@@ -60,7 +71,8 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         return super.getStateForPlacement(context)
                 .setValue(STAGE, 0)
-                .setValue(DIRECTION_ACTIVE, false);
+                .setValue(DIRECTION_ACTIVE, false)
+                .setValue(PLUS_SIDE, false);
     }
 
     // ------------------------------------------------------------------ IBE
@@ -77,7 +89,10 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
 
     // ------------------------------------------------------------------ interaction
 
-    /** Crouch + right-click opens the frequency GUI. Plain right-click does nothing extra. */
+    /**
+     * Sneak + right-click → open the frequency GUI.
+     * Plain right-click → pass through so block placement works normally.
+     */
     @Override
     public InteractionResult useWithoutItem(BlockState state, Level worldIn, BlockPos pos,
                                             Player player, BlockHitResult hit) {
@@ -96,9 +111,6 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
      * Reads direct redstone signals on the two side faces (perpendicular to the shaft axis).
      * PLUS face = speed signal (0–15 → RPM).
      * MINUS face = direction signal (>0 → flip output).
-     *
-     * This coexists with the link-network receivers — whichever source delivers a
-     * signal at any given moment is used.
      */
     @Override
     public void neighborChanged(BlockState state, Level worldIn, BlockPos pos,
@@ -109,12 +121,13 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
         BlockEntity be = worldIn.getBlockEntity(pos);
         if (!(be instanceof TransmissionBlockEntity tbe)) return;
 
-        Direction.Axis axis = state.getValue(BlockStateProperties.AXIS);
-        Direction plusFace  = getPlusFace(axis);
-        Direction minusFace = getMinusFace(axis);
+        Direction.Axis axis     = state.getValue(BlockStateProperties.AXIS);
+        boolean        plusSide = state.getValue(PLUS_SIDE);
+        Direction plusFace  = getPlusFace(axis, plusSide);
+        Direction minusFace = plusFace.getOpposite();
 
-        int     speedSignal = worldIn.getSignal(pos.relative(plusFace),  plusFace);
-        boolean dirSignal   = worldIn.getSignal(pos.relative(minusFace), minusFace) > 0;
+        int     speedSignal = worldIn.getSignal(pos.relative(plusFace),  plusFace.getOpposite());
+        boolean dirSignal   = worldIn.getSignal(pos.relative(minusFace), minusFace.getOpposite()) > 0;
 
         tbe.setRedstonePower(speedSignal);
         tbe.setDirectionActive(dirSignal);
@@ -128,23 +141,53 @@ public class TransmissionBlock extends AbstractEncasedShaftBlock
     // ------------------------------------------------------------------ face helpers
 
     /**
-     * PLUS face (speed) — the face showing the + texture.
-     * For axis=Z: west. For axis=X: north. For axis=Y: west.
-     * Confirmed with north-face placement as anchor.
+     * Returns the PLUS (speed) face given the shaft axis and plus_side toggle.
+     *
+     * axis=Z: false→WEST,  true→EAST
+     * axis=X: false→NORTH, true→SOUTH
+     * axis=Y: false→WEST,  true→EAST
      */
-    public static Direction getPlusFace(Direction.Axis axis) {
-        return switch (axis) {
-            case Z -> Direction.EAST;  // facing north: speed (plus) is left = east
-            case X -> Direction.SOUTH; // facing west:  speed (plus) is left = south
-            case Y -> Direction.EAST;  // shaft up:     speed (plus) is left = east
+    public static Direction getPlusFace(Direction.Axis axis, boolean plusSide) {
+        Direction base = switch (axis) {
+            case Z -> Direction.WEST;
+            case X -> Direction.NORTH;
+            case Y -> Direction.WEST;
         };
+        return plusSide ? base.getOpposite() : base;
     }
 
+    /** Convenience overload — reads PLUS_SIDE from the blockstate. */
+    public static Direction getPlusFace(BlockState state) {
+        return getPlusFace(
+                state.getValue(BlockStateProperties.AXIS),
+                state.getValue(PLUS_SIDE));
+    }
+
+    public static Direction getMinusFace(BlockState state) {
+        return getPlusFace(state).getOpposite();
+    }
+
+    // ------------------------------------------------------------------ wrench
+
     /**
-     * MINUS face (direction) — opposite of plus.
+     * Extends Create's default axis rotation to also handle {@code PLUS_SIDE}.
+     *
+     * Wrench behaviour:
+     * - If the clicked face is along the current shaft axis → cycle PLUS_SIDE
+     *   (the axis can't rotate further along its own axis, so we use that click
+     *   to swap which perpendicular face is PLUS vs MINUS).
+     * - Otherwise → let the parent rotate the AXIS property as normal, and reset
+     *   PLUS_SIDE to false (canonical orientation for the new axis).
      */
-    public static Direction getMinusFace(Direction.Axis axis) {
-        return getPlusFace(axis).getOpposite();
+    @Override
+    public BlockState getRotatedBlockState(BlockState state, Direction targetedFace) {
+        Direction.Axis currentAxis = state.getValue(BlockStateProperties.AXIS);
+        if (targetedFace.getAxis() == currentAxis) {
+            // Same axis: can't rotate axis, so toggle PLUS_SIDE instead
+            return state.cycle(PLUS_SIDE);
+        }
+        // Different axis: rotate normally, reset PLUS_SIDE to default
+        return super.getRotatedBlockState(state, targetedFace).setValue(PLUS_SIDE, false);
     }
 
     // ------------------------------------------------------------------ detach / re-attach kinetics

@@ -2,7 +2,6 @@
   "parent": "loconautics:block/transmission_flipped",
   "textures": {
     "0": "loconautics:block/transmission_stage_2",
-    "particle": "loconautics:block/transmission_stage_2",
-    "3": "loconautics:block/transmission_minus_on"
+    "particle": "loconautics:block/transmission_stage_2"
   }
 }
