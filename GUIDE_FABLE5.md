@@ -5,8 +5,11 @@
 > already in those — this guide is the task list + pointers. Keep token use low: read the specific file/section a
 > task names, not everything.
 
-## 0. CURRENT STATE (post-merge)
-- Branch `feature/all-sable-physics-train`, HEAD = merge `9f9b85f` (merged Lycoris' `feature/controller-and-trans-fix`
+## 0. CURRENT STATE
+- **2026-06-10 latest:** HEAD = `6013cc7` (loose pivoting bogeys, see #2). Bogeys pivot on curves ✅; persistence ✅;
+  weight→axle ✅; analog→axle propulsion ✅. Active work = bogey/body **cohesion** fine-tune (#2, visual) and the
+  **disconnected-block fall** feature (#2b, to implement). The crash never reproduced in the Loconautics instance.
+- Branch `feature/all-sable-physics-train`, base = merge `9f9b85f` (merged Lycoris' `feature/controller-and-trans-fix`
   cleanly — no conflicts; his work and the persistence work touch disjoint files). **Builds OK** (`./gradlew build`).
 - Merged jar **`c89df05`** deployed to the NEW test instance (see workflow).
 - The merge brought in Lycoris' NEW code: **steel cable** (`content/steelcable/*`), **transmission** rework
@@ -42,25 +45,40 @@ The merged build compiles but crashes when the game opens. **Get the log first, 
 - Fix the offending mixin selector / registration. Re-build, re-deploy, confirm clean start (`[sabletrain]
   persistence active` line should appear = our code loaded).
 
-### #2 — Bogeys must each rotate on their OWN axis (Create-style), and support N>2 bogeys
-**Requirement (Lycoris + screenshots):** like Create, **each bogey pivots at its own position to the rail tangent
-under it** (NOT the whole car rotating about its centre), and with 2 bogeys both turn, with 3 all three turn.
-**Root cause:** our car is ONE rigid Sable sub-level posed by a single orientation (`RailCarriage.orientation()` =
-chord of the 2 bogeys). The bogey *blocks* are rigid inside it → they point along the chord, not their local tangent;
-and `RailCarriage` only models 2 `TravellingPoint`s (3rd+ bogey ignored → the >2 "bug").
-**Plan (pick with user):**
-- (A) **Render-side articulation** (closest to Create, lowest physics risk): keep the body one sub-level posed by the
-  chord, but at render time rotate the bogey blocks to their local rail tangent. Needs: identify bogey blocks
-  (`AbstractBogeyBlock`) in the sub-level, give each a `TravellingPoint` for its tangent, and a CLIENT mixin into
-  Sable's sub-level block render to apply a per-bogey transform around the bogey's pivot. Cosmetic only (collision
-  unaffected). See `mixin/client/CarriageBogey*Mixin` (we already hide Create's ghost bogey) + Create's
-  `BogeyRenderer` for the rotation it applies.
-- (B) **Multi-body articulation** (physically real, bigger): each bogey = its own small sub-level pinned to its
-  `TravellingPoint` (local tangent); body = sub-level linked to the bogeys by rotary constraints
-  (`RESEARCH_sable_aeronautics.md` §H.4). True pivoting + derail; large rework, risk to the working train.
-- **N bogeys:** generalise `RailCarriage` to a LIST of bogey `TravellingPoint`s (Create's `Carriage` has a bogey
-  list) spaced along the car; body pose = best-fit (e.g. first↔last) and each bogey gets its own tangent (for A or B).
-- Recommendation: do **(A)** first (gets the Create look with least risk), generalise to N bogeys at the same time.
+### #2 — Loose pivoting bogeys ✅ DONE (pivoting); 🟡 cohesion fine-tuning remains (visual)
+**DONE (commit `6013cc7`, confirmed in-game 2026-06-10):** Implemented the **multi-body** approach (option B, the
+user picked it): at spawn each car is split into a **BODY** sub-level (cart minus the bogey blocks) + **one sub-level
+per Create bogey block**. Each bogey rides its own point on the rail (`RailCarriage` spacing 1) and is pinned to the
+local tangent → **bogeys pivot independently on curves, like Create** (✅ user-confirmed "ahora pivotan y giran solos").
+Works for N bogeys automatically. The body is posed FROM the bogeys (midpoint of the two end bogeys, oriented to the
+chord between them via `RailCarriage.orientationTo`) so it hangs on them — no independent drift. Code: `SableTrainSpawner
+.buildCar` (split + sort bogeys front-to-back), `SableTrain.Bogey`/`Car.bogeys()`, `SableTrainDriver.pinCar`/`bodyPose`,
+persistence handles per-bogey sub-levels, `clear()` removes them.
+
+**🟡 REMAINING — cohesion (needs your eyes, cheap to iterate):** the user wants body+bogeys to look like ONE row of
+blocks (the body a single rigid row that turns only "a little"; bogeys pivot under it), NOT separated. Two things to
+tune **visually**:
+1. **Vertical alignment / gaps.** The body has holes where the bogey blocks were removed, and the body vs bogeys may
+   sit a touch off in Y. Tune so the body's bottom sits flush on the bogeys. Likely a small Y offset in
+   `SableTrainDriver.pin`/`targetPosition` for the body, or pin each bogey at its captured height above the rail
+   (store the bogey block's `Y - railY` at spawn and add it to the bogey's target Y) so it fills its hole.
+2. **Orphan cleanup.** Old test spawns leave un-driven orphan sub-levels (the "floating chests"). `/loconautics
+   sabletrain clear` now removes a train's bogeys too; tell the user to clear before re-testing.
+Iterate with screenshots (straight + curve). The architecture is right; this is pure visual tuning.
+
+### #2b — Disconnected blocks should become physical and FALL (NEW, from Lycoris 2026-06-10)
+**Requirement:** if the player builds off the train and breaks the connecting block, any block(s) no longer in contact
+(adjacent OR diagonal) with the train's core should drop out and fall to the ground, like a physics mod.
+**Finding (researched):** **Sable does NOT auto-split on block break.** Its only split (`ClientboundRecentlySplitSubLevelPacket`
+/ `setSplitFrom`) fires at ASSEMBLY time (kick-from-containing), never by connectivity on break. Its `FloatingBlockController`
+is buoyancy (`FloatingBlockMaterial` lift), unrelated. So this must be IMPLEMENTED:
+- Hook block-break/`onBlockChange` in our train BODY sub-levels.
+- Flood-fill connectivity (26-neighbour, incl. diagonals) from a core anchor (e.g. the Bearing Axle, or the largest
+  cluster). Any block NOT reached = disconnected.
+- Eject the disconnected blocks: project to world (`Sable.HELPER.projectOutOfSubLevel(level, localPoint, dst)`),
+  remove from the sub-level, and place them in the world / spawn a `FallingBlockEntity` so they fall. (Simplest first
+  cut = drop as world blocks/items at the projected position.)
+- Don't pin the ejected blocks (they're no longer train cars → they fall freely).
 
 ### #3 — Trains "die" (stop being a Sable train) when you leave & re-enter the world = PERSISTENCE ✅ DONE
 - **CONFIRMED WORKING in-game 2026-06-10** (Loconautics instance): spawn → exit to title → re-enter → log showed
