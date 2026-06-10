@@ -42,8 +42,8 @@ public class TransmissionRenderer extends KineticBlockEntityRenderer<Transmissio
         kineticRotationTransform(inputShaft, be, axis, inputAngle, light);
         inputShaft.renderInto(ms, buffer.getBuffer(RenderType.solid()));
 
-        // Output shaft half — positive direction along axis, spins at redstone-controlled target speed
-        float outputAngle = (time * be.getTargetSpeed() * 3.0f / 10.0f + offset) % 360.0f / 180.0f * (float) Math.PI;
+        // Output shaft half — positive direction along axis, spins at generated (redstone-set) speed
+        float outputAngle = (time * be.getGeneratedSpeed() * 3.0f / 10.0f + offset) % 360.0f / 180.0f * (float) Math.PI;
         Direction outputDir = Direction.fromAxisAndDirection(axis, Direction.AxisDirection.POSITIVE);
         SuperByteBuffer outputShaft = CachedBuffers.partialFacing(
                 (PartialModel) AllPartialModels.SHAFT_HALF, state, outputDir);
