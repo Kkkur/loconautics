@@ -13,6 +13,7 @@ import java.util.UUID;
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.mixin.StationBlockEntityAccessor;
+import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 import com.lycoris.loconautics.registry.LoconauticsRegistries;
 
 import com.simibubi.create.content.contraptions.AssemblyException;
@@ -104,6 +105,7 @@ public final class SableTrainSpawner {
         ensureObserver(level);
         lastTrainId = id;
         SableTrainPersistence.persist(train); // survive restarts
+        SableTrainSyncPacket.broadcast(train); // mark this body sub-level as a train sub-level on clients
         msg(player, String.format("%s cart spawned speed=%.2f — id %s — join carts together with steel cable",
                 physics ? "PHYSICS" : "pinned", speed, id.toString().substring(0, 8)));
         return 1;
@@ -246,6 +248,7 @@ public final class SableTrainSpawner {
             ensureObserver(level);
             lastTrainId = id;
             SableTrainPersistence.persist(train);
+            SableTrainSyncPacket.broadcast(train); // mark this body sub-level as a train sub-level on clients
             assembled.addAll(cluster);
             built++;
         }
@@ -602,6 +605,7 @@ public final class SableTrainSpawner {
             }
             SableTrainRegistry.remove(train.id());
             SableTrainPersistence.unpersist(train.level().getServer(), train.id()); // forget it on disk too
+            SableTrainSyncPacket.broadcastRemoval(train.car().subLevelId()); // drop the client marker
             n++;
         }
         lastTrainId = null;
@@ -659,8 +663,79 @@ public final class SableTrainSpawner {
         }
         best.setDerailed(true);
         SableTrainPersistence.persist(best); // remember the derailed state across restarts
+        SableTrainSyncPacket.broadcast(best); // update the client marker's derail state (gates derailedOnly relocation)
         msg(player, "derailed cart " + best.id().toString().substring(0, 8) + " — released from the rail");
         return 1;
+    }
+
+    /**
+     * Server authority for wrench relocation: re-seats the train sub-level {@code subLevelId} onto the Create
+     * track at {@code pos}. Re-validates everything Create's {@code TrainRelocationPacket.handle} does (feature
+     * enabled, the train still exists, the {@code derailedOnly} gate, player reach, the rail resolves) before
+     * rebuilding the {@link RailCarriage} at the new location and snapping the body onto it. The existing
+     * {@link SableTrainDriver} then re-pins/re-glues the body to the new rail from the next physics tick, so no
+     * post-teleport collision handling (Create's {@code nonDamageTicks}) is needed — there is no contraption entity.
+     */
+    public static void relocate(ServerPlayer player, UUID subLevelId, BlockPos pos, Vec3 lookAngle,
+                                boolean bezierDirection) {
+        if (!Config.WRENCH_RELOCATION_ENABLED.get()) {
+            return;
+        }
+        ServerLevel level = player.serverLevel();
+        SableTrain train = SableTrainRegistry.bySubLevel(subLevelId);
+        if (train == null || train.level() != level) {
+            return;
+        }
+        if (Config.WRENCH_RELOCATION_DERAILED_ONLY.get() && !train.isDerailed()) {
+            return; // config restricts relocation to derailed trains
+        }
+        if (!player.canInteractWithBlock(pos, 24.0)) {
+            return; // anti-cheat: the player must actually be able to reach the target rail
+        }
+
+        BlockState state = level.getBlockState(pos);
+        if (!(state.getBlock() instanceof ITrackBlock track)) {
+            return;
+        }
+        Pair<Vec3, Direction.AxisDirection> axis = track.getNearestTrackAxis(level, pos, state, lookAngle);
+        TrackGraphLocation loc = TrackGraphHelper.getGraphLocationAt(level, pos, axis.getSecond(), axis.getFirst());
+        if (loc == null || loc.graph == null) {
+            return;
+        }
+        Vec3 upNormal = track.getUpNormal(level, pos, state);
+
+        double spacing = train.car().carriage().bogeySpacing();
+        RailCarriage carriage = RailCarriage.at(loc, upNormal, spacing, 0.0);
+        if (carriage == null) {
+            return;
+        }
+        // Rebuild each bogey's reference rail near the new body location (it only feeds the yaw visual).
+        List<SableTrain.Bogey> bogeys = new ArrayList<>();
+        for (SableTrain.Bogey bogey : train.car().bogeys()) {
+            RailCarriage bogeyRail = RailCarriage.at(loc, upNormal, 1.0, 0.0);
+            if (bogeyRail != null) {
+                bogeys.add(new SableTrain.Bogey(bogey.localPos(), bogeyRail));
+            }
+        }
+
+        train.relocate(carriage, bogeys);
+        train.setDerailed(false); // back on the rails (mirrors Create's train.derailed = false on relocate)
+
+        // Snap the body sub-level onto the new rail so the driver's constraint/pin doesn't yank it across the map.
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container != null && container.getSubLevel(subLevelId) instanceof ServerSubLevel sub && !sub.isRemoved()) {
+            Vector3d center = carriage.center();
+            if (center != null) {
+                sub.logicalPose().position().set(center);
+                sub.logicalPose().orientation().set(carriage.orientation());
+                sub.updateLastPose();
+            }
+        }
+
+        SableTrainPersistence.persist(train);
+        SableTrainSyncPacket.broadcast(train); // marker is no longer derailed
+        LoconauticsConstants.LOGGER.info("[sabletrain] relocated train {} (sub-level {}) to {}",
+                train.id(), subLevelId, pos);
     }
 
     /** True if a Create train bogey block sits in the cart's footprint (scanned down to the rail level). */
@@ -731,6 +806,7 @@ public final class SableTrainSpawner {
                     if (removedId.equals(train.car().subLevelId())) {
                         SableTrainRegistry.remove(train.id());
                         SableTrainPersistence.unpersist(train.level().getServer(), train.id());
+                        SableTrainSyncPacket.broadcastRemoval(removedId); // drop the client marker
                     }
                 }
             }

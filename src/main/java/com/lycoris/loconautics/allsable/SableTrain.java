@@ -44,7 +44,8 @@ public final class SableTrain {
 
     private final UUID id;
     private final ServerLevel level;
-    private final Car car;
+    /** The car. Mutable: wrench relocation re-seats the car on a new rail location (see {@link #relocate}). */
+    private Car car;
     /** When true, the cart is a free physics body held to the rail by bogey spring forces (legacy, can derail);
      *  when false, it is held to the rail by the constraint-glued / linear-bearing drive (default). */
     private final boolean physics;
@@ -87,6 +88,18 @@ public final class SableTrain {
 
     public Car car() {
         return car;
+    }
+
+    /**
+     * Re-seats the car on a freshly built {@link RailCarriage} (and its rebuilt bogey reference rails) after a
+     * wrench relocation. The body sub-level id and the local bogey attachment points ({@code localLead}/
+     * {@code localTrail}) are unchanged — only the rail the car rides moves — so a new {@link Car} is built that
+     * keeps those and swaps in the new carriage/bogeys. Clears speed so the moved car starts at rest.
+     */
+    public void relocate(RailCarriage newCarriage, List<Bogey> newBogeys) {
+        this.car = new Car(car.subLevelId(), newCarriage, newBogeys, car.localLead(), car.localTrail());
+        this.speed = 0.0;
+        this.targetSpeed = 0.0;
     }
 
     public double speed() {

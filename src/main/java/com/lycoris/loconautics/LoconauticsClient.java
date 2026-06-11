@@ -1,5 +1,7 @@
 package com.lycoris.loconautics;
 
+import com.lycoris.loconautics.allsable.SableTrainClientRegistry;
+import com.lycoris.loconautics.allsable.SableTrainRelocator;
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.client.LoconauticsSpriteShifts;
 import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
@@ -63,6 +65,7 @@ public final class LoconauticsClient {
         NeoForge.EVENT_BUS.addListener(this::onKeyInput);
         NeoForge.EVENT_BUS.addListener(this::onMouseScroll);
         NeoForge.EVENT_BUS.addListener(this::onClientDisconnect);
+        NeoForge.EVENT_BUS.addListener(this::onUseItem);
     }
 
     private void onClientSetup(FMLClientSetupEvent event) {
@@ -116,6 +119,12 @@ public final class LoconauticsClient {
 
     private void onClientTick(ClientTickEvent.Pre event) {
         AnalogControllerClientHandler.tick();
+        SableTrainRelocator.clientTick();
+    }
+
+    /** Use-item key: starts/confirms/aborts a Sable train-sub-level wrench relocation (see {@link SableTrainRelocator}). */
+    private void onUseItem(InputEvent.InteractionKeyMappingTriggered event) {
+        SableTrainRelocator.onInteract(event);
     }
 
     private void onKeyInput(InputEvent.Key event) {
@@ -138,5 +147,6 @@ public final class LoconauticsClient {
 
     private void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         SteelCableTracker.clearClient();
+        SableTrainClientRegistry.clear();
     }
 }

@@ -14,10 +14,34 @@ public final class Config {
             .comment("Master switch for assembling trains as physical Sable sub-levels.")
             .define("enableSableMode", true);
 
-    /** Optional cap on physics-train speed (blocks/tick). 0 = use Create's normal limits. */
-    public static final ModConfigSpec.DoubleValue PHYSICS_TRAIN_MAX_SPEED = BUILDER
-            .comment("Max speed (blocks/tick) for physics trains. 0 = use Create's default limits.")
-            .defineInRange("physicsTrainMaxSpeed", 0.0, 0.0, 100.0);
+    // -------------------------------------------------------------------------
+    // Train
+    // -------------------------------------------------------------------------
+
+    /** Hard cap (m/s) on the speed the Bearing Axle will drive an attached train to. -1 = defer to Create's
+     *  train top speed; any other value overrides Create's limit for bearing-axle movement. */
+    public static final ModConfigSpec.DoubleValue BEARING_AXLE_MAX_SPEED;
+    /** Absolute cap (m/s) on a train sub-level's speed from ANY source (thrusters, propellers, physics wand,
+     *  collisions, gravity on slopes, …). -1 = defer to Create's train top speed; any other value is the hard cap. */
+    public static final ModConfigSpec.DoubleValue TRAIN_MAX_SPEED;
+
+    static {
+        BUILDER.push("train");
+
+        BEARING_AXLE_MAX_SPEED = BUILDER
+                .comment("Maximum speed (m/s) the Bearing Axle will drive an attached train to.",
+                        "-1 defers to Create's train top speed (trainTopSpeed).",
+                        "Any other value overrides Create's limit and becomes the hard cap for bearing-axle movement.")
+                .defineInRange("bearingAxleMaxSpeed", -1.0, -1.0, 1000.0);
+
+        TRAIN_MAX_SPEED = BUILDER
+                .comment("Absolute maximum speed (m/s) a train sub-level may travel, regardless of what pushes it",
+                        "(thrusters, propellers, physics wand, collisions, gravity on slopes, anything).",
+                        "-1 defers to Create's train top speed (trainTopSpeed). Any other value is the hard cap.")
+                .defineInRange("trainMaxSpeed", -1.0, -1.0, 1000.0);
+
+        BUILDER.pop();
+    }
 
     // -------------------------------------------------------------------------
     // Bearing Axle
@@ -91,6 +115,30 @@ public final class Config {
                         "Set to -1 (default) to automatically use 2x Simulated's current maxRopeRange.",
                         "Set to any positive value to override the range directly.")
                 .defineInRange("maxRange", -1.0, -1.0, 10000.0);
+
+        BUILDER.pop();
+    }
+
+    // ------------------------------------------------------------------ Wrench Relocation
+
+    /** Master switch: when false, the Create wrench never relocates a Sable train sub-level (the feature is off). */
+    public static final ModConfigSpec.BooleanValue WRENCH_RELOCATION_ENABLED;
+    /** When true, only derailed train sub-levels can be wrench-relocated; when false, any train sub-level can. */
+    public static final ModConfigSpec.BooleanValue WRENCH_RELOCATION_DERAILED_ONLY;
+
+    static {
+        BUILDER.push("wrench_relocation");
+
+        WRENCH_RELOCATION_ENABLED = BUILDER
+                .comment("Master switch for relocating Sable train sub-levels with the Create wrench.",
+                        "Mirrors Create's own derailed-train relocation, but targets Sable train sub-levels.",
+                        "When false the feature is completely disabled (the wrench does nothing to train sub-levels).")
+                .define("enabled", true);
+
+        WRENCH_RELOCATION_DERAILED_ONLY = BUILDER
+                .comment("When true, only DERAILED train sub-levels may be relocated (matches Create's vanilla behaviour).",
+                        "When false, ANY train sub-level may be relocated regardless of its derail state.")
+                .define("derailedOnly", true);
 
         BUILDER.pop();
     }

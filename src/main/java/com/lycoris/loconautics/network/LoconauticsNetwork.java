@@ -2,6 +2,8 @@ package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
 import com.lycoris.loconautics.network.packets.AssembleSableTrainPacket;
+import com.lycoris.loconautics.network.packets.SableTrainRelocatePacket;
+import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
@@ -69,6 +71,20 @@ public final class LoconauticsNetwork {
                 AssembleSableTrainPacket.TYPE,
                 AssembleSableTrainPacket.STREAM_CODEC,
                 AssembleSableTrainPacket::handle
+        );
+
+        // Server -> Client: marks (or unmarks) a Sable sub-level as a relocatable train sub-level.
+        registrar.playToClient(
+                SableTrainSyncPacket.TYPE,
+                SableTrainSyncPacket.STREAM_CODEC,
+                SableTrainSyncPacket::handle
+        );
+
+        // Client -> Server: wrench-relocate a Sable train sub-level onto a new rail location.
+        registrar.playToServer(
+                SableTrainRelocatePacket.TYPE,
+                SableTrainRelocatePacket.STREAM_CODEC,
+                SableTrainRelocatePacket::handle
         );
     }
 

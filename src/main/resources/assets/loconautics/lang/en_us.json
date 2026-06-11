@@ -30,7 +30,11 @@
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Config",
   "loconautics.configuration.enableSableMode": "Enable Sable Physics Mode",
-  "loconautics.configuration.physicsTrainMaxSpeed": "Physics Train Max Speed",
+
+  "loconautics.configuration.train.bearingAxleMaxSpeed": "Bearing Axle Max Speed (m/s)",
+  "loconautics.configuration.train.bearingAxleMaxSpeed.tooltip": "Max speed the Bearing Axle drives a train to. -1 = use Create's train top speed.",
+  "loconautics.configuration.train.trainMaxSpeed": "Train Max Speed (m/s)",
+  "loconautics.configuration.train.trainMaxSpeed.tooltip": "Absolute speed cap for a train sub-level from any source. -1 = use Create's train top speed.",
 
   "loconautics.configuration.bearing_axle.massDivisor": "Mass Divisor",
   "loconautics.configuration.bearing_axle.massDivisor.tooltip": "Divides total train mass (kpg) to get stress impact per RPM. Lower = more stress per kg.",

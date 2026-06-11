@@ -11,10 +11,12 @@ import com.lycoris.loconautics.allsable.SableTrain.Car;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlockEntity;
 // (AbstractBogeyBlock is used both for the yaw visual target and to detect when a car has lost all its wheels.)
+import com.simibubi.create.infrastructure.config.AllConfigs;
 
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
@@ -34,9 +36,11 @@ import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
@@ -84,6 +88,9 @@ public final class SableTrainDriver {
     /** Pre-step: drive each non-legacy car; legacy cars get springs. */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
         forEachCar(system, (pipeline, container, sub, train, car) -> {
+            // Global speed cap FIRST, so it applies no matter what is pushing the car — the bearing-axle drive,
+            // thrusters, a physics wand, collisions, gravity on a slope, anything — and regardless of drive mode.
+            capTrainSpeed(sub);
             // Derailed cars (e.g. all wheels destroyed) are released from the rail and left as a free physics
             // body — no constraint, no spring, no pin. Detection happens once per game tick in checkDerailment().
             if (train.isDerailed()) {
@@ -379,6 +386,15 @@ public final class SableTrainDriver {
     private static int diagCounter = 0;
     private static int massCounter = 0;
 
+    /** Full-syncs every active train sub-level's relocation marker to a player when they join (so the wrench
+     *  flow recognises trains that were assembled before they connected). */
+    @SubscribeEvent
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedIn event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            SableTrainSyncPacket.syncAllTo(player);
+        }
+    }
+
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         if (SableTrainRegistry.isEmpty()) {
@@ -600,15 +616,55 @@ public final class SableTrainDriver {
             return;
         }
         train.setPowered(true);
-        double maxSpeed = maxSpeedBpt();
+        double maxSpeed = bearingAxleCapBpt();
         double target = (axle.getSpeed() / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
         train.setTargetSpeed(target);
     }
 
-    private static double maxSpeedBpt() {
-        double cfg = Config.PHYSICS_TRAIN_MAX_SPEED.get();
-        return cfg > 0.0 ? cfg : 1.0;
+    /** Create's configured train top speed (m/s) — the value both Loconautics caps defer to when set to -1. */
+    private static double createTopSpeedMps() {
+        return AllConfigs.server().trains.trainTopSpeed.get();
+    }
+
+    /** Bearing-axle speed cap in m/s: the configured value, or Create's train top speed when -1. */
+    private static double bearingAxleCapMps() {
+        double cfg = Config.BEARING_AXLE_MAX_SPEED.get();
+        return cfg < 0.0 ? createTopSpeedMps() : cfg;
+    }
+
+    /** Bearing-axle speed cap in blocks/tick (the unit the drive target uses). 1 m/s = 1 block / 20 ticks. */
+    private static double bearingAxleCapBpt() {
+        return bearingAxleCapMps() / 20.0;
+    }
+
+    /** Global train speed cap in m/s (matches Sable's velocity units): the configured value, or Create's when -1. */
+    private static double trainSpeedCapMps() {
+        double cfg = Config.TRAIN_MAX_SPEED.get();
+        return cfg < 0.0 ? createTopSpeedMps() : cfg;
+    }
+
+    /**
+     * Hard-limits a sub-level's linear speed to the global train cap ({@link #trainSpeedCapMps}). Sable reports
+     * velocity in m/s, so we compare directly and, if over the cap, add a velocity delta that scales it straight
+     * back down to the cap (direction preserved, angular velocity untouched). Runs every physics substep for every
+     * car, so the cap holds against any source of motion.
+     */
+    private static void capTrainSpeed(ServerSubLevel sub) {
+        double capMps = trainSpeedCapMps();
+        if (capMps < 0.0) {
+            return; // negative cap = disabled (resolvers never return this, but stay safe)
+        }
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        Vector3d velocity = handle.getLinearVelocity(new Vector3d());
+        double speed = velocity.length();
+        if (speed > capMps && speed > 1.0e-6) {
+            Vector3d delta = new Vector3d(velocity).mul(capMps / speed - 1.0);
+            handle.addLinearAndAngularVelocity(delta, new Vector3d());
+        }
     }
 
     static BearingAxleBlockEntity findBearingAxle(SableTrain train, ServerSubLevelContainer container) {

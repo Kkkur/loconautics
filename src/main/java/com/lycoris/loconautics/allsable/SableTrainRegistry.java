@@ -44,4 +44,17 @@ public final class SableTrainRegistry {
     public static Collection<SableTrain> all() {
         return new ArrayList<>(TRAINS.values());
     }
+
+    /** The train whose body sub-level has this UUID, or {@code null} if none — the wrench-relocation lookup. */
+    public static SableTrain bySubLevel(UUID subLevelId) {
+        if (subLevelId == null) {
+            return null;
+        }
+        for (SableTrain train : TRAINS.values()) {
+            if (subLevelId.equals(train.car().subLevelId())) {
+                return train;
+            }
+        }
+        return null;
+    }
 }
