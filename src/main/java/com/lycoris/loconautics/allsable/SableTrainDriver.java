@@ -153,6 +153,7 @@ public final class SableTrainDriver {
         Vector3d anchorWorld = bodySub.logicalPose().transformPosition(localAnchor, new Vector3d());
         double slide = anchorWorld.sub(railPoint, new Vector3d()).dot(tangent);
         advanceRail(car, slide);
+        animateBogeyWheels(car, bodySub, slide);
 
         railPoint = carriage.center();
         if (railPoint == null) {
@@ -351,6 +352,34 @@ public final class SableTrainDriver {
         }
     }
 
+    /**
+     * Drives wheel-rotation animation on every bogey in the car for this substep.
+     *
+     * <p>Delegates to {@link AbstractBogeyBlockEntity#animate(float)}, which converts the arc-length
+     * {@code ds} into degrees using each bogey block's own {@link AbstractBogeyBlock#getWheelRadius()},
+     * accumulates the result into its {@code virtualAnimation} {@code LerpedFloat}, and marks the BE
+     * changed so the new angle is sent to clients. On the client, {@link
+     * com.simibubi.create.content.trains.bogey.BogeyBlockEntityVisual} picks up the interpolated angle
+     * via {@code getVirtualAngle(partialTick)} and passes it straight to the style's {@link
+     * com.simibubi.create.content.trains.bogey.BogeyVisual#update} — so every registered bogey style
+     * (standard small/large, mod-added styles) spins its wheels correctly with no extra code here.
+     *
+     * @param car the car whose bogey BEs should be animated
+     * @param sub the server sub-level that owns the car's body blocks
+     * @param ds  arc-length moved this substep (blocks, may be negative when reversing)
+     */
+    private static void animateBogeyWheels(Car car, ServerSubLevel sub, double ds) {
+        if (ds == 0.0) return;
+        float distanceMoved = (float) Math.abs(ds);
+        ServerLevel subLevel = sub.getLevel();
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            BlockPos worldPos = sub.getPlot().getCenterBlock().offset(bogey.localPos());
+            if (subLevel.getBlockEntity(worldPos) instanceof AbstractBogeyBlockEntity be) {
+                be.animate(distanceMoved);
+            }
+        }
+    }
+
     /** Pins the body sub-level to its rail pose (kinematic-pin fallback path). */
     private static void pinCar(PhysicsPipeline pipeline, ServerSubLevel bodySub, Car car, boolean post) {
         Vector3d bodyCenter = new Vector3d();
@@ -497,6 +526,7 @@ public final class SableTrainDriver {
                 tickStation(train, operatedControllerIn(train));
                 train.tickMotion();
                 updateBogeyYaw(train);
+                updateBogeyWheels(train);
                 if (updateMass) {
                     updateAxleMass(train);
                 }
@@ -580,6 +610,36 @@ public final class SableTrainDriver {
                 BogeyYawVisual.setLocalYaw(be, yawDeg);
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Bogey wheel animation: drive virtualAnimation on each bogey BE (kinematic-pin path).
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Called once per game tick for kinematic-pin trains (cars without captured bogey attachment
+     * points). For the constraint-glued path, {@link #animateBogeyWheels} is called from inside
+     * {@link #driveConstraintGlued} each physics substep instead, where the actual slide distance
+     * ({@code ds}) is measured directly from the body's motion.
+     *
+     * <p>This method uses {@code train.speed()} (blocks/tick) as a proxy, which is accurate enough
+     * for the pin path since it is also what {@link SableTrain#tickMotion()} advances the rail by.
+     */
+    private static void updateBogeyWheels(SableTrain train) {
+        // Constraint-glued cars are animated per substep in driveConstraintGlued; skip them here.
+        Car car = train.car();
+        if (useForceGlue(car)) return;
+
+        double ds = train.speed();
+        if (ds == 0.0) return;
+
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        if (container == null) return;
+        if (car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub)
+                || sub.isRemoved()) return;
+
+        animateBogeyWheels(car, sub, ds);
     }
 
     // ---------------------------------------------------------------------------------------------
