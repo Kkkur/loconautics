@@ -303,6 +303,12 @@ public final class SableTrainDriver {
         if (handle == null) {
             return;
         }
+        // REALISTIC over-cap: the consist is too heavy for the axle (and its gear) to pull, so the axle produces no
+        // tractive effort. We apply NO impulse here — the prismatic constraint still holds the car to the rail and
+        // Sable's gravity still acts, so the train can roll/coast downhill but cannot be driven (intended).
+        if (train.isOverloaded()) {
+            return;
+        }
         MassData md = sub.getMassTracker();
         double locoMass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
         // The WHOLE hauled consist's weight governs how briskly the train can change speed; the impulse itself is
