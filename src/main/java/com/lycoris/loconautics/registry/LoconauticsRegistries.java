@@ -13,6 +13,10 @@ import com.lycoris.loconautics.content.transmission.TransmissionBlock;
 import com.lycoris.loconautics.content.transmission.TransmissionBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
@@ -21,6 +25,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
@@ -69,15 +74,12 @@ public final class LoconauticsRegistries {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AnalogControllerBlockEntity>>
             ANALOG_CONTROLLER_BE = BLOCK_ENTITIES.register("analog_controller", () ->
             BlockEntityType.Builder
-                    .of((pos, state) -> new AnalogControllerBlockEntity(
-                                    LoconauticsRegistries.ANALOG_CONTROLLER_BE.get(), pos, state),
-                            ANALOG_CONTROLLER.get())
+                    .of(LoconauticsRegistries::createAnalogControllerBE, ANALOG_CONTROLLER.get())
                     .build(null));
 
     public static final DeferredHolder<MenuType<?>, MenuType<AnalogControllerMenu>>
             ANALOG_CONTROLLER_MENU = MENUS.register("analog_controller", () ->
-            IMenuTypeExtension.create((id, inv, buf) ->
-                    new AnalogControllerMenu(LoconauticsRegistries.ANALOG_CONTROLLER_MENU.get(), id, inv, buf)));
+            IMenuTypeExtension.create(LoconauticsRegistries::createAnalogControllerMenu));
 
     // ------------------------------------------------------------------ Bearing Axle
 
@@ -97,9 +99,7 @@ public final class LoconauticsRegistries {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<BearingAxleBlockEntity>>
             BEARING_AXLE_BE = BLOCK_ENTITIES.register("bearing_axle", () ->
             BlockEntityType.Builder
-                    .of((pos, state) -> new BearingAxleBlockEntity(
-                                    LoconauticsRegistries.BEARING_AXLE_BE.get(), pos, state),
-                            BEARING_AXLE.get())
+                    .of(LoconauticsRegistries::createBearingAxleBE, BEARING_AXLE.get())
                     .build(null));
 
     // ------------------------------------------------------------------ Knuckle
@@ -136,15 +136,12 @@ public final class LoconauticsRegistries {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<TransmissionBlockEntity>>
             TRANSMISSION_BE = BLOCK_ENTITIES.register("transmission", () ->
             BlockEntityType.Builder
-                    .of((pos, state) -> new TransmissionBlockEntity(
-                                    LoconauticsRegistries.TRANSMISSION_BE.get(), pos, state),
-                            TRANSMISSION.get())
+                    .of(LoconauticsRegistries::createTransmissionBE, TRANSMISSION.get())
                     .build(null));
 
     public static final DeferredHolder<MenuType<?>, MenuType<TransmissionMenu>>
             TRANSMISSION_MENU = MENUS.register("transmission", () ->
-            IMenuTypeExtension.create((id, inv, buf) ->
-                    new TransmissionMenu(LoconauticsRegistries.TRANSMISSION_MENU.get(), id, inv, buf)));
+            IMenuTypeExtension.create(LoconauticsRegistries::createTransmissionMenu));
 
     // ------------------------------------------------------------------ Steel Cable
 
@@ -181,7 +178,7 @@ public final class LoconauticsRegistries {
 
     // ------------------------------------------------------------------ Creative tab
 
-    public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab>
             LOCONAUTICS_TAB = CREATIVE_TABS.register("main", () ->
             net.minecraft.world.item.CreativeModeTab.builder()
                     .title(net.minecraft.network.chat.Component.translatable("itemGroup.loconautics.main"))
@@ -200,6 +197,46 @@ public final class LoconauticsRegistries {
                         output.accept(com.lycoris.loconautics.content.boiler.BoilerBlocks.BOILER_CONTROLLER_ITEM.get());
                     })
                     .build());
+
+    // ------------------------------------------------------------------ factories
+
+    static AnalogControllerBlockEntity createAnalogControllerBE(BlockPos pos, BlockState state) {
+        return new AnalogControllerBlockEntity(ANALOG_CONTROLLER_BE.get(), pos, state);
+    }
+
+    static AnalogControllerMenu createAnalogControllerMenu(
+            int id,
+            Inventory inv,
+            RegistryFriendlyByteBuf buf
+    ) {
+        return new AnalogControllerMenu(
+                ANALOG_CONTROLLER_MENU.get(),
+                id,
+                inv,
+                buf
+        );
+    }
+
+    static BearingAxleBlockEntity createBearingAxleBE(BlockPos pos, BlockState state) {
+        return new BearingAxleBlockEntity(BEARING_AXLE_BE.get(), pos, state);
+    }
+
+    static TransmissionBlockEntity createTransmissionBE(BlockPos pos, BlockState state) {
+        return new TransmissionBlockEntity(TRANSMISSION_BE.get(), pos, state);
+    }
+
+    static TransmissionMenu createTransmissionMenu(
+            int id,
+            Inventory inv,
+            RegistryFriendlyByteBuf buf
+    ) {
+        return new TransmissionMenu(
+                TRANSMISSION_MENU.get(),
+                id,
+                inv,
+                buf
+        );
+    }
 
     // ------------------------------------------------------------------ constructor / register
 

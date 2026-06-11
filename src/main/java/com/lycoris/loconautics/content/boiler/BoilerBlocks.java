@@ -14,6 +14,12 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
+/**
+ * Deferred registrations for the steam boiler multiblock.
+ *
+ * <p>Call {@link #register(IEventBus)} once from the mod constructor alongside
+ * the other registries.
+ */
 public final class BoilerBlocks {
 
     public static final DeferredRegister.Blocks BLOCKS =
