@@ -33,8 +33,8 @@ import net.minecraft.network.chat.Component;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.physics.constraint.ConstraintJointAxis;
-import dev.ryanhcode.sable.api.physics.constraint.PhysicsConstraintHandle;
 import dev.ryanhcode.sable.api.physics.constraint.generic.GenericConstraintConfiguration;
+import dev.ryanhcode.sable.api.physics.constraint.generic.GenericConstraintHandle;
 import dev.ryanhcode.sable.api.physics.force.ForceTotal;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
@@ -90,8 +90,9 @@ public final class SableTrainDriver {
     private static final double DRIVE_K = 6.0;
     private static final double MAX_DRIVE_ACCEL = 20.0;
 
-    /** Live constraints, keyed by the body sub-level UUID they glue to the rail. */
-    private static final java.util.Map<UUID, PhysicsConstraintHandle> CONSTRAINTS = new java.util.HashMap<>();
+    /** Live constraints, keyed by the body sub-level UUID they glue to the rail. Reused across substeps (frames
+     *  updated in place) — never rebuilt per tick — so Sable's solver keeps its warm-start state. */
+    private static final java.util.Map<UUID, GenericConstraintHandle> CONSTRAINTS = new java.util.HashMap<>();
 
     /** Debug escape hatch: force the legacy kinematic teleport-pin instead of the constraint-glued drive. */
     private static final boolean USE_KINEMATIC_PIN = false;
@@ -101,7 +102,12 @@ public final class SableTrainDriver {
 
     /** Pre-step: drive each non-legacy car; legacy cars get springs. */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
+        substepSeq++;
         forEachCar(system, (pipeline, container, sub, train, car) -> {
+            // Velocity BEFORE Sable's collision/constraint solve this substep (pairs with the POST log below).
+            if (Config.BOUNCE_DEBUG.get()) {
+                logBounceVel("PRE ", sub, train, car);
+            }
             // Global speed cap FIRST, so it applies no matter what is pushing the car — the bearing-axle drive,
             // thrusters, a physics wand, collisions, gravity on a slope, anything — and regardless of drive mode.
             capTrainSpeed(sub);
@@ -127,11 +133,66 @@ public final class SableTrainDriver {
     /** Post-step: only the kinematic-pin fallback needs a re-pin. */
     public static void onPostPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
         forEachCar(system, (pipeline, container, sub, train, car) -> {
-            if (train.isDerailed() || train.isPhysics() || useForceGlue(car)) {
+            // Velocity AFTER Sable's solve. KE_post > KE_pre on a bounce substep = energy was ADDED, not conserved.
+            if (Config.BOUNCE_DEBUG.get()) {
+                logBounceVel("POST", sub, train, car);
+            }
+            if (train.isDerailed() || train.isPhysics()) {
+                return;
+            }
+            if (useForceGlue(car)) {
+                // Remove any velocity the solve added OFF the rail line. A rail-glued body may only move along its
+                // tangent — the prismatic joint forbids perpendicular translation and all rotation. When the body
+                // is rammed into an obstacle, Sable's contact solver can leave large perpendicular/vertical (and
+                // angular) velocity, which the magnitude-only speed cap merely rescales — preserving its direction
+                // and sustaining the bounce. Projecting the velocity back onto the tangent (and zeroing spin)
+                // dissipates that energy instead of recycling it.
+                projectVelocityOntoRail(sub, car);
                 return;
             }
             pinCar(pipeline, sub, car, true);
         });
+    }
+
+    /**
+     * Constrains a rail-glued body's velocity to what the prismatic joint actually allows: motion only along the
+     * rail tangent, no spin. Keeps the along-rail component (so the train still moves and gravity still pulls it
+     * down a grade) clamped to the global speed cap, and removes the perpendicular/vertical and angular components
+     * that a collision can inject. This is what stops injected energy from being recycled into a sustained bounce.
+     */
+    private static void projectVelocityOntoRail(ServerSubLevel sub, Car car) {
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        Vector3d tangent = railTangent(car);
+        Vector3d vel = handle.getLinearVelocity(new Vector3d());
+        double vTan = vel.dot(tangent);
+        double capMps = trainSpeedCapMps();
+        if (capMps >= 0.0) {
+            vTan = Math.max(-capMps, Math.min(capMps, vTan));
+        }
+        Vector3d desired = new Vector3d(tangent).mul(vTan);
+        Vector3d deltaLinear = desired.sub(vel, new Vector3d());
+        Vector3d angVel = handle.getAngularVelocity(new Vector3d());
+        handle.addLinearAndAngularVelocity(deltaLinear, angVel.negate());
+    }
+
+    /** Unit rail tangent for a car: the chord between its front and rear bogey rail points (matching the pose the
+     *  prismatic joint is built on), falling back to the body carriage's own tangent. */
+    private static Vector3d railTangent(Car car) {
+        var bogeys = car.bogeys();
+        if (bogeys.size() >= 2) {
+            Vector3d rear = bogeys.get(0).rail().center();
+            Vector3d front = bogeys.get(bogeys.size() - 1).rail().center();
+            if (rear != null && front != null) {
+                Vector3d chord = new Vector3d(front).sub(rear);
+                if (chord.lengthSquared() > 1.0e-9) {
+                    return chord.normalize();
+                }
+            }
+        }
+        return forwardUnit(car.carriage());
     }
 
     private static boolean useForceGlue(Car car) {
@@ -194,24 +255,44 @@ public final class SableTrainDriver {
 
         RigidBodyHandle bodyHandle = RigidBodyHandle.of(bodySub);
         if (bodyHandle != null) {
-            train.setSpeed(bodyHandle.getLinearVelocity(new Vector3d()).dot(tangent) / 20.0);
+            double bodyVelBpt = bodyHandle.getLinearVelocity(new Vector3d()).dot(tangent) / 20.0;
+            train.setSpeed(bodyVelBpt);
+            // #3: does the rail advancement (slide) agree with the physics velocity? A persistent gap after a
+            // collision means the rail follower and the body have desynced.
+            if (Config.BOUNCE_DEBUG.get()) {
+                LoconauticsConstants.LOGGER.info(
+                        "[bounce] seq={} car={} slide={} speed={} bodyVelBpt={} slide-vel={}",
+                        substepSeq, train.id(), f(slide), f(train.speed()), f(bodyVelBpt), f(slide - bodyVelBpt));
+            }
         }
     }
 
     private static void glueBodyPrismatic(PhysicsPipeline pipeline, ServerSubLevel sub, Vector3dc localAnchor,
                                           Vector3d railPoint, Vector3d tangent, Quaterniond q) {
         UUID id = sub.getUniqueId();
-        releaseConstraint(id);
         Vector3d up = perpendicularUp(tangent);
         Vector3d lateral = new Vector3d(tangent).cross(up).normalize();
         Quaterniond frame1 = basisQuaternion(tangent, up, lateral);
         Quaterniond frame2 = new Quaterniond(q).invert().mul(frame1);
+
+        // Reuse the existing joint and just MOVE its frames to the new rail pose. Tearing the constraint down and
+        // re-adding it every substep (the old behaviour) discarded the solver's accumulated impulse / warm-start
+        // state, so a body in contact with an obstacle and a freshly-rebuilt rail joint over-corrected against each
+        // other and pumped kinetic energy into the body each step — the runaway "bounce". Updating in place keeps
+        // the solve stable; we only build a fresh joint when there isn't a valid one yet.
+        GenericConstraintHandle existing = CONSTRAINTS.get(id);
+        if (existing != null && existing.isValid()) {
+            existing.setFrame1(new Vector3d(railPoint), frame1);
+            existing.setFrame2(new Vector3d(localAnchor), frame2);
+            return;
+        }
+        releaseConstraint(id);
         java.util.Set<ConstraintJointAxis> locked = java.util.EnumSet.of(
                 ConstraintJointAxis.LINEAR_Y, ConstraintJointAxis.LINEAR_Z,
                 ConstraintJointAxis.ANGULAR_X, ConstraintJointAxis.ANGULAR_Y, ConstraintJointAxis.ANGULAR_Z);
         GenericConstraintConfiguration config = new GenericConstraintConfiguration(
                 new Vector3d(railPoint), new Vector3d(localAnchor), frame1, frame2, locked);
-        PhysicsConstraintHandle handle = pipeline.addConstraint(null, sub, config);
+        GenericConstraintHandle handle = pipeline.addConstraint(null, sub, config);
         if (handle != null) {
             CONSTRAINTS.put(id, handle);
         }
@@ -333,7 +414,7 @@ public final class SableTrainDriver {
 
     /** Removes (if present) the prismatic constraint gluing this body sub-level to the rail. Idempotent. */
     private static void releaseConstraint(UUID id) {
-        PhysicsConstraintHandle handle = CONSTRAINTS.remove(id);
+        GenericConstraintHandle handle = CONSTRAINTS.remove(id);
         if (handle != null) {
             handle.remove();
         }
@@ -370,6 +451,12 @@ public final class SableTrainDriver {
     private static final double MAX_FOLLOW_CORRECTION = 0.5;
 
     private static void advanceRail(Car car, double ds) {
+        // Unstick the body carriage before each advance (like the bogey followers below). Once it parks at a dead
+        // end it sets stopped=true and, without this, would stay frozen forever — so a consist driven INTO the end
+        // could never be reversed back out, and the rail point stayed pinned at the end while propulsion kept
+        // ramming the body into it. Re-trying each substep lets it leave when driven away; a true dead end simply
+        // re-blocks (stays put) when driven further into it, so the dead-end derail check still works.
+        car.carriage().unstick();
         car.carriage().setSpeed(ds);
         car.carriage().tick();
 
@@ -569,6 +656,8 @@ public final class SableTrainDriver {
 
     private static int diagCounter = 0;
     private static int massCounter = 0;
+    /** Monotonic physics-substep counter, so [bounce] substep logs correlate with each other (and with ticks). */
+    private static long substepSeq = 0;
 
     /** Last speed broadcast to clients per train, so the marker only re-syncs when the speed actually moves. */
     private static final java.util.Map<UUID, Double> SYNCED_SPEED = new java.util.HashMap<>();
@@ -609,6 +698,15 @@ public final class SableTrainDriver {
                 }
             } catch (Throwable t) {
                 LoconauticsConstants.LOGGER.error("[sabletrain] error ticking motion for {}", train.id(), t);
+            }
+        }
+        // #2: per-tick rope coupling state, once per distinct level (the manager is per-level, not per-train).
+        if (Config.BOUNCE_DEBUG.get()) {
+            java.util.Set<ServerLevel> levels = new java.util.HashSet<>();
+            for (SableTrain train : SableTrainRegistry.all()) {
+                if (levels.add(train.level())) {
+                    logCouplingState(train.level());
+                }
             }
         }
     }
@@ -921,6 +1019,12 @@ public final class SableTrainDriver {
             return;
         }
         double total = TrainConsist.totalMass(train.level(), sub.getUniqueId());
+        // #5: every-10-tick refresh. Compare the freshly-summed consist mass with the value the physics tick has
+        // been driving with (cachedHaul) to spot a stale mass during the bounce window.
+        if (Config.BOUNCE_DEBUG.get()) {
+            LoconauticsConstants.LOGGER.info("[bounce] mass car={} consistTotal={} cachedHaul={} axleMass={}",
+                    train.id(), f(total), f(train.haulMass()), f(axle.getTrainMass()));
+        }
         train.setHaulMass(total); // cache for the physics-tick drive (weight-scaled accel/braking)
         if (total != axle.getTrainMass()) {
             axle.setTrainMass(total);
@@ -959,6 +1063,49 @@ public final class SableTrainDriver {
 
     private static String f(double d) {
         return String.format("%.2f", d);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Bounce diagnostics (gated behind Config.BOUNCE_DEBUG). All lines carry the [bounce] tag.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * #1: logs one car's velocity along its rail tangent and its kinetic energy (½·m·|v|²), tagged with the current
+     * substep and {@code phase}. Logging the same car at PRE (before Sable's solve) and POST (after) brackets the
+     * collision/constraint solve, so a {@code KE} that rises across the step proves energy is being added.
+     */
+    private static void logBounceVel(String phase, ServerSubLevel sub, SableTrain train, Car car) {
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        Vector3d v = handle.getLinearVelocity(new Vector3d());
+        MassData md = sub.getMassTracker();
+        double m = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
+        double vTan = v.dot(forwardUnit(car.carriage()));
+        double ke = 0.5 * m * v.lengthSquared();
+        LoconauticsConstants.LOGGER.info("[bounce] seq={} {} car={} vTan={} |v|={} KE={} m={}",
+                substepSeq, phase, train.id(), f(vTan), f(v.length()), f(ke), f(m));
+    }
+
+    /**
+     * #2: logs every rope strand's current vs rest extension (the closest available signal to coupling "stretch").
+     * NOTE: the steel-cable coupling is, at the Sable level, a bidirectional velocity-damped joint with no length
+     * stop (see {@code ServerRopeStrand.reattachConstraints} — linear motors, stiffness 0, no force limit), NOT a
+     * tension-only rope. So there is no taut/slack switching to observe; this stretch value is informational.
+     */
+    private static void logCouplingState(ServerLevel level) {
+        var manager = dev.simulated_team.simulated.content.blocks.rope.strand.server.ServerLevelRopeManager
+                .getOrCreate(level);
+        if (manager == null) {
+            return;
+        }
+        for (var strand : manager.getAllStrands()) {
+            double cur = strand.getCurrentExtension();
+            double goal = strand.getExtension();
+            LoconauticsConstants.LOGGER.info("[bounce] rope cur={} goal={} stretch={}",
+                    f(cur), f(goal), f(cur - goal));
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1327,6 +1474,12 @@ public final class SableTrainDriver {
         Vector3d velocity = handle.getLinearVelocity(new Vector3d());
         double speed = velocity.length();
         if (speed > capMps && speed > 1.0e-6) {
+            // #4: the cap only ever rescales magnitude DOWN to the global cap (mass-independent) — it never removes
+            // a collision's energy. Repeated firings during a bounce mean it is sustaining, not damping, the loop.
+            if (Config.BOUNCE_DEBUG.get()) {
+                LoconauticsConstants.LOGGER.info("[bounce] seq={} CAP fired speed={} -> cap={} dir=({}, {}, {})",
+                        substepSeq, f(speed), f(capMps), f(velocity.x), f(velocity.y), f(velocity.z));
+            }
             Vector3d delta = new Vector3d(velocity).mul(capMps / speed - 1.0);
             handle.addLinearAndAngularVelocity(delta, new Vector3d());
         }
