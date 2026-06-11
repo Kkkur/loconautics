@@ -532,6 +532,18 @@ public final class SableTrainDriver {
                 LoconauticsConstants.LOGGER.info(
                         "[sabletrain] car {} derailed: {} m/s on a ~{} m radius curve (safe ~{} m/s)",
                         train.id(), f(cv[0]), f(cv[2]), f(cv[1]));
+                return;
+            }
+        }
+        // Off the end of the track: the carriage's rail point hit a dead end (no further track) — if it arrived
+        // at speed (with no buffer to stop it), it flies off the rail instead of parking.
+        if (Config.DERAIL_AT_TRACK_END.get() && car.carriage().stopped()) {
+            double speed = Math.abs(train.speed()) * 20.0; // blocks/tick -> m/s
+            if (speed > Config.DERAIL_END_MIN_SPEED.get()) {
+                train.setDerailed(true);
+                LoconauticsConstants.LOGGER.info(
+                        "[sabletrain] car {} ran off the end of the track at {} m/s (no buffer) — derailed",
+                        train.id(), f(speed));
             }
         }
     }

@@ -151,6 +151,10 @@ public final class Config {
     public static final ModConfigSpec.DoubleValue DERAIL_CURVE_FRICTION;
     /** Forgiveness multiplier on the safe curve speed before a derail actually triggers. */
     public static final ModConfigSpec.DoubleValue DERAIL_SPEED_MARGIN;
+    /** Whether a train derails when it runs off the end of a track (with no buffer) above a speed. */
+    public static final ModConfigSpec.BooleanValue DERAIL_AT_TRACK_END;
+    /** Minimum speed (m/s) at which hitting the end of a track derails instead of just parking. */
+    public static final ModConfigSpec.DoubleValue DERAIL_END_MIN_SPEED;
 
     static {
         BUILDER.push("derailment");
@@ -170,6 +174,16 @@ public final class Config {
                 .comment("Multiplier on the safe curve speed before a derail triggers (forgiveness).",
                         "1.0 = derail exactly at the physical limit; 1.5 = tolerate 50% over first. Default 1.25.")
                 .defineInRange("speedMargin", 1.25, 1.0, 5.0);
+
+        DERAIL_AT_TRACK_END = BUILDER
+                .comment("Whether a train derails when it runs off the END of a track (no buffer) above a speed.",
+                        "Below the speed it simply parks at the dead end; above it, it flies off the rail.")
+                .define("derailAtTrackEnd", true);
+
+        DERAIL_END_MIN_SPEED = BUILDER
+                .comment("Minimum speed (m/s) at which hitting the end of a track derails instead of parking.",
+                        "Default 4.0 (~0.2 blocks/tick).")
+                .defineInRange("trackEndMinSpeed", 4.0, 0.0, 1000.0);
 
         BUILDER.pop();
     }
