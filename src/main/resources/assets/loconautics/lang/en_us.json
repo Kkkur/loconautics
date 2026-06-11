@@ -53,8 +53,12 @@
   "loconautics.gui.goggles.bearing_axle_stats": "Bearing Axle",
   "loconautics.gui.goggles.train_weight": "Train Weight",
   "loconautics.gui.goggles.unit_kg": "kpg",
+  "loconautics.gui.goggles.stress_impact": "Stress Impact",
   "loconautics.gui.goggles.current_su": "Stress Impact",
   "loconautics.gui.goggles.unit_su": "su",
+  "loconautics.gui.goggles.network_stress": "Network Load",
+  "loconautics.gui.goggles.network_stress_ratio": "Load / Capacity",
+  "loconautics.gui.goggles.unit_percent": "%",
   "loconautics.gui.goggles.rpm": "Speed",
   "loconautics.gui.goggles.unit_rpm": "RPM",
 

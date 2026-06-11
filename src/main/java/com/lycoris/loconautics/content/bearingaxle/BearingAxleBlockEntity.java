@@ -59,6 +59,35 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
         return totalMassKg;
     }
 
+    // ---------------------------------------------------------------------------
+    // Network stress readout — used by the boiler burn-rate formula and the
+    // goggle tooltip. Both values are safe to call from any server-side context.
+    // Reads the stress/capacity fields pushed by KineticBlockEntity.updateFromNetwork(),
+    // mirroring exactly how StressGaugeBlockEntity.getNetworkStress() works.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Returns the kinetic network's current stress load in absolute SU.
+     * Reads the {@code stress} field pushed to this BE by
+     * {@code KineticBlockEntity.updateFromNetwork()}.
+     */
+    public float getNetworkStressAbsolute() {
+        return stress;
+    }
+
+    /**
+     * Returns the fraction of network capacity currently consumed
+     * (stress / capacity). 1.0 = fully loaded; >1.0 = overstressed.
+     * Returns 0 when capacity is zero (network not yet active).
+     *
+     * <p>This is the primary input to the boiler burn-rate formula alongside
+     * {@link #getTrainMass()}.
+     */
+    public float getNetworkStressRatio() {
+        if (capacity <= 0f) return 0f;
+        return stress / capacity;
+    }
+
     /**
      * Sets the rail incline (degrees) the axle sits on, pushed once per game tick by {@code SableTrainDriver}. A
      * steeper angle raises the axle's stress impact. Recomputes stress through the network the same way
@@ -132,6 +161,28 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
         LoconauticsLang.number(impact)
                 .translate("gui.goggles.unit_su")
                 .style(ChatFormatting.AQUA)
+                .forGoggles(tooltip, 1);
+
+        // Network Stress (absolute SU)
+        float stressAbs = getNetworkStressAbsolute();
+        LoconauticsLang.translate("gui.goggles.network_stress")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.number(stressAbs)
+                .translate("gui.goggles.unit_su")
+                .style(stressAbs > 0 ? ChatFormatting.YELLOW : ChatFormatting.DARK_GRAY)
+                .forGoggles(tooltip, 1);
+
+        // Network Stress Ratio (load / capacity)
+        float stressRatio = getNetworkStressRatio();
+        LoconauticsLang.translate("gui.goggles.network_stress_ratio")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.number(stressRatio * 100f)
+                .translate("gui.goggles.unit_percent")
+                .style(stressRatio >= 1f ? ChatFormatting.RED
+                        : stressRatio >= 0.75f ? ChatFormatting.GOLD
+                        : ChatFormatting.GREEN)
                 .forGoggles(tooltip, 1);
 
         // RPM (live)

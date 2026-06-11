@@ -746,7 +746,7 @@ public final class SableTrainDriver {
     private static final double STATION_PARK_EPSILON = 0.4;
     /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
      *  the bogey, so the train always parks at the same offset relative to the marker. */
-    private static final double STATION_FRONT_OFFSET = 4.0;
+    private static final double STATION_FRONT_OFFSET = -3.5;
     /** Amber/brass colour Create uses for station names in prompts. */
     private static final int STATION_NAME_COLOR = 7358000;
     /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
