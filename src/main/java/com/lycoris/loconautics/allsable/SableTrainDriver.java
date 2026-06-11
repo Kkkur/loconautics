@@ -522,7 +522,59 @@ public final class SableTrainDriver {
             LoconauticsConstants.LOGGER.info(
                     "[sabletrain] car {} lost all its bogeys — released from the rail (now a free sub-level)",
                     train.id());
+            return;
         }
+        // Over-speed on a curve: if the train is cornering faster than its wheels can grip, derail.
+        if (Config.DERAIL_ON_CURVE.get()) {
+            double[] cv = curveSafety(train); // {speed m/s, safeMax m/s, radius m} or null
+            if (cv != null && cv[0] > cv[1] * Config.DERAIL_SPEED_MARGIN.get()) {
+                train.setDerailed(true);
+                LoconauticsConstants.LOGGER.info(
+                        "[sabletrain] car {} derailed: {} m/s on a ~{} m radius curve (safe ~{} m/s)",
+                        train.id(), f(cv[0]), f(cv[2]), f(cv[1]));
+            }
+        }
+    }
+
+    /**
+     * Curve-safety check. Measures the track curvature under the car from the heading difference between its two
+     * end bogeys (each bogey's own rail tangent) over the distance between them — radius {@code r = arc / angle} —
+     * and the physical safe cornering speed {@code vmax = sqrt(g * r * mu/(1-mu))} (the classic adhesion-limit
+     * formula). Returns {@code {speed, vmax, radius}} in m / m·s⁻¹, or {@code null} on straight track / when the
+     * car has fewer than two bogeys (can't measure curvature).
+     */
+    private static double[] curveSafety(SableTrain train) {
+        var bogeys = train.car().bogeys();
+        if (bogeys.size() < 2) {
+            return null;
+        }
+        RailCarriage a = bogeys.get(0).rail();
+        RailCarriage b = bogeys.get(bogeys.size() - 1).rail();
+        Vec3 ta = a.forward();
+        Vec3 tb = b.forward();
+        Vector3d da = new Vector3d(ta.x, 0.0, ta.z);
+        Vector3d db = new Vector3d(tb.x, 0.0, tb.z); // horizontal tangents: curvature is the yaw turn rate
+        if (da.lengthSquared() < 1.0e-9 || db.lengthSquared() < 1.0e-9) {
+            return null;
+        }
+        double theta = Math.acos(Math.max(-1.0, Math.min(1.0, da.normalize().dot(db.normalize()))));
+        if (theta < 1.0e-3) {
+            return null; // essentially straight — no curve limit
+        }
+        Vector3d ca = a.center();
+        Vector3d cb = b.center();
+        if (ca == null || cb == null) {
+            return null;
+        }
+        double arc = ca.distance(cb);
+        if (arc < 1.0e-3) {
+            return null;
+        }
+        double radius = arc / theta;
+        double mu = Config.DERAIL_CURVE_FRICTION.get();
+        double vmax = Math.sqrt(9.81 * radius * (mu / (1.0 - mu)));
+        double speed = Math.abs(train.speed()) * 20.0; // blocks/tick -> m/s
+        return new double[] { speed, vmax, radius };
     }
 
     /** True if the body sub-level still contains at least one Create bogey block (the car's wheels). */

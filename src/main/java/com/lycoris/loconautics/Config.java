@@ -143,6 +143,37 @@ public final class Config {
         BUILDER.pop();
     }
 
+    // ------------------------------------------------------------------ Derailment
+
+    /** Whether a train derails when it takes a curve faster than its wheels can grip. */
+    public static final ModConfigSpec.BooleanValue DERAIL_ON_CURVE;
+    /** Wheel-rail grip coefficient used in the safe curve-speed formula. */
+    public static final ModConfigSpec.DoubleValue DERAIL_CURVE_FRICTION;
+    /** Forgiveness multiplier on the safe curve speed before a derail actually triggers. */
+    public static final ModConfigSpec.DoubleValue DERAIL_SPEED_MARGIN;
+
+    static {
+        BUILDER.push("derailment");
+
+        DERAIL_ON_CURVE = BUILDER
+                .comment("Whether a train derails when it takes a curve too fast (lateral grip exceeded).",
+                        "Safe curve speed = sqrt(9.81 * radius * friction/(1-friction)); above it (times the",
+                        "margin below) the car leaves the rail and becomes a free physics body.")
+                .define("derailOnCurve", true);
+
+        DERAIL_CURVE_FRICTION = BUILDER
+                .comment("Wheel-rail grip coefficient (0..1) for the safe curve-speed formula.",
+                        "Higher = grippier = corners faster before derailing. Default 0.4 (steel on steel-ish).")
+                .defineInRange("curveFriction", 0.4, 0.05, 0.95);
+
+        DERAIL_SPEED_MARGIN = BUILDER
+                .comment("Multiplier on the safe curve speed before a derail triggers (forgiveness).",
+                        "1.0 = derail exactly at the physical limit; 1.5 = tolerate 50% over first. Default 1.25.")
+                .defineInRange("speedMargin", 1.25, 1.0, 5.0);
+
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {
