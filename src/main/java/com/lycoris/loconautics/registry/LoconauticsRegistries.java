@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.registry;
 
+import com.lycoris.loconautics.block.casing.ReinforcedCasingBlock;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
 import com.lycoris.loconautics.content.steelcable.SteelCableItem;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
@@ -194,6 +195,9 @@ public final class LoconauticsRegistries {
                         output.accept(SABLE_TRAIN_RELOCATOR.get());
                         output.accept(REINFORCED_IRON_SHEET.get());
                         output.accept(UNPROCESSED_REINFORCED_IRON_SHEET.get());
+                        output.accept(com.lycoris.loconautics.content.boiler.BoilerBlocks.FIREBOX_ITEM.get());
+                        output.accept(com.lycoris.loconautics.content.boiler.BoilerBlocks.BOILER_BODY_ITEM.get());
+                        output.accept(com.lycoris.loconautics.content.boiler.BoilerBlocks.BOILER_CONTROLLER_ITEM.get());
                     })
                     .build());
 

@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.content.boiler;
 
+import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
@@ -35,6 +36,11 @@ public class FireboxBlock extends BaseEntityBlock {
         super(properties);
     }
 
+    @Override
+    protected MapCodec<? extends BaseEntityBlock> codec() {
+        return simpleCodec(FireboxBlock::new);
+    }
+
     // ------------------------------------------------------------------ flammability
 
     @Override
@@ -65,7 +71,7 @@ public class FireboxBlock extends BaseEntityBlock {
 
     @Override
     public @Nullable BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
-        return new FireboxBlockEntity(BoilerBlocks.FIREBOX_BE.get(), pos, state);
+        return BoilerBlocks.createFireboxBE(pos, state);
     }
 
     @Override

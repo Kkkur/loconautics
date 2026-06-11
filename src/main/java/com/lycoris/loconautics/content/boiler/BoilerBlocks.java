@@ -1,23 +1,19 @@
 package com.lycoris.loconautics.content.boiler;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
-/**
- * Deferred registrations for the steam boiler multiblock.
- *
- * <p>Call {@link #register(IEventBus)} once from the mod constructor alongside
- * the other registries.
- */
 public final class BoilerBlocks {
 
     public static final DeferredRegister.Blocks BLOCKS =
@@ -48,8 +44,7 @@ public final class BoilerBlocks {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FireboxBlockEntity>>
             FIREBOX_BE = BLOCK_ENTITIES.register("firebox", () ->
             BlockEntityType.Builder
-                    .of((pos, state) -> new FireboxBlockEntity(FIREBOX_BE.get(), pos, state),
-                            FIREBOX.get())
+                    .of(BoilerBlocks::createFireboxBE, FIREBOX.get())
                     .build(null));
 
     // ------------------------------------------------------------------ Boiler Body
@@ -85,9 +80,18 @@ public final class BoilerBlocks {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<BoilerControllerBlockEntity>>
             BOILER_CONTROLLER_BE = BLOCK_ENTITIES.register("boiler_controller", () ->
             BlockEntityType.Builder
-                    .of((pos, state) -> new BoilerControllerBlockEntity(BOILER_CONTROLLER_BE.get(), pos, state),
-                            BOILER_CONTROLLER.get())
+                    .of(BoilerBlocks::createBoilerControllerBE, BOILER_CONTROLLER.get())
                     .build(null));
+
+    // ------------------------------------------------------------------ factories
+
+    static FireboxBlockEntity createFireboxBE(BlockPos pos, BlockState state) {
+        return new FireboxBlockEntity(FIREBOX_BE.get(), pos, state);
+    }
+
+    static BoilerControllerBlockEntity createBoilerControllerBE(BlockPos pos, BlockState state) {
+        return new BoilerControllerBlockEntity(BOILER_CONTROLLER_BE.get(), pos, state);
+    }
 
     // ------------------------------------------------------------------ register
 

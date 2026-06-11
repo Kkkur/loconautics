@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.content.boiler;
 
+import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
@@ -25,6 +26,11 @@ public class BoilerControllerBlock extends BaseEntityBlock {
 
     public BoilerControllerBlock(BlockBehaviour.Properties properties) {
         super(properties);
+    }
+
+    @Override
+    protected MapCodec<? extends BaseEntityBlock> codec() {
+        return simpleCodec(BoilerControllerBlock::new);
     }
 
     // ------------------------------------------------------------------ neighbour / placement
@@ -56,7 +62,7 @@ public class BoilerControllerBlock extends BaseEntityBlock {
 
     @Override
     public @Nullable BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
-        return new BoilerControllerBlockEntity(BoilerBlocks.BOILER_CONTROLLER_BE.get(), pos, state);
+        return BoilerBlocks.createBoilerControllerBE(pos, state);
     }
 
     @Override
