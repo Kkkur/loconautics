@@ -37,6 +37,8 @@ public final class RailFollower {
         this.speed = speed;
         // steer(NONE) keeps the point going straight through junctions; reads point.edge live each call.
         this.selector = point.steer(SteerDirection.NONE, upNormal);
+        // Seed lastPos so position()/tick() never return null before the first successful advance.
+        this.lastPos = point.edge != null ? point.getPosition(graph) : Vec3.ZERO;
     }
 
     /**

@@ -20,12 +20,17 @@
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
   "loconautics.assembly.missing_bearing_axle": "No Bearing Axle found in the assembly area",
 
+  "loconautics.station.sabletrain.disabled": "Sable physics mode is disabled in the config",
+  "loconautics.station.sabletrain.no_track": "The station has no valid track direction",
+  "loconautics.station.sabletrain.no_glue": "No glued carriages found, glue your cart together with Super Glue or Honey Glue",
+  "loconautics.station.sabletrain.no_bogeys": "No glued bogeys found in the station's range",
+  "loconautics.station.sabletrain.missing_bearing_axle": "The frontmost carriage needs a Bearing Axle to be driven",
+
   "loconautics.configuration.title": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml.title": "Loconautics Config",
   "loconautics.configuration.enableSableMode": "Enable Sable Physics Mode",
   "loconautics.configuration.physicsTrainMaxSpeed": "Physics Train Max Speed",
-  "loconautics.configuration.debugRender": "Debug Render",
 
   "loconautics.configuration.bearing_axle.massDivisor": "Mass Divisor",
   "loconautics.configuration.bearing_axle.massDivisor.tooltip": "Divides total train mass (kpg) to get stress impact per RPM. Lower = more stress per kg.",

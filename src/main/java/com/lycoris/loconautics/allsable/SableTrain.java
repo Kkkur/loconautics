@@ -58,6 +58,13 @@ public final class SableTrain {
     /** True when a Bearing Axle is driving the train this tick: the driver then servos the along-rail speed toward
      *  {@link #targetSpeed}. When false the train is purely force-driven (gravity, propellers, shoves move it). */
     private boolean powered = false;
+    /**
+     * When true the car has lost all its bogeys (its wheels were destroyed) and is no longer held to the rail:
+     * the driver releases its rail constraint and the sub-level becomes a free physics body that gravity and
+     * collisions act on normally. This is the single hook future derailment mechanics build on — flip it true
+     * (for any reason: lost wheels, excessive speed on a curve, a collision) and the car leaves the rail next tick.
+     */
+    private boolean derailed = false;
 
     public SableTrain(UUID id, ServerLevel level, Car car, boolean physics) {
         this.id = id;
@@ -106,6 +113,19 @@ public final class SableTrain {
 
     public boolean isPowered() {
         return powered;
+    }
+
+    /** Whether the car has left the rail and is now a free physics body (see {@link #derailed}). */
+    public boolean isDerailed() {
+        return derailed;
+    }
+
+    /**
+     * Derails the car (true) so the driver releases its rail constraint next tick and it becomes a free
+     * sub-level, or clears the flag (false). The single entry point for derailment mechanics.
+     */
+    public void setDerailed(boolean derailed) {
+        this.derailed = derailed;
     }
 
     public void setAccel(double accel) {

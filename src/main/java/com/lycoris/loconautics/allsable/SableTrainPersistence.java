@@ -19,6 +19,7 @@ import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -196,6 +197,7 @@ public final class SableTrainPersistence {
         tag.putUUID("Id", train.id());
         tag.putString("Dimension", train.level().dimension().location().toString());
         tag.putBoolean("Physics", train.isPhysics());
+        tag.putBoolean("Derailed", train.isDerailed());
         tag.putDouble("TargetSpeed", train.targetSpeed());
         tag.putDouble("Speed", train.speed());
         tag.putDouble("Accel", train.accel());
@@ -213,11 +215,12 @@ public final class SableTrainPersistence {
             if (car.localTrail() != null) {
                 writeVec3d(c, "LocalTrail", car.localTrail());
             }
-            // Loose bogeys: each its own sub-level + rail carriage.
+            // Bogeys live inside the body sub-level: persist each bogey's LOCAL position (relative to the body
+            // anchor) plus its own reference rail carriage. They have no sub-level of their own.
             ListTag bogeyList = new ListTag();
             for (SableTrain.Bogey bogey : car.bogeys()) {
                 CompoundTag bt = new CompoundTag();
-                bt.putUUID("SubLevel", bogey.subLevelId());
+                bt.putLong("LocalPos", bogey.localPos().asLong());
                 bt.putUUID("Graph", bogey.rail().graphId());
                 bt.put("Carriage", bogey.rail().writeNbt(dims));
                 bogeyList.add(bt);
@@ -297,14 +300,14 @@ public final class SableTrainPersistence {
         ListTag bogeyList = c.getList("Bogeys", Tag.TAG_COMPOUND);
         for (int j = 0; j < bogeyList.size(); j++) {
             CompoundTag bt = bogeyList.getCompound(j);
-            UUID bSub = bt.getUUID("SubLevel");
             TrackGraph bGraph = Create.RAILWAYS.trackNetworks.get(bt.getUUID("Graph"));
-            if (bGraph == null || !(container.getSubLevel(bSub) instanceof ServerSubLevel)) {
-                return null; // bogey graph/sub-level not ready yet — retry
+            if (bGraph == null) {
+                return null; // the bogey's track graph isn't loaded yet — retry
             }
             RailCarriage bRail = RailCarriage.restore(bGraph, bt.getCompound("Carriage"), dims);
             if (bRail != null) {
-                bogeys.add(new SableTrain.Bogey(bSub, bRail));
+                BlockPos localPos = BlockPos.of(bt.getLong("LocalPos"));
+                bogeys.add(new SableTrain.Bogey(localPos, bRail));
             }
         }
         Vector3dc localLead = readVec3d(c, "LocalLead");
@@ -312,6 +315,7 @@ public final class SableTrainPersistence {
         SableTrain.Car car = new SableTrain.Car(subId, carriage, bogeys, localLead, localTrail);
 
         SableTrain train = new SableTrain(tag.getUUID("Id"), level, car, tag.getBoolean("Physics"));
+        train.setDerailed(tag.getBoolean("Derailed"));
         train.setTargetSpeed(tag.getDouble("TargetSpeed"));
         train.setSpeed(tag.getDouble("Speed"));
         if (tag.contains("Accel")) {

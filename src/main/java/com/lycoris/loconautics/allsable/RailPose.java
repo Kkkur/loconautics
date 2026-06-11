@@ -1,6 +1,5 @@
 package com.lycoris.loconautics.allsable;
 
-import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
 import com.simibubi.create.content.trains.entity.TravellingPoint;
@@ -43,26 +42,8 @@ public final class RailPose {
         return a.add(b).mul(0.5);
     }
 
-    /**
-     * Carriage orientation from the leading->trailing vector, matching Create's alignEntity yaw/pitch.
-     * Returns identity if either point isn't placed.
-     */
-    public static Quaterniond carriageOrientation(TravellingPoint leading, TravellingPoint trailing, TrackGraph graph) {
-        Vector3d a = position(leading, graph);
-        Vector3d b = position(trailing, graph);
-        if (a == null || b == null) {
-            return new Quaterniond();
-        }
-        double dx = a.x - b.x;
-        double dy = a.y - b.y;
-        double dz = a.z - b.z;
-        double yawDeg = Math.toDegrees(Math.atan2(dz, dx)) + 180.0;
-        double pitchDeg = -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-        return new Quaterniond()
-                .rotateY(Math.toRadians(-yawDeg))
-                .rotateX(Math.toRadians(pitchDeg))
-                .normalize();
-    }
+    // NOTE: orientation is intentionally NOT provided here. A raw Euler yaw+pitch construction introduced a
+    // roll bug on curves; RailCarriage now derives orientation from a proper reference-frame matrix instead.
 
     private RailPose() {
     }

@@ -19,11 +19,6 @@ public final class Config {
             .comment("Max speed (blocks/tick) for physics trains. 0 = use Create's default limits.")
             .defineInRange("physicsTrainMaxSpeed", 0.0, 0.0, 100.0);
 
-    /** Render debug overlays (sub-level bounds, pose markers). */
-    public static final ModConfigSpec.BooleanValue DEBUG_RENDER = BUILDER
-            .comment("Render debug overlays for physics trains (sub-level bounds, pose markers).")
-            .define("debugRender", false);
-
     // -------------------------------------------------------------------------
     // Bearing Axle
     // -------------------------------------------------------------------------

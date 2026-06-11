@@ -11,8 +11,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * Sent client → server when the player clicks "Assemble as Sable Train" in the station assembly screen.
- * Delegates to the same spawn path as {@code /loconautics sabletrain}: raycasts from the player's view
- * to find the cart they were looking at when they opened the station.
+ * Carries the station's {@link BlockPos}; the server scans the station's assembly range for glued carriages
+ * and assembles each one as an independent Sable train (see {@link SableTrainSpawner#assembleFromStation}).
  */
 public record AssembleSableTrainPacket(BlockPos stationPos) implements CustomPacketPayload {
 
@@ -33,7 +33,7 @@ public record AssembleSableTrainPacket(BlockPos stationPos) implements CustomPac
     public static void handle(AssembleSableTrainPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            SableTrainSpawner.spawn(player, 0.0, false);
+            SableTrainSpawner.assembleFromStation(player, packet.stationPos());
         });
     }
 }

@@ -2,18 +2,29 @@ package com.lycoris.loconautics.allsable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.mixin.StationBlockEntityAccessor;
+import com.lycoris.loconautics.registry.LoconauticsRegistries;
 
+import com.simibubi.create.content.contraptions.AssemblyException;
+import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.graph.TrackGraphHelper;
 import com.simibubi.create.content.trains.graph.TrackGraphLocation;
+import com.simibubi.create.content.trains.station.StationBlockEntity;
 import com.simibubi.create.content.trains.track.ITrackBlock;
+import com.simibubi.create.foundation.utility.CreateLang;
+
+import dev.simulated_team.simulated.content.entities.honey_glue.HoneyGlueEntity;
 
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper;
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper.GatherResult;
@@ -34,8 +45,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -72,6 +88,10 @@ public final class SableTrainSpawner {
      *  {@code physics=false} = kinematic teleport-pin (smooth, rigid); {@code physics=true} = free body held to
      *  the rail by bogey spring forces (can derail). */
     public static int spawn(ServerPlayer player, double speed, boolean physics) {
+        if (!Config.ENABLE_SABLE_MODE.get()) {
+            msg(player, "Sable physics mode is disabled in the config (enableSableMode)");
+            return 0;
+        }
         ServerLevel level = player.serverLevel();
         SableTrain.Car car = buildCar(player, level, null);
         if (car == null) {
@@ -87,6 +107,328 @@ public final class SableTrainSpawner {
         msg(player, String.format("%s cart spawned speed=%.2f — id %s — join carts together with steel cable",
                 physics ? "PHYSICS" : "pinned", speed, id.toString().substring(0, 8)));
         return 1;
+    }
+
+    // ============================================================================================
+    // Station-driven assembly (the proper assembly path, triggered from Create's AssemblyScreen).
+    // ============================================================================================
+
+    /** How many blocks above the rail line to scan for glued cart blocks. */
+    private static final int STATION_SCAN_HEIGHT = 10;
+    /** How far to either side of the rail line to scan (cart overhang). */
+    private static final int STATION_SCAN_WIDTH = 2;
+
+    /**
+     * Assembles Sable trains from a Create train station instead of the player's view. Scans the station's
+     * assembly range for glued clusters of blocks: each glued cluster that carries a Create bogey becomes its
+     * own <b>independent</b> {@link SableTrain} car (clusters are never merged — gluing two clusters together is
+     * what makes them one carriage). Only the frontmost carriage (nearest the station along the track) is
+     * required to contain a {@code loconautics:bearing_axle}. Failures are surfaced through Create's standard
+     * {@link AssemblyException} channel (rendered by {@code AssemblyScreen}), never via chat.
+     */
+    public static void assembleFromStation(ServerPlayer player, BlockPos stationPos) {
+        ServerLevel level = player.serverLevel();
+        if (!(level.getBlockEntity(stationPos) instanceof StationBlockEntity station)) {
+            return;
+        }
+        StationBlockEntityAccessor acc = (StationBlockEntityAccessor) station;
+
+        // Master switch: when off, the addon behaves as if not installed (no physics assembly).
+        if (!Config.ENABLE_SABLE_MODE.get()) {
+            fail(acc, "disabled", -1);
+            return;
+        }
+
+        // Use Create's own scan to refresh the assembly area, direction, and bogey count.
+        station.refreshAssemblyInfo();
+        Direction dir = station.getAssemblyDirection();
+        if (dir == null) {
+            fail(acc, "no_track", -1);
+            return;
+        }
+        BoundingBox area = StationBlockEntity.assemblyAreas.get(level).get(stationPos);
+        if (area == null || acc.loconautics$getBogeyCount() == 0) {
+            fail(acc, "no_bogeys", -1);
+            return;
+        }
+
+        Vec3 railDir = Vec3.atLowerCornerOf(dir.getNormal());
+        BlockPos stationTrack = station.edgePoint.getGlobalPosition();
+        double railY = stationTrack.getY();
+
+        // Scan a band sitting on top of the rail line for glue entities (Create super glue + Simulated honey
+        // glue). The band is the assembly area inflated sideways for cart overhang and upward for cart height.
+        AABB scan = new AABB(
+                area.minX() - STATION_SCAN_WIDTH, railY + 1, area.minZ() - STATION_SCAN_WIDTH,
+                area.maxX() + 1 + STATION_SCAN_WIDTH, railY + 1 + STATION_SCAN_HEIGHT, area.maxZ() + 1 + STATION_SCAN_WIDTH);
+
+        List<Entity> glue = new ArrayList<>(level.getEntitiesOfClass(SuperGlueEntity.class, scan));
+        try {
+            collectHoneyGlue(level, scan, glue); // Simulated is an optional dependency — guard its class load
+        } catch (Throwable ignored) {
+        }
+
+        // Union the solid blocks each glue entity rigidly links. Blocks not joined by any glue never enter the
+        // union-find, so they are silently invisible to the assembler.
+        Map<BlockPos, BlockPos> uf = new HashMap<>();
+        for (Entity g : glue) {
+            List<BlockPos> linked = solidBlocksIn(level, g.getBoundingBox(), scan);
+            if (linked.size() < 2) {
+                continue; // a glue touching only one solid block links nothing
+            }
+            BlockPos root = linked.get(0);
+            ufAdd(uf, root);
+            for (int i = 1; i < linked.size(); i++) {
+                ufAdd(uf, linked.get(i));
+                ufUnion(uf, root, linked.get(i));
+            }
+        }
+        // Group the glued blocks by their union-find root → one set of blocks per glued cluster.
+        Map<BlockPos, Set<BlockPos>> clustersByRoot = new HashMap<>();
+        for (BlockPos p : uf.keySet()) {
+            clustersByRoot.computeIfAbsent(ufFind(uf, p), k -> new HashSet<>()).add(p);
+        }
+
+        // A cluster is a carriage only if it carries a Create bogey; bogey-less clusters are ignored.
+        List<Set<BlockPos>> carriages = new ArrayList<>();
+        for (Set<BlockPos> cluster : clustersByRoot.values()) {
+            if (clusterHasBogey(level, cluster)) {
+                carriages.add(cluster);
+            }
+        }
+
+        // Every bogey on the rail in range, ordered front-to-back (nearest the station first). The frontmost
+        // bogey is the leading wheel-set — Create's own assembler keys its errors off this same ordering.
+        List<BlockPos> bogeys = bogeysInBand(level, scan);
+        if (bogeys.isEmpty()) {
+            fail(acc, "no_bogeys", -1);
+            return;
+        }
+        bogeys.sort(java.util.Comparator.comparingDouble(
+                b -> (b.getX() - stationTrack.getX()) * railDir.x + (b.getZ() - stationTrack.getZ()) * railDir.z));
+        BlockPos frontBogey = bogeys.get(0);
+
+        // The frontmost carriage is the glued cluster that actually contains the frontmost bogey. If that bogey
+        // has no glued structure on it, refuse exactly like Create ("No structure attached to bogey 1").
+        Set<BlockPos> frontCarriage = carriageContaining(carriages, frontBogey);
+        if (frontCarriage == null) {
+            failNothingAttached(acc, 1);
+            return;
+        }
+
+        // Bearing-axle requirement: ONLY the frontmost carriage must contain a loconautics:bearing_axle. Checked
+        // before any sub-level is created so a refusal leaves the build untouched.
+        if (!clusterHasBearingAxle(level, frontCarriage)) {
+            fail(acc, "missing_bearing_axle", 1);
+            return;
+        }
+
+        // Assemble front-to-back: frontmost carriage first, then the rest ordered back along the track.
+        carriages.sort(java.util.Comparator.comparingDouble(c -> projectionAlong(c, stationTrack, railDir)));
+
+        // All validation passed — assemble each cluster as its own independent Sable car. No links are created
+        // between cars: coupling them (steel cable, knuckle, …) is the player's job at runtime.
+        Set<BlockPos> assembled = new HashSet<>();
+        int built = 0;
+        for (Set<BlockPos> cluster : carriages) {
+            BoundingBox3i bounds = boundsOf(cluster);
+            BlockPos anchor = frontmostBlock(cluster, stationTrack, railDir);
+            SableTrain.Car car = seatCar(level, cluster, bounds, railDir, anchor);
+            if (car == null) {
+                LoconauticsConstants.LOGGER.warn(
+                        "[sabletrain] station assembly: a carriage could not be seated (no rail/graph?) — skipped");
+                continue;
+            }
+            UUID id = UUID.randomUUID();
+            SableTrain train = new SableTrain(id, level, car, false);
+            train.setTargetSpeed(0.0); // start idle — at rest on the rail until the player drives it
+            SableTrainRegistry.register(train);
+            ensureObserver(level);
+            lastTrainId = id;
+            SableTrainPersistence.persist(train);
+            assembled.addAll(cluster);
+            built++;
+        }
+        if (built == 0) {
+            fail(acc, "no_bogeys", -1);
+            return;
+        }
+
+        // Remove the glue entities that linked the now-assembled blocks (their blocks have moved into sub-levels,
+        // so the glue would otherwise dangle over empty space).
+        for (Entity g : glue) {
+            AABB box = g.getBoundingBox();
+            for (BlockPos p : assembled) {
+                if (box.contains(Vec3.atCenterOf(p))) {
+                    g.discard();
+                    break;
+                }
+            }
+        }
+
+        // Success: clear any previous error and drop the station out of assembly mode, exactly like Create does
+        // after a normal assembly. The new cars sit idle (throttle 0, glued to the rail) until the player drives
+        // them with a Bearing Axle.
+        acc.loconautics$exception(null, -1);
+        station.exitAssemblyMode();
+        LoconauticsConstants.LOGGER.info("[sabletrain] station at {} assembled {} independent Sable car(s) (idle)",
+                stationPos, built);
+    }
+
+    /** Surfaces an assembly failure through Create's standard error channel (no chat). */
+    private static void fail(StationBlockEntityAccessor acc, String key, int carriage) {
+        acc.loconautics$exception(
+                new AssemblyException(Component.translatable("loconautics.station.sabletrain." + key)), carriage);
+    }
+
+    /**
+     * Refuses assembly with Create's own "No structure attached to bogey N" message, so an unglued leading bogey
+     * reads identically to Create's vanilla train assembler. Mirrors Create passing {@code -1} as the carriage
+     * index (the bogey number is already baked into the message).
+     */
+    private static void failNothingAttached(StationBlockEntityAccessor acc, int bogeyNumber) {
+        acc.loconautics$exception(
+                new AssemblyException(CreateLang.translateDirect("train_assembly.nothing_attached", bogeyNumber)), -1);
+    }
+
+    /** The carriage cluster that contains {@code pos}, or {@code null} if no glued carriage covers it. */
+    private static Set<BlockPos> carriageContaining(List<Set<BlockPos>> carriages, BlockPos pos) {
+        for (Set<BlockPos> carriage : carriages) {
+            if (carriage.contains(pos)) {
+                return carriage;
+            }
+        }
+        return null;
+    }
+
+    /** Every Create bogey block sitting inside the station's scan band (immutable positions). */
+    private static List<BlockPos> bogeysInBand(ServerLevel level, AABB scan) {
+        List<BlockPos> out = new ArrayList<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = Mth.floor(scan.minX); x < Mth.ceil(scan.maxX); x++) {
+            for (int y = Mth.floor(scan.minY); y < Mth.ceil(scan.maxY); y++) {
+                for (int z = Mth.floor(scan.minZ); z < Mth.ceil(scan.maxZ); z++) {
+                    if (level.getBlockState(pos.set(x, y, z)).getBlock() instanceof AbstractBogeyBlock) {
+                        out.add(pos.immutable());
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Adds Simulated's honey-glue entities to {@code out}; isolated so its (optional) class only loads here. */
+    private static void collectHoneyGlue(ServerLevel level, AABB scan, List<Entity> out) {
+        out.addAll(level.getEntitiesOfClass(HoneyGlueEntity.class, scan));
+    }
+
+    /** Solid, non-track blocks whose centre lies inside both the glue box and the overall scan band. */
+    private static List<BlockPos> solidBlocksIn(ServerLevel level, AABB box, AABB scan) {
+        List<BlockPos> out = new ArrayList<>();
+        int minX = Mth.floor(box.minX);
+        int minY = Mth.floor(box.minY);
+        int minZ = Mth.floor(box.minZ);
+        int maxX = Mth.ceil(box.maxX) - 1;
+        int maxY = Mth.ceil(box.maxY) - 1;
+        int maxZ = Mth.ceil(box.maxZ) - 1;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    Vec3 centre = new Vec3(x + 0.5, y + 0.5, z + 0.5);
+                    if (!box.contains(centre) || !scan.contains(centre)) {
+                        continue;
+                    }
+                    BlockState state = level.getBlockState(pos.set(x, y, z));
+                    if (state.isAir() || state.getBlock() instanceof ITrackBlock) {
+                        continue;
+                    }
+                    out.add(pos.immutable());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** True if any block in the cluster is a Create train bogey. */
+    private static boolean clusterHasBogey(ServerLevel level, Set<BlockPos> cluster) {
+        for (BlockPos p : cluster) {
+            if (level.getBlockState(p).getBlock() instanceof AbstractBogeyBlock) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True if any block in the cluster is a {@code loconautics:bearing_axle}. */
+    private static boolean clusterHasBearingAxle(ServerLevel level, Set<BlockPos> cluster) {
+        Block axle = LoconauticsRegistries.BEARING_AXLE.get();
+        for (BlockPos p : cluster) {
+            if (level.getBlockState(p).getBlock() == axle) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Mean signed distance of the cluster from the station along the track direction (smaller = nearer/front). */
+    private static double projectionAlong(Set<BlockPos> cluster, BlockPos station, Vec3 railDir) {
+        double sum = 0.0;
+        for (BlockPos p : cluster) {
+            sum += (p.getX() - station.getX()) * railDir.x + (p.getZ() - station.getZ()) * railDir.z;
+        }
+        return sum / cluster.size();
+    }
+
+    /** The cluster block nearest the station along the track direction (used as the sub-level anchor). */
+    private static BlockPos frontmostBlock(Set<BlockPos> cluster, BlockPos station, Vec3 railDir) {
+        return cluster.stream()
+                .min(java.util.Comparator.comparingDouble(
+                        p -> (p.getX() - station.getX()) * railDir.x + (p.getZ() - station.getZ()) * railDir.z))
+                .orElseGet(() -> cluster.iterator().next());
+    }
+
+    /** Axis-aligned integer bounds enclosing every block in the cluster. */
+    private static BoundingBox3i boundsOf(Set<BlockPos> cluster) {
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (BlockPos p : cluster) {
+            minX = Math.min(minX, p.getX());
+            minY = Math.min(minY, p.getY());
+            minZ = Math.min(minZ, p.getZ());
+            maxX = Math.max(maxX, p.getX());
+            maxY = Math.max(maxY, p.getY());
+            maxZ = Math.max(maxZ, p.getZ());
+        }
+        return new BoundingBox3i(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    // ----- tiny BlockPos union-find (glued-cluster detection) -----
+
+    private static void ufAdd(Map<BlockPos, BlockPos> uf, BlockPos p) {
+        uf.putIfAbsent(p, p);
+    }
+
+    private static BlockPos ufFind(Map<BlockPos, BlockPos> uf, BlockPos p) {
+        BlockPos root = p;
+        while (!uf.get(root).equals(root)) {
+            root = uf.get(root);
+        }
+        BlockPos cur = p; // path-compress
+        while (!cur.equals(root)) {
+            BlockPos next = uf.get(cur);
+            uf.put(cur, root);
+            cur = next;
+        }
+        return root;
+    }
+
+    private static void ufUnion(Map<BlockPos, BlockPos> uf, BlockPos a, BlockPos b) {
+        BlockPos ra = ufFind(uf, a);
+        BlockPos rb = ufFind(uf, b);
+        if (!ra.equals(rb)) {
+            uf.put(ra, rb);
+        }
     }
 
     /**
@@ -139,11 +481,28 @@ public final class SableTrainSpawner {
             return null;
         }
 
-        // 4) Find the bogey blocks (Create train bogeys) WITHOUT removing them from the cart — they stay
-        //    part of the body sub-level and never move on their own. We only record where they are
-        //    (in WORLD space for now; converted to the body's LOCAL frame after assembly) and seat a
-        //    small reference RailCarriage under each one, purely so SableTrainDriver can read the local
-        //    rail tangent at that point each tick and feed it to BogeyYawVisual as a visual-only yaw.
+        // 4) Lift the cart into a sub-level and seat its rail body + per-bogey reference rails.
+        SableTrain.Car car = seatCar(level, blocks, bounds, railDir, origin);
+        if (car == null) {
+            msg(player, "couldn't seat the rail body (no rail/graph under the cart?)");
+            return null;
+        }
+        return car;
+    }
+
+    /**
+     * Lifts a gathered set of cart blocks into a Sable sub-level and seats a {@link RailCarriage} body plus one
+     * reference {@link RailCarriage} per Create bogey (used only to read the local rail tangent for the yaw
+     * visual — never advanced/ticked). Returns {@code null} on any failure (no rail/graph/sub-level); does NOT
+     * message the player, so both the raycast command path and the station path can surface errors their own way.
+     *
+     * @param preferredAnchor a block to anchor the sub-level on if present in {@code blocks} (else an arbitrary one)
+     */
+    private static SableTrain.Car seatCar(ServerLevel level, Set<BlockPos> blocks, BoundingBox3i bounds,
+                                          Vec3 railDir, BlockPos preferredAnchor) {
+        // Find the bogey blocks (Create train bogeys) WITHOUT removing them — they stay part of the body
+        // sub-level and never move on their own. We only record where they are (WORLD space, converted to the
+        // body's LOCAL frame after assembly) and seat a small reference RailCarriage under each.
         List<BlockPos> bogeyPositions = new ArrayList<>();
         for (BlockPos p : blocks) {
             if (level.getBlockState(p).getBlock() instanceof AbstractBogeyBlock) {
@@ -153,22 +512,17 @@ public final class SableTrainSpawner {
         // Order bogeys front-to-back along the travel direction, for consistency with previous behaviour.
         bogeyPositions.sort(java.util.Comparator.comparingDouble(p -> p.getX() * railDir.x + p.getZ() * railDir.z));
 
-        // The body is the WHOLE cart — bogeys are no longer split out.
-        Set<BlockPos> bodyBlocks = blocks;
-        BoundingBox3i bodyBounds = bounds;
-
-        // Body sub-level (the entire cart, including its bogey blocks).
-        BlockPos bodyAnchor = bodyBlocks.contains(origin) ? origin : bodyBlocks.iterator().next();
-        ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, bodyAnchor, bodyBlocks, bodyBounds);
+        // Body sub-level (the entire cluster, including its bogey blocks).
+        BlockPos bodyAnchor = (preferredAnchor != null && blocks.contains(preferredAnchor))
+                ? preferredAnchor : blocks.iterator().next();
+        ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, bodyAnchor, blocks, bounds);
         if (sub == null) {
-            msg(player, "sub-level creation failed");
             return null;
         }
 
-        // One reference RailCarriage per bogey, seated on the rail directly under its (former world)
-        // position — used ONLY to read the local tangent for the yaw visual, never advanced/ticked.
-        // localPos is the bogey's position relative to the body sub-level's anchor block, so the driver
-        // can find the bogey's BlockEntity inside the sub-level each tick.
+        // One reference RailCarriage per bogey, seated on the rail directly under its (former world) position.
+        // localPos is the bogey's position relative to the body sub-level's anchor block, so the driver can
+        // find the bogey's BlockEntity inside the sub-level each tick.
         List<SableTrain.Bogey> bogeys = new ArrayList<>();
         for (BlockPos bp : bogeyPositions) {
             TrackHit bogeyTrack = findRailBelow(level, bp, railDir);
@@ -179,24 +533,34 @@ public final class SableTrainSpawner {
             if (bogeyRail == null) {
                 continue;
             }
-            BlockPos localPos = bp.subtract(bodyAnchor);
-            bogeys.add(new SableTrain.Bogey(localPos, bogeyRail));
+            bogeys.add(new SableTrain.Bogey(bp.subtract(bodyAnchor), bogeyRail));
         }
 
-        // 5) Re-locate the rail under the BODY's horizontal CENTRE so the body lines up over its bogeys.
-        int cx = (bodyBounds.minX() + bodyBounds.maxX()) / 2;
-        int cz = (bodyBounds.minZ() + bodyBounds.maxZ()) / 2;
-        TrackHit centreTrack = findRailBelow(level, new BlockPos(cx, bodyBounds.minY(), cz), railDir);
-        if (centreTrack != null) {
-            track = centreTrack;
+        // Re-locate the rail under the body's horizontal CENTRE so the body lines up over its bogeys, falling
+        // back to the anchor / a bogey position if the centre column has no rail.
+        int cx = (bounds.minX() + bounds.maxX()) / 2;
+        int cz = (bounds.minZ() + bounds.maxZ()) / 2;
+        TrackHit track = findRailBelow(level, new BlockPos(cx, bounds.minY(), cz), railDir);
+        if (track == null) {
+            track = findRailBelow(level, bodyAnchor, railDir);
+        }
+        if (track == null) {
+            for (BlockPos bp : bogeyPositions) {
+                track = findRailBelow(level, bp, railDir);
+                if (track != null) {
+                    break;
+                }
+            }
+        }
+        if (track == null) {
+            return null;
         }
 
-        // 6) Body pose: a RailCarriage spanning the body's longer horizontal extent (it follows the rail; its
-        //    orientation is the chord between its ends — so the body turns according to where its bogeys are).
-        double spacing = Math.max(1.0, Math.max(bodyBounds.maxX() - bodyBounds.minX(), bodyBounds.maxZ() - bodyBounds.minZ()));
+        // Body pose: a RailCarriage spanning the body's longer horizontal extent (it follows the rail; its
+        // orientation is the chord between its ends — so the body turns according to where its bogeys are).
+        double spacing = Math.max(1.0, Math.max(bounds.maxX() - bounds.minX(), bounds.maxZ() - bounds.minZ()));
         RailCarriage carriage = RailCarriage.at(track.location(), track.upNormal(), spacing, 0.0);
         if (carriage == null) {
-            msg(player, "couldn't seat the rail body (track not in a graph?)");
             return null;
         }
         // Capture the two bogey attachment points in the body sub-level's LOCAL frame (physics mode only).
@@ -207,8 +571,8 @@ public final class SableTrainSpawner {
         Vector3dc localLead = new Vector3d(localLeadVec.x, localLeadVec.y, localLeadVec.z);
         Vector3dc localTrail = new Vector3d(localTrailVec.x, localTrailVec.y, localTrailVec.z);
 
-        LoconauticsConstants.LOGGER.info("[sabletrain] built car (body {} blocks, {} loose bogeys, spacing {}) on graph {}",
-                bodyBlocks.size(), bogeys.size(), spacing, track.location().graph.id);
+        LoconauticsConstants.LOGGER.info("[sabletrain] seated car (body {} blocks, {} loose bogeys, spacing {}) on graph {}",
+                blocks.size(), bogeys.size(), spacing, track.location().graph.id);
         return new SableTrain.Car(sub.getUniqueId(), carriage, bogeys, localLead, localTrail);
     }
 
@@ -232,12 +596,8 @@ public final class SableTrainSpawner {
                 if (car.subLevelId() != null
                         && container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub
                         && !sub.isRemoved()) {
+                    // Bogeys live inside the body sub-level, so removing the body removes them too.
                     container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
-                }
-                for (SableTrain.Bogey bogey : car.bogeys()) {
-                    if (container.getSubLevel(bogey.subLevelId()) instanceof ServerSubLevel bsub && !bsub.isRemoved()) {
-                        container.removeSubLevel(bsub, SubLevelRemovalReason.REMOVED);
-                    }
                 }
             }
             SableTrainRegistry.remove(train.id());
@@ -246,6 +606,61 @@ public final class SableTrainSpawner {
         }
         lastTrainId = null;
         return n;
+    }
+
+    /** How close the player's look ray must pass to a car's centre to target it for {@link #derailLookedAt}. */
+    private static final double DERAIL_RAY_RADIUS = 2.5;
+
+    /**
+     * Derails the Sable car the player is looking at: finds the car whose body sub-level centre lies nearest the
+     * player's view ray (within {@link #REACH}) and flags it {@linkplain SableTrain#setDerailed derailed}, so the
+     * driver releases its rail constraint and it becomes a free physics body. Backs the {@code /loconautics derail}
+     * debug command.
+     */
+    public static int derailLookedAt(ServerPlayer player) {
+        ServerLevel level = player.serverLevel();
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            msg(player, "no Sable sub-levels in this dimension");
+            return 0;
+        }
+        Vec3 eye = player.getEyePosition(1.0F);
+        Vec3 look = player.getViewVector(1.0F);
+
+        SableTrain best = null;
+        double bestPerp = DERAIL_RAY_RADIUS;
+        for (SableTrain train : SableTrainRegistry.all()) {
+            if (train.level() != level || train.car().subLevelId() == null) {
+                continue;
+            }
+            if (!(container.getSubLevel(train.car().subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+                continue;
+            }
+            Vector3dc p = sub.logicalPose().position();
+            Vec3 centre = new Vec3(p.x(), p.y(), p.z());
+            double along = centre.subtract(eye).dot(look); // distance of the car's centre projected onto the ray
+            if (along < 0.0 || along > REACH) {
+                continue;
+            }
+            double perp = eye.add(look.scale(along)).distanceTo(centre); // how far the ray passes from the centre
+            if (perp < bestPerp) {
+                best = train;
+                bestPerp = perp;
+            }
+        }
+
+        if (best == null) {
+            msg(player, "look at a Sable cart within " + (int) REACH + " blocks to derail it");
+            return 0;
+        }
+        if (best.isDerailed()) {
+            msg(player, "that cart is already off the rails");
+            return 0;
+        }
+        best.setDerailed(true);
+        SableTrainPersistence.persist(best); // remember the derailed state across restarts
+        msg(player, "derailed cart " + best.id().toString().substring(0, 8) + " — released from the rail");
+        return 1;
     }
 
     /** True if a Create train bogey block sits in the cart's footprint (scanned down to the rail level). */

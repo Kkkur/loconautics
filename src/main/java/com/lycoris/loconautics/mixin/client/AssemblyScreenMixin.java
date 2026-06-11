@@ -1,11 +1,13 @@
 package com.lycoris.loconautics.mixin.client;
 
+import com.lycoris.loconautics.client.gui.SableButtonIcon;
 import com.lycoris.loconautics.network.packets.AssembleSableTrainPacket;
 import com.simibubi.create.content.trains.station.AssemblyScreen;
+import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
+import com.simibubi.create.content.trains.station.StationScreen;
+import com.simibubi.create.content.trains.station.WideIconButton;
 import com.simibubi.create.foundation.gui.AllGuiTextures;
-import com.simibubi.create.foundation.gui.AllIcons;
-import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -32,7 +34,9 @@ public abstract class AssemblyScreenMixin extends Screen {
 
         StationBlockEntity be = ((AbstractStationScreenAccessor) (Object) this).loconautics$getBlockEntity();
 
-        IconButton sableButton = new IconButton(x + 52, by, AllIcons.I_CONFIRM);
+        // A wide button (26×18, like Create's own assemble button) carrying the custom 24×16 sable icon.
+        // Seated to the left of Create's "cancel assembly" button (which sits at x + 73).
+        WideIconButton sableButton = new WideIconButton(x + 45, by, SableButtonIcon.INSTANCE);
         sableButton.setToolTip(Component.literal("Assemble as Sable Train"));
         sableButton.withCallback(() ->
                 CatnipServices.NETWORK.sendToServer(
@@ -40,5 +44,24 @@ public abstract class AssemblyScreenMixin extends Screen {
                 )
         );
         this.addRenderableWidget(sableButton);
+    }
+
+    /**
+     * After a successful Sable assembly the server drops the station out of assembly mode (just like Create does
+     * after a normal assembly). Create's own flow then relies on the base screen detecting the new {@code Train}
+     * and switching to the idle {@link StationScreen} — but a Sable assembly produces no Create {@code Train}, so
+     * that never fires and the player is stuck on the assembly screen until they reopen it. We detect the station
+     * leaving assembly mode here and switch to the idle screen ourselves.
+     */
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void loconautics$switchToIdleWhenAssembled(CallbackInfo ci) {
+        if (this.minecraft == null) {
+            return;
+        }
+        StationBlockEntity be = ((AbstractStationScreenAccessor) (Object) this).loconautics$getBlockEntity();
+        GlobalStation station = ((AbstractStationScreenAccessor) (Object) this).loconautics$getStation();
+        if (station != null && !be.isAssembling()) {
+            this.minecraft.setScreen(new StationScreen(be, station));
+        }
     }
 }

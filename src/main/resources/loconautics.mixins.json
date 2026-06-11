@@ -4,13 +4,16 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "RopeStrandHolderBehaviorAccessor",
-    "RopeStrandHolderDestroyMixin"
+    "RopeStrandHolderDestroyMixin",
+    "StationBlockEntityAccessor"
   ],
   "client": [
     "client.RopeConnectorRendererMixin",
     "client.RopeWinchRendererMixin",
     "client.RopeWinchBlockEntityAccessor",
-    "client.BogeyYawVisualMixin"
+    "client.BogeyYawVisualMixin",
+    "client.AssemblyScreenMixin",
+    "client.AbstractStationScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
