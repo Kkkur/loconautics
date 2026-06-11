@@ -232,6 +232,39 @@ public final class RailCarriage {
         stopped = false;
     }
 
+    /**
+     * Adopts another carriage's spawn reference frame, so {@link #orientation()} keeps mapping the SAME
+     * original grid frame (the axis the car's blocks were assembled along) onto the new rail tangent.
+     * Used by relocation: a freshly built carriage would otherwise re-capture its reference from the NEW
+     * rail's tangent, leaving the body permanently misaligned with the track whenever the target rail runs
+     * along a different axis than the original assembly. (Persistence preserves the frame the same way —
+     * see {@link #restore}.)
+     */
+    public void adoptReferenceFrame(RailCarriage from) {
+        if (from != null && from.forward0 != null) {
+            this.forward0 = new Vector3d(from.forward0);
+            this.up0 = from.up0 != null ? new Vector3d(from.up0) : perpendicularUp(this.forward0);
+        }
+    }
+
+    /**
+     * True while both bogey points still ride edges that EXIST in the track graph. Breaking a rail removes
+     * (or splits) its edge from the graph, but a stale {@link TravellingPoint} keeps gliding along the
+     * phantom geometry of the removed edge — the train would sail straight past the gap without ever
+     * blocking. The driver checks this every tick and re-seats/derails when the track vanished.
+     */
+    public boolean edgesValid() {
+        return pointValid(leading) && pointValid(trailing);
+    }
+
+    private boolean pointValid(TravellingPoint point) {
+        if (point == null || point.node1 == null || point.node2 == null || point.edge == null) {
+            return false;
+        }
+        var connections = graph.getConnectionsFrom(point.node1);
+        return connections != null && connections.get(point.node2) == point.edge;
+    }
+
     public double bogeySpacing() {
         return bogeySpacing;
     }

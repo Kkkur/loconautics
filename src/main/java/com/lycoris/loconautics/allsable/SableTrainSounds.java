@@ -154,11 +154,6 @@ public final class SableTrainSounds {
                             SoundEvents.GRINDSTONE_USE, SoundSource.NEUTRAL,
                             intensity, 0.6f + intensity * 0.5f, false);
                 }
-                if (tick % 7 == 0) { // spark crackle on top
-                    mc.level.playLocalSound(crashLoc.x, crashLoc.y, crashLoc.z,
-                            SoundEvents.FLINTANDSTEEL_USE, SoundSource.NEUTRAL,
-                            intensity * 0.6f, 1.3f + (tick % 14 == 0 ? 0.3f : 0.0f), false);
-                }
             }
             return; // no rolling audio while off the rails
         }

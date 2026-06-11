@@ -448,6 +448,20 @@ public final class SableTrainDriver {
         return (f.x * bodyFwd.x + f.z * bodyFwd.z) < 0.0 ? -1.0 : 1.0;
     }
 
+    /** True while the body carriage and every bogey follower still ride edges that exist in the graph. */
+    private static boolean railsValid(SableTrain train) {
+        Car car = train.car();
+        if (!car.carriage().edgesValid()) {
+            return false;
+        }
+        for (SableTrain.Bogey bogey : car.bogeys()) {
+            if (!bogey.rail().edgesValid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Pins the body sub-level to its rail pose (kinematic-pin fallback path). */
     private static void pinCar(PhysicsPipeline pipeline, ServerSubLevel bodySub, Car car, boolean post) {
         Vector3d bodyCenter = new Vector3d();
@@ -821,6 +835,24 @@ public final class SableTrainDriver {
             LoconauticsConstants.LOGGER.info(
                     "[sabletrain] car {} lost all its bogeys — released from the rail (now a free sub-level)",
                     train.id());
+            return;
+        }
+        // Track integrity: breaking a rail removes its edge from the graph, but stale TravellingPoints keep
+        // gliding along the phantom geometry — the train would sail straight over the gap (or off into the
+        // air). If any follower's edge no longer exists, re-seat the followers on the LIVE graph at the
+        // car's current spot: a break further along just shortens the edge (the car then meets the new track
+        // end normally); no rail under the car any more means the track is gone — derail.
+        if (!railsValid(train) && !SableTrainSpawner.reseatOnRail(train, sub)) {
+            train.setDerailed(true);
+            LAST_FORWARD.remove(train.id());
+            LoconauticsConstants.LOGGER.info(
+                    "[sabletrain] car {} lost its track (rail broken underneath) — derailed", train.id());
+            return;
+        }
+        // The speed-based rules below only apply while the train is travelling under its OWN drive (the
+        // Bearing Axle is commanding motion). External manipulation — dragging the car with the physics
+        // wand, thruster nudges, coupling pulls — must never derail it.
+        if (!train.isPowered() || Math.abs(train.targetSpeed()) < 0.01) {
             return;
         }
         // Cornering load: derail when mass × speed × turn-rate exceeds the limit (heavier/faster/sharper = worse).

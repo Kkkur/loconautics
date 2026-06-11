@@ -753,21 +753,18 @@ public final class SableTrainSpawner {
         if (carriage == null) {
             return;
         }
-        // Rebuild each bogey's reference rail near the new body location (it only feeds the yaw visual).
-        List<SableTrain.Bogey> bogeys = new ArrayList<>();
-        for (SableTrain.Bogey bogey : train.car().bogeys()) {
-            RailCarriage bogeyRail = RailCarriage.at(loc, upNormal, 1.0, 0.0);
-            if (bogeyRail != null) {
-                bogeys.add(new SableTrain.Bogey(bogey.localPos(), bogeyRail));
-            }
-        }
+        // CRITICAL: keep the ORIGINAL assembly reference frame. A fresh carriage captures its reference from
+        // the new rail's tangent, so orientation() would stop mapping the axis the car's blocks were actually
+        // built along — leaving the body permanently misaligned with the track (it "stops following the rail")
+        // whenever the target rail runs along a different axis than the original assembly.
+        carriage.adoptReferenceFrame(train.car().carriage());
 
-        train.relocate(carriage, bogeys);
-        train.setDerailed(false); // back on the rails (mirrors Create's train.derailed = false on relocate)
-
-        // Snap the body sub-level onto the new rail so the driver's constraint/pin doesn't yank it across the map.
+        // Snap the body sub-level onto the new rail FIRST, so each bogey block's world position on the new
+        // rail is known and its follower can be seated at its own exact arc position (mirrors assembly).
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
-        if (container != null && container.getSubLevel(subLevelId) instanceof ServerSubLevel sub && !sub.isRemoved()) {
+        ServerSubLevel sub = container != null
+                && container.getSubLevel(subLevelId) instanceof ServerSubLevel s && !s.isRemoved() ? s : null;
+        if (sub != null) {
             Vector3d center = carriage.center();
             if (center != null) {
                 sub.logicalPose().position().set(center);
@@ -776,10 +773,134 @@ public final class SableTrainSpawner {
             }
         }
 
+        // Re-seat each bogey's follower EXACTLY like first assembly does: find the track UNDER the bogey's
+        // own (snapped) position and align to its block centre — never seed every follower from the clicked
+        // block, whose arc estimate degrades with distance/curves and leaves the rear bogey turning late.
+        List<SableTrain.Bogey> bogeys = new ArrayList<>();
+        Vec3 railDir = carriage.forward(); // travel axis at the destination (better hint than the look ray)
+        int bogeyIdx = 0;
+        for (SableTrain.Bogey bogey : train.car().bogeys()) {
+            RailCarriage bogeyRail = null;
+            Vector3d w = null;
+            boolean ownRail = false;
+            if (sub != null) {
+                BlockPos bogeyWorld = sub.getPlot().getCenterBlock().offset(bogey.localPos());
+                w = sub.logicalPose().transformPosition(
+                        new Vector3d(bogeyWorld.getX() + 0.5, bogeyWorld.getY() + 0.5, bogeyWorld.getZ() + 0.5),
+                        new Vector3d());
+                TrackHit hit = findRailBelow(level, BlockPos.containing(w.x, w.y, w.z), railDir);
+                if (hit != null) {
+                    bogeyRail = RailCarriage.at(hit.location(), hit.upNormal(), 1.0, 0.0);
+                    ownRail = bogeyRail != null;
+                }
+            }
+            if (bogeyRail == null) {
+                bogeyRail = RailCarriage.at(loc, upNormal, 1.0, 0.0); // fallback: seed at the clicked block
+                if (bogeyRail == null) {
+                    continue;
+                }
+            }
+            // Align the follower's arc position to the bogey block's snapped centre (both paths).
+            if (w != null) {
+                Vector3d c = bogeyRail.center();
+                Vec3 fwd = bogeyRail.forward();
+                if (c != null) {
+                    double ds0 = (w.x - c.x) * fwd.x + (w.z - c.z) * fwd.z;
+                    if (Math.abs(ds0) > 1.0e-3) {
+                        bogeyRail.setSpeed(ds0);
+                        bogeyRail.tick();
+                        bogeyRail.setSpeed(0.0);
+                    }
+                }
+            }
+            Vector3d seated = bogeyRail.center();
+            LoconauticsConstants.LOGGER.info(
+                    "[sabletrain] relocate: bogey[{}] ownRail={} target={} -> follower={}",
+                    bogeyIdx, ownRail,
+                    w == null ? "null" : String.format("(%.1f, %.1f, %.1f)", w.x, w.y, w.z),
+                    seated == null ? "null" : String.format("(%.1f, %.1f, %.1f)", seated.x, seated.y, seated.z));
+            bogeys.add(new SableTrain.Bogey(bogey.localPos(), bogeyRail));
+            bogeyIdx++;
+        }
+
+        train.relocate(carriage, bogeys);
+        train.setDerailed(false); // back on the rails (mirrors Create's train.derailed = false on relocate)
+
         SableTrainPersistence.persist(train);
         SableTrainSyncPacket.broadcast(train); // marker is no longer derailed
         LoconauticsConstants.LOGGER.info("[sabletrain] relocated train {} (sub-level {}) to {}",
                 train.id(), subLevelId, pos);
+    }
+
+    /**
+     * Re-seats the train's followers on the LIVE track graph at the car's current position — used when the
+     * graph changed underneath it (a rail was broken or the network was rebuilt/split) and the followers'
+     * edges no longer exist. Keeps the body pose and speed untouched: the car simply continues riding the
+     * (possibly shortened) track from where it is, so a break further ahead is met at the new track end by
+     * the normal end-of-track rule. Returns {@code false} when there is no rail under the car/bogeys any
+     * more — the caller should derail it.
+     */
+    public static boolean reseatOnRail(SableTrain train, ServerSubLevel sub) {
+        ServerLevel level = train.level();
+        Vec3 fwd = train.car().carriage().forward();
+        Vector3dc p = sub.logicalPose().position();
+
+        TrackHit bodyHit = findRailBelow(level, BlockPos.containing(p.x(), p.y(), p.z()), fwd);
+        if (bodyHit == null) {
+            return false;
+        }
+        double spacing = train.car().carriage().bogeySpacing();
+        RailCarriage carriage = RailCarriage.at(bodyHit.location(), bodyHit.upNormal(), spacing, 0.0);
+        if (carriage == null) {
+            return false;
+        }
+        carriage.adoptReferenceFrame(train.car().carriage());
+        // Align the carriage's arc position to the body's actual centre (block-coarse seating otherwise).
+        Vector3d c = carriage.center();
+        Vec3 cf = carriage.forward();
+        if (c != null) {
+            double ds0 = (p.x() - c.x) * cf.x + (p.z() - c.z) * cf.z;
+            if (Math.abs(ds0) > 1.0e-3) {
+                carriage.setSpeed(ds0);
+                carriage.tick();
+                carriage.setSpeed(0.0);
+            }
+        }
+
+        // Each bogey follower re-seats at its own spot; a bogey with no rail below means the track is gone.
+        List<SableTrain.Bogey> bogeys = new ArrayList<>();
+        for (SableTrain.Bogey bogey : train.car().bogeys()) {
+            BlockPos bogeyWorld = sub.getPlot().getCenterBlock().offset(bogey.localPos());
+            Vector3d w = sub.logicalPose().transformPosition(
+                    new Vector3d(bogeyWorld.getX() + 0.5, bogeyWorld.getY() + 0.5, bogeyWorld.getZ() + 0.5),
+                    new Vector3d());
+            TrackHit hit = findRailBelow(level, BlockPos.containing(w.x, w.y, w.z), fwd);
+            if (hit == null) {
+                return false;
+            }
+            RailCarriage rail = RailCarriage.at(hit.location(), hit.upNormal(), 1.0, 0.0);
+            if (rail == null) {
+                return false;
+            }
+            Vector3d rc = rail.center();
+            Vec3 rf = rail.forward();
+            if (rc != null) {
+                double ds0 = (w.x - rc.x) * rf.x + (w.z - rc.z) * rf.z;
+                if (Math.abs(ds0) > 1.0e-3) {
+                    rail.setSpeed(ds0);
+                    rail.tick();
+                    rail.setSpeed(0.0);
+                }
+            }
+            bogeys.add(new SableTrain.Bogey(bogey.localPos(), rail));
+        }
+
+        double keepSpeed = train.speed();
+        train.relocate(carriage, bogeys);
+        train.setSpeed(keepSpeed); // mid-run re-seat: the car keeps rolling (relocate() zeroes it)
+        LoconauticsConstants.LOGGER.info(
+                "[sabletrain] re-seated train {} on the live track graph (rail broken/rebuilt nearby)", train.id());
+        return true;
     }
 
     /** True if a Create train bogey block sits in the cart's footprint (scanned down to the rail level). */

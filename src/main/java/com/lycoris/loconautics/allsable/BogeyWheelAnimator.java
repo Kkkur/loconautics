@@ -31,8 +31,26 @@ import net.neoforged.api.distmarker.OnlyIn;
 public final class BogeyWheelAnimator {
 
     private static final Map<AbstractBogeyBlockEntity, Vector3d> LAST_POS = new WeakHashMap<>();
+    /** Client-side index of the train bogey BEs currently being rendered, keyed to their sub-level id —
+     *  lets the particle emitter find each train's bogeys without scanning sub-level blocks. Written from
+     *  the render thread, read from the client tick, hence the synchronized wrapper. */
+    private static final Map<AbstractBogeyBlockEntity, java.util.UUID> RENDERED =
+            java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
     private BogeyWheelAnimator() {
+    }
+
+    /** Snapshot of the rendered bogey BEs belonging to the given train sub-level. */
+    public static java.util.List<AbstractBogeyBlockEntity> bogeysOf(java.util.UUID subLevelId) {
+        java.util.List<AbstractBogeyBlockEntity> out = new java.util.ArrayList<>(2);
+        synchronized (RENDERED) {
+            for (Map.Entry<AbstractBogeyBlockEntity, java.util.UUID> e : RENDERED.entrySet()) {
+                if (subLevelId.equals(e.getValue()) && !e.getKey().isRemoved()) {
+                    out.add(e.getKey());
+                }
+            }
+        }
+        return out;
     }
 
     /** Called once per rendered frame per bogey; advances the wheel animation by the distance moved. */
@@ -41,6 +59,7 @@ public final class BogeyWheelAnimator {
         if (sub == null || !SableTrainClientRegistry.isTrain(sub.getUniqueId())) {
             return;
         }
+        RENDERED.put(be, sub.getUniqueId());
         Vec3 w = sub.renderPose().transformPosition(Vec3.atCenterOf(be.getBlockPos()));
         Vector3d pos = new Vector3d(w.x, w.y, w.z);
         Vector3d last = LAST_POS.put(be, pos);
