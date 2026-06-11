@@ -14,7 +14,6 @@ import com.lycoris.loconautics.content.transmission.TransmissionBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.MenuType;
@@ -204,17 +203,8 @@ public final class LoconauticsRegistries {
         return new AnalogControllerBlockEntity(ANALOG_CONTROLLER_BE.get(), pos, state);
     }
 
-    static AnalogControllerMenu createAnalogControllerMenu(
-            int id,
-            Inventory inv,
-            RegistryFriendlyByteBuf buf
-    ) {
-        return new AnalogControllerMenu(
-                ANALOG_CONTROLLER_MENU.get(),
-                id,
-                inv,
-                buf
-        );
+    static AnalogControllerMenu createAnalogControllerMenu(int id, Inventory inv, RegistryFriendlyByteBuf buf) {
+        return new AnalogControllerMenu(ANALOG_CONTROLLER_MENU.get(), id, inv, buf);
     }
 
     static BearingAxleBlockEntity createBearingAxleBE(BlockPos pos, BlockState state) {
@@ -225,17 +215,8 @@ public final class LoconauticsRegistries {
         return new TransmissionBlockEntity(TRANSMISSION_BE.get(), pos, state);
     }
 
-    static TransmissionMenu createTransmissionMenu(
-            int id,
-            Inventory inv,
-            RegistryFriendlyByteBuf buf
-    ) {
-        return new TransmissionMenu(
-                TRANSMISSION_MENU.get(),
-                id,
-                inv,
-                buf
-        );
+    static TransmissionMenu createTransmissionMenu(int id, Inventory inv, RegistryFriendlyByteBuf buf) {
+        return new TransmissionMenu(TRANSMISSION_MENU.get(), id, inv, buf);
     }
 
     // ------------------------------------------------------------------ constructor / register

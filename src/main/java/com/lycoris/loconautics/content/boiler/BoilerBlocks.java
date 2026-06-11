@@ -1,6 +1,6 @@
 package com.lycoris.loconautics.content.boiler;
 
-import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.registry.LoconauticsRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -10,24 +10,23 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
-import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
+
+import com.lycoris.loconautics.core.LoconauticsConstants;
 
 /**
  * Deferred registrations for the steam boiler multiblock.
  *
- * <p>Call {@link #register(IEventBus)} once from the mod constructor alongside
- * the other registries.
+ * <p>Blocks and items are registered onto the shared registers in
+ * {@link LoconauticsRegistries} so that NeoForge sees a single
+ * DeferredRegister per registry namespace. The block-entity register
+ * is local because it is only used by the boiler.
  */
 public final class BoilerBlocks {
 
-    public static final DeferredRegister.Blocks BLOCKS =
-            DeferredRegister.createBlocks(LoconauticsConstants.MOD_ID);
-
-    public static final DeferredRegister.Items ITEMS =
-            DeferredRegister.createItems(LoconauticsConstants.MOD_ID);
-
+    // Block-entity types get their own register — there is no conflict here
+    // because LoconauticsRegistries doesn't have one that overlaps.
     public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITIES =
             DeferredRegister.create(net.minecraft.core.registries.Registries.BLOCK_ENTITY_TYPE,
                     LoconauticsConstants.MOD_ID);
@@ -35,7 +34,7 @@ public final class BoilerBlocks {
     // ------------------------------------------------------------------ Firebox
 
     public static final DeferredHolder<Block, FireboxBlock> FIREBOX =
-            BLOCKS.register("firebox", () -> new FireboxBlock(
+            LoconauticsRegistries.BLOCKS.register("firebox", () -> new FireboxBlock(
                     BlockBehaviour.Properties.of()
                             .mapColor(MapColor.STONE)
                             .strength(3.5f)
@@ -44,7 +43,7 @@ public final class BoilerBlocks {
             ));
 
     public static final DeferredHolder<Item, BlockItem> FIREBOX_ITEM =
-            ITEMS.register("firebox", () ->
+            LoconauticsRegistries.ITEMS.register("firebox", () ->
                     new BlockItem(FIREBOX.get(), new Item.Properties().stacksTo(64)));
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FireboxBlockEntity>>
@@ -56,7 +55,7 @@ public final class BoilerBlocks {
     // ------------------------------------------------------------------ Boiler Body
 
     public static final DeferredHolder<Block, BoilerBodyBlock> BOILER_BODY =
-            BLOCKS.register("boiler_body", () -> new BoilerBodyBlock(
+            LoconauticsRegistries.BLOCKS.register("boiler_body", () -> new BoilerBodyBlock(
                     BlockBehaviour.Properties.of()
                             .mapColor(MapColor.METAL)
                             .strength(3.5f)
@@ -65,13 +64,13 @@ public final class BoilerBlocks {
             ));
 
     public static final DeferredHolder<Item, BlockItem> BOILER_BODY_ITEM =
-            ITEMS.register("boiler_body", () ->
+            LoconauticsRegistries.ITEMS.register("boiler_body", () ->
                     new BlockItem(BOILER_BODY.get(), new Item.Properties().stacksTo(64)));
 
     // ------------------------------------------------------------------ Boiler Controller
 
     public static final DeferredHolder<Block, BoilerControllerBlock> BOILER_CONTROLLER =
-            BLOCKS.register("boiler_controller", () -> new BoilerControllerBlock(
+            LoconauticsRegistries.BLOCKS.register("boiler_controller", () -> new BoilerControllerBlock(
                     BlockBehaviour.Properties.of()
                             .mapColor(MapColor.METAL)
                             .strength(3.5f)
@@ -80,7 +79,7 @@ public final class BoilerBlocks {
             ));
 
     public static final DeferredHolder<Item, BlockItem> BOILER_CONTROLLER_ITEM =
-            ITEMS.register("boiler_controller", () ->
+            LoconauticsRegistries.ITEMS.register("boiler_controller", () ->
                     new BlockItem(BOILER_CONTROLLER.get(), new Item.Properties().stacksTo(64)));
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<BoilerControllerBlockEntity>>
@@ -103,9 +102,11 @@ public final class BoilerBlocks {
 
     private BoilerBlocks() {}
 
-    public static void register(IEventBus modEventBus) {
-        BLOCKS.register(modEventBus);
-        ITEMS.register(modEventBus);
+    /**
+     * Registers only the block-entity DeferredRegister.
+     * Blocks and items are already on the shared registers in LoconauticsRegistries.
+     */
+    public static void register(net.neoforged.bus.api.IEventBus modEventBus) {
         BLOCK_ENTITIES.register(modEventBus);
     }
 }

@@ -23,6 +23,7 @@ public final class Loconautics {
 
     public Loconautics(IEventBus modEventBus, ModContainer modContainer) {
         LoconauticsRegistries.register(modEventBus);
+        com.lycoris.loconautics.content.boiler.BoilerBlocks.register(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
 
