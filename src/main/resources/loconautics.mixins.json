@@ -9,7 +9,8 @@
   "client": [
     "client.RopeConnectorRendererMixin",
     "client.RopeWinchRendererMixin",
-    "client.RopeWinchBlockEntityAccessor"
+    "client.RopeWinchBlockEntityAccessor",
+    "client.BogeyYawVisualMixin"
   ],
   "injectors": {
     "defaultRequire": 1

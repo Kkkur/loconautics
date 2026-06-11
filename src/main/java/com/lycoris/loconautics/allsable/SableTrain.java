@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.joml.Vector3dc;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 
 /**
@@ -22,11 +23,15 @@ import net.minecraft.server.level.ServerLevel;
 public final class SableTrain {
 
     /**
-     * One LOOSE bogey: its own Sable sub-level (just the bogey block(s)) and a small {@link RailCarriage} that
-     * rides the rail so the bogey sits at its rail point and pivots to the local tangent — independently of the
-     * body. This is what makes bogeys turn on curves like Create (instead of being rigid with the body).
+     * One bogey block that stays part of the car's BODY sub-level (never detached/separated).
+     *
+     * <p>{@code localPos} is the bogey block's position within the body sub-level (used to find its
+     * block entity each tick so {@link SableTrainDriver} can push a yaw value into it).
+     * {@code rail} is a small 1-block-spacing {@link RailCarriage} seated on the rail directly under
+     * the bogey's spawn position — it is never advanced/ticked; it exists only so the driver can read
+     * the local rail tangent/orientation at that point on the track for the yaw calculation.
      */
-    public record Bogey(UUID subLevelId, RailCarriage rail) {}
+    public record Bogey(BlockPos localPos, RailCarriage rail) {}
 
     /**
      * One carriage: the BODY sub-level id (the cart minus its bogeys) + the rail body (target) that says where
@@ -131,9 +136,5 @@ public final class SableTrain {
         }
         car.carriage().setSpeed(speed);
         car.carriage().tick();
-        for (Bogey bogey : car.bogeys()) {
-            bogey.rail().setSpeed(speed);
-            bogey.rail().tick();
-        }
     }
 }

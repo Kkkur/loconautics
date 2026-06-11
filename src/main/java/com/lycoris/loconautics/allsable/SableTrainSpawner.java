@@ -139,27 +139,25 @@ public final class SableTrainSpawner {
             return null;
         }
 
-        // 4) Separate the LOOSE bogeys from the body. Each Create bogey block becomes its OWN sub-level that
-        //    rides the rail and pivots to the local tangent; the body is the cart MINUS the bogeys. (Detect the
-        //    bogeys NOW, while everything is still in the world.)
+        // 4) Find the bogey blocks (Create train bogeys) WITHOUT removing them from the cart — they stay
+        //    part of the body sub-level and never move on their own. We only record where they are
+        //    (in WORLD space for now; converted to the body's LOCAL frame after assembly) and seat a
+        //    small reference RailCarriage under each one, purely so SableTrainDriver can read the local
+        //    rail tangent at that point each tick and feed it to BogeyYawVisual as a visual-only yaw.
         List<BlockPos> bogeyPositions = new ArrayList<>();
         for (BlockPos p : blocks) {
             if (level.getBlockState(p).getBlock() instanceof AbstractBogeyBlock) {
                 bogeyPositions.add(p.immutable());
             }
         }
-        // Order bogeys front-to-back along the travel direction, so the body's chord (first->last bogey) points
-        // the same way as the body's own reference and the cars stay consistent.
+        // Order bogeys front-to-back along the travel direction, for consistency with previous behaviour.
         bogeyPositions.sort(java.util.Comparator.comparingDouble(p -> p.getX() * railDir.x + p.getZ() * railDir.z));
-        Set<BlockPos> bodyBlocks = new HashSet<>(blocks);
-        bodyBlocks.removeAll(bogeyPositions);
-        if (bodyBlocks.isEmpty()) { // degenerate cart (only bogeys): keep it whole, no separation
-            bodyBlocks = blocks;
-            bogeyPositions.clear();
-        }
-        BoundingBox3i bodyBounds = BoundingBox3i.from(bodyBlocks);
 
-        // Body sub-level (cart minus bogeys). MOVES the body blocks out of the world; bogey blocks stay for now.
+        // The body is the WHOLE cart — bogeys are no longer split out.
+        Set<BlockPos> bodyBlocks = blocks;
+        BoundingBox3i bodyBounds = bounds;
+
+        // Body sub-level (the entire cart, including its bogey blocks).
         BlockPos bodyAnchor = bodyBlocks.contains(origin) ? origin : bodyBlocks.iterator().next();
         ServerSubLevel sub = SubLevelAssemblyHelper.assembleBlocks(level, bodyAnchor, bodyBlocks, bodyBounds);
         if (sub == null) {
@@ -167,22 +165,22 @@ public final class SableTrainSpawner {
             return null;
         }
 
-        // One sub-level per bogey, each seated on the rail directly under it (so it rides + pivots on its own).
+        // One reference RailCarriage per bogey, seated on the rail directly under its (former world)
+        // position — used ONLY to read the local tangent for the yaw visual, never advanced/ticked.
+        // localPos is the bogey's position relative to the body sub-level's anchor block, so the driver
+        // can find the bogey's BlockEntity inside the sub-level each tick.
         List<SableTrain.Bogey> bogeys = new ArrayList<>();
         for (BlockPos bp : bogeyPositions) {
             TrackHit bogeyTrack = findRailBelow(level, bp, railDir);
             if (bogeyTrack == null) {
-                continue; // no rail under this bogey — skip it
+                continue; // no rail under this bogey — skip it (no yaw visual, but it still rides the body)
             }
             RailCarriage bogeyRail = RailCarriage.at(bogeyTrack.location(), bogeyTrack.upNormal(), 1.0, 0.0);
             if (bogeyRail == null) {
                 continue;
             }
-            BoundingBox3i bbBounds = new BoundingBox3i(bp.getX(), bp.getY(), bp.getZ(), bp.getX(), bp.getY(), bp.getZ());
-            ServerSubLevel bogeySub = SubLevelAssemblyHelper.assembleBlocks(level, bp, List.of(bp), bbBounds);
-            if (bogeySub != null) {
-                bogeys.add(new SableTrain.Bogey(bogeySub.getUniqueId(), bogeyRail));
-            }
+            BlockPos localPos = bp.subtract(bodyAnchor);
+            bogeys.add(new SableTrain.Bogey(localPos, bogeyRail));
         }
 
         // 5) Re-locate the rail under the BODY's horizontal CENTRE so the body lines up over its bogeys.

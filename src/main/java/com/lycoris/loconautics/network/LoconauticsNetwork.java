@@ -1,6 +1,7 @@
 package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
+import com.lycoris.loconautics.network.packets.AssembleSableTrainPacket;
 import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
@@ -61,6 +62,13 @@ public final class LoconauticsNetwork {
                 SteelCableStrandPacket.TYPE,
                 SteelCableStrandPacket.STREAM_CODEC,
                 SteelCableStrandPacket::handle
+        );
+
+        // Client -> Server: assemble Sable physics train from the station assembly screen.
+        registrar.playToServer(
+                AssembleSableTrainPacket.TYPE,
+                AssembleSableTrainPacket.STREAM_CODEC,
+                AssembleSableTrainPacket::handle
         );
     }
 
