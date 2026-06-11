@@ -18,6 +18,11 @@
 
   "itemGroup.loconautics.main": "Loconautics",
 
+  "loconautics.train.approach_station": "Hold %1$s to approach %2$s",
+  "loconautics.train.approaching_station": "Approaching %s",
+  "loconautics.train.arrived_at": "Arrived at %s",
+  "loconautics.train.departing_from": "Departing from %s",
+
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
   "loconautics.assembly.missing_bearing_axle": "No Bearing Axle found in the assembly area",
 

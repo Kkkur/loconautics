@@ -119,6 +119,7 @@ public final class LoconauticsClient {
 
     private void onClientTick(ClientTickEvent.Pre event) {
         AnalogControllerClientHandler.tick();
+        AnalogControllerHUD.tick();
         SableTrainRelocator.clientTick();
     }
 

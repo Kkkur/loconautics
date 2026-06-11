@@ -1,12 +1,17 @@
 package com.lycoris.loconautics.content.analogcontroller;
 
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.foundation.gui.AllGuiTextures;
 import net.createmod.catnip.animation.LerpedFloat;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
@@ -45,6 +50,31 @@ public class AnalogControllerHUD {
     // Animated bar values — chase actual values each frame like TrainHUD
     private static final LerpedFloat displayedSpeed    = LerpedFloat.linear();
     private static final LerpedFloat displayedThrottle = LerpedFloat.linear();
+
+    // Station-stop prompt banner — written by AnalogControllerStationPromptPacket, rendered here.
+    // Mirrors TrainHUD.currentPrompt / promptKeepAlive / displayedPromptSize exactly.
+    public static Component currentPrompt;
+    public static boolean currentPromptShadow;
+    public static int promptKeepAlive = 0;
+    private static final LerpedFloat displayedPromptSize = LerpedFloat.linear();
+
+    /**
+     * Per-client-tick update for the station-stop banner (called once per game tick from {@code LoconauticsClient},
+     * NOT per frame). Mirrors {@code TrainHUD.tick()}: the keepalive is a discrete tick counter, so decrementing it
+     * in {@link #render} (which runs every frame) would make it lapse in a fraction of a second and flicker.
+     */
+    public static void tick() {
+        if (promptKeepAlive > 0) {
+            promptKeepAlive--;
+        } else {
+            currentPrompt = null;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        displayedPromptSize.chase(
+                currentPrompt != null ? (double) (mc.font.width((FormattedText) currentPrompt) + 17) : 0.0,
+                0.5, LerpedFloat.Chaser.EXP);
+        displayedPromptSize.tickChaser();
+    }
 
     private static void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
@@ -121,6 +151,37 @@ public class AnalogControllerHUD {
         int textX = dirZoneAbsX + (DIR_ZONE_W - textW) / 2;
         int textY = dirZoneCtrY - mc.font.lineHeight / 2 + 4;
         graphics.drawString(mc.font, powerText, textX, textY, 0xFFFFFF, true);
+
+        // Station-stop prompt banner — copied from TrainHUD.renderOverlay (same widgets.png sheet, same anchor).
+        // The HUD bar anchor (originX, barY) is identical to Create's TrainHUD translate, so the prompt origin
+        // (-promptSize/2 + 91, -27) lands in the same screen position for both HUDs.
+        int promptSize = (int) displayedPromptSize.getValue(partialTicks);
+        if (promptSize > 1) {
+            PoseStack poseStack = graphics.pose();
+            poseStack.pushPose();
+            poseStack.translate(originX, barY, 0.0f);
+            poseStack.pushPose();
+            poseStack.translate(promptSize / -2.0f + 91.0f, -27.0f, 0.0f);
+            AllGuiTextures.TRAIN_PROMPT_L.render(graphics, -3, 0);
+            AllGuiTextures.TRAIN_PROMPT_R.render(graphics, promptSize, 0);
+            graphics.blit(AllGuiTextures.TRAIN_PROMPT.location, 0, 0, 0,
+                    AllGuiTextures.TRAIN_PROMPT.getStartX() + (128.0f - promptSize / 2.0f),
+                    AllGuiTextures.TRAIN_PROMPT.getStartY(), promptSize, AllGuiTextures.TRAIN_PROMPT.getHeight(),
+                    256, 256);
+            poseStack.popPose();
+            Font font = mc.font;
+            if (currentPrompt != null && font.width((FormattedText) currentPrompt) < promptSize - 10) {
+                poseStack.pushPose();
+                poseStack.translate(font.width((FormattedText) currentPrompt) / -2.0f + 82.0f, -27.0f, 100.0f);
+                if (currentPromptShadow) {
+                    graphics.drawString(font, currentPrompt, 9, 4, 0x544D45);
+                } else {
+                    graphics.drawString(font, currentPrompt, 9, 4, 0x544D45, false);
+                }
+                poseStack.popPose();
+            }
+            poseStack.popPose();
+        }
 
         // Lock icon centered on the speed bar
         if (locked) {

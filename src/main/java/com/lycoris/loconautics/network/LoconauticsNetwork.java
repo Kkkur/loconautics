@@ -7,10 +7,12 @@ import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerMountPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerScrollPacket;
+import com.lycoris.loconautics.network.packets.AnalogControllerStationPromptPacket;
 import com.lycoris.loconautics.network.packets.AnalogControllerDismountPacket;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -44,6 +46,13 @@ public final class LoconauticsNetwork {
                 AnalogControllerMountPacket.TYPE,
                 AnalogControllerMountPacket.STREAM_CODEC,
                 AnalogControllerMountPacket::handle
+        );
+
+        // Server -> Client: station-stop banner for the Analog Controller HUD.
+        registrar.playToClient(
+                AnalogControllerStationPromptPacket.TYPE,
+                AnalogControllerStationPromptPacket.STREAM_CODEC,
+                AnalogControllerStationPromptPacket::handle
         );
 
         // Client -> Server: scroll wheel adjusted the max-power cap.
@@ -93,6 +102,11 @@ public final class LoconauticsNetwork {
     /** Tells a specific client player they have mounted/dismounted an Analog Controller. */
     public static void sendMount(ServerPlayer player, boolean mounted, BlockPos pos) {
         PacketDistributor.sendToPlayer(player, new AnalogControllerMountPacket(mounted, pos));
+    }
+
+    /** Pushes a station-stop banner to a specific operator's Analog Controller HUD. */
+    public static void sendStationPrompt(ServerPlayer player, Component text, boolean shadow) {
+        PacketDistributor.sendToPlayer(player, new AnalogControllerStationPromptPacket(text, shadow));
     }
 
     /** Sends a dismount request from client to server. */

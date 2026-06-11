@@ -81,6 +81,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     private boolean raisingSignal  = false;
     private boolean loweringSignal = false;
+    /** Space (jump) held — used as the "hold to approach/park at a station" control, mirroring Create. */
+    private boolean spaceSignal    = false;
 
     private int raiseTimer = RAISE_TICKS;
     private int lowerTimer = LOWER_TICKS;
@@ -156,6 +158,20 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     }
 
     private void serverTick(Level level, BlockState state) {
+        // --- station lockout: if this controller lives inside a Sable train that is stopping/stopped at a
+        // station, the operator has no control. Zero the power (if needed) and skip everything else this tick. ---
+        com.lycoris.loconautics.allsable.SableTrain train = sableTrainAt(level);
+        if (train != null && train.isAtStation()) {
+            if (currentPower != 0) {
+                currentPower = 0;
+                updateNetwork(level);
+                updateBlockState(level, state);
+                setChanged();
+                sendData();
+            }
+            return;
+        }
+
         // --- sanity: disconnect stale user ---
         if (currentUser != null) {
             Player player = level.getPlayerByUUID(currentUser);
@@ -281,6 +297,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         currentUser    = player.getUUID();
         raisingSignal  = false;
         loweringSignal = false;
+        spaceSignal    = false;
         raiseTimer     = RAISE_TICKS;
         lowerTimer     = LOWER_TICKS;
         updateBlockState(level, getBlockState());
@@ -306,6 +323,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         currentUser    = null;
         raisingSignal  = false;
         loweringSignal = false;
+        spaceSignal    = false;
         updateBlockState(level, getBlockState());
         setChanged();
         sendData();
@@ -331,6 +349,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                     }
                 }
             }
+            case 4 -> { // Space → hold to approach / park at a station (read by SableTrainDriver)
+                spaceSignal = pressed;
+            }
             case 5 -> { // Shift → toggle lock
                 if (pressed) {
                     locked = !locked;
@@ -339,6 +360,16 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                 }
             }
         }
+    }
+
+    /** True while the operator holds Space (the "approach/park at station" control). */
+    public boolean isSpaceHeld() {
+        return spaceSignal;
+    }
+
+    /** True while the operator holds W (raise / depart). */
+    public boolean isForwardHeld() {
+        return raisingSignal;
     }
 
     // ------------------------------------------------------------------ network
@@ -467,6 +498,31 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         maxPower = Math.max(0, Math.min(MAX_POWER, maxPower + delta));
         setChanged();
         sendData();
+    }
+
+    /**
+     * Resolves the {@link com.lycoris.loconautics.allsable.SableTrain} this controller lives inside, or
+     * {@code null} if it isn't in a train sub-level. The controller's {@code level} is the parent level that
+     * hosts every Sable sub-level as a plot region; we find the plot covering this block's position, read its
+     * sub-level UUID, and map that to a registered train.
+     */
+    @Nullable
+    private com.lycoris.loconautics.allsable.SableTrain sableTrainAt(Level level) {
+        dev.ryanhcode.sable.api.sublevel.SubLevelContainer container =
+                dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return null;
+        }
+        dev.ryanhcode.sable.sublevel.plot.LevelPlot plot =
+                container.getPlot(new net.minecraft.world.level.ChunkPos(worldPosition));
+        if (plot == null) {
+            return null;
+        }
+        dev.ryanhcode.sable.sublevel.SubLevel sub = plot.getSubLevel();
+        if (sub == null) {
+            return null;
+        }
+        return com.lycoris.loconautics.allsable.SableTrainRegistry.bySubLevel(sub.getUniqueId());
     }
 
     private boolean playerInRange(Player player) {

@@ -97,6 +97,22 @@ public final class RailCarriage {
         return leadingPos().add(trailingPos()).scale(0.5);
     }
 
+    /** The leading bogey's {@link TravellingPoint} (read-only): its current edge + along-edge position, used by
+     *  {@link SableTrainDriver} to scan the rail ahead for stations without touching the carriage internals. */
+    public TravellingPoint leading() {
+        return leading;
+    }
+
+    /** The Create track graph this carriage rides (read-only) — needed to resolve edge-point geometry. */
+    public TrackGraph graph() {
+        return graph;
+    }
+
+    /** Track up-normal used to build the steering selectors — needed to scout the rail ahead across edges. */
+    public Vec3 upNormal() {
+        return upNormal;
+    }
+
     public Vec3 leadingPos() {
         return leading.getPosition(graph);
     }

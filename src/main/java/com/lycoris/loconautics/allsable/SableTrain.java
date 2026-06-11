@@ -5,6 +5,8 @@ import java.util.UUID;
 
 import org.joml.Vector3dc;
 
+import com.simibubi.create.content.trains.station.GlobalStation;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 
@@ -42,6 +44,19 @@ public final class SableTrain {
     public record Car(UUID subLevelId, RailCarriage carriage, List<Bogey> bogeys,
                       Vector3dc localLead, Vector3dc localTrail) {}
 
+    /**
+     * Station-stop lifecycle, driven by {@link SableTrainDriver#tickStation}:
+     * <ul>
+     *   <li>{@code RUNNING}  — normal propulsion; the driver scans the rail ahead for a station.</li>
+     *   <li>{@code STOPPING} — a station was detected; distance-based braking owns {@code targetSpeed} until stopped.</li>
+     *   <li>{@code STOPPED}  — parked at the marker, holding {@code targetSpeed} at zero for the dwell.</li>
+     *   <li>{@code DEPARTING}— dwell elapsed; normal propulsion resumes until the train is visibly moving again.</li>
+     * </ul>
+     */
+    public enum StationState {
+        RUNNING, STOPPING, STOPPED, DEPARTING
+    }
+
     private final UUID id;
     private final ServerLevel level;
     /** The car. Mutable: wrench relocation re-seats the car on a new rail location (see {@link #relocate}). */
@@ -69,6 +84,24 @@ public final class SableTrain {
     /** Latest total weight (kg) of the whole hauled consist (this car + everything coupled to it), refreshed by
      *  {@link SableTrainDriver}. Drives weight-scaled acceleration/braking. 0 until first computed. */
     private double haulMass = 0.0;
+
+    // ---------------------------------------------------------------------------------------------
+    // Station stopping (driven entirely by SableTrainDriver.tickStation).
+    // ---------------------------------------------------------------------------------------------
+
+    /** Current station-stop phase. */
+    private StationState stationState = StationState.RUNNING;
+    /** Along-rail distance (blocks) remaining to the station edge point: measured once when the station is first
+     *  detected, decremented each tick by {@code abs(speed)}. The braking formula reads from it. */
+    private double distanceToStation = Double.MAX_VALUE;
+    /** Remaining dwell ticks while {@code STOPPED}. */
+    private int dwellTicks = 0;
+    /** The station currently being approached/served, or {@code null} when {@code RUNNING}/{@code DEPARTING}. */
+    private GlobalStation currentStation = null;
+    /** Along-rail travel direction toward the station being served: {@code +1} = node1→node2, {@code -1} = reverse.
+     *  Captured when the station is detected so the braking curve drives the train the right way (carriages have
+     *  no inherent front, so a station can be on either side). */
+    private double stationDirection = 1.0;
 
     public SableTrain(UUID id, ServerLevel level, Car car, boolean physics) {
         this.id = id;
@@ -103,6 +136,10 @@ public final class SableTrain {
         this.car = new Car(car.subLevelId(), newCarriage, newBogeys, car.localLead(), car.localTrail());
         this.speed = 0.0;
         this.targetSpeed = 0.0;
+        this.stationState = StationState.RUNNING;
+        this.distanceToStation = Double.MAX_VALUE;
+        this.dwellTicks = 0;
+        this.currentStation = null;
     }
 
     public double speed() {
@@ -152,6 +189,56 @@ public final class SableTrain {
     /** Updates the cached hauled-consist weight (called by {@link SableTrainDriver} from the game tick). */
     public void setHaulMass(double haulMass) {
         this.haulMass = haulMass;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Station-stop state.
+    // ---------------------------------------------------------------------------------------------
+
+    public StationState stationState() {
+        return stationState;
+    }
+
+    public void setStationState(StationState state) {
+        this.stationState = state;
+    }
+
+    /** True while the train is braking for, or parked at, a station (operator controls are locked out). */
+    public boolean isAtStation() {
+        return stationState == StationState.STOPPING || stationState == StationState.STOPPED;
+    }
+
+    public double distanceToStation() {
+        return distanceToStation;
+    }
+
+    public void setDistanceToStation(double distance) {
+        this.distanceToStation = distance;
+    }
+
+    public int dwellTicks() {
+        return dwellTicks;
+    }
+
+    public void setDwellTicks(int ticks) {
+        this.dwellTicks = ticks;
+    }
+
+    public GlobalStation currentStation() {
+        return currentStation;
+    }
+
+    public void setCurrentStation(GlobalStation station) {
+        this.currentStation = station;
+    }
+
+    /** Along-rail direction toward the station being served (+1 = node1→node2, -1 = reverse). */
+    public double stationDirection() {
+        return stationDirection;
+    }
+
+    public void setStationDirection(double direction) {
+        this.stationDirection = direction;
     }
 
     public void setAccel(double accel) {

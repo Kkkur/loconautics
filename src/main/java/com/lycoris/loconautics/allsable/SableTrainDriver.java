@@ -8,15 +8,27 @@ import org.joml.Vector3dc;
 
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.allsable.SableTrain.Car;
+import com.lycoris.loconautics.allsable.SableTrain.StationState;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
+import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
+import com.lycoris.loconautics.network.LoconauticsNetwork;
 import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlockEntity;
 // (AbstractBogeyBlock is used both for the yaw visual target and to detect when a car has lost all its wheels.)
+import com.simibubi.create.content.trains.entity.TravellingPoint;
+import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
+import com.simibubi.create.content.trains.graph.TrackGraph;
+import com.simibubi.create.content.trains.graph.TrackNode;
+import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.infrastructure.config.AllConfigs;
+
+import net.createmod.catnip.data.Couple;
+import net.minecraft.network.chat.Component;
 
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
@@ -477,10 +489,12 @@ public final class SableTrainDriver {
         }
         boolean diag = (diagCounter++ % 20) == 0;
         boolean updateMass = (massCounter++ % 10) == 0;
+        stationTickCounter++;
         for (SableTrain train : SableTrainRegistry.all()) {
             try {
                 checkDerailment(train);
                 applyPropulsion(train);
+                tickStation(train, operatedControllerIn(train));
                 train.tickMotion();
                 updateBogeyYaw(train);
                 if (updateMass) {
@@ -717,6 +731,287 @@ public final class SableTrainDriver {
         // is the least stressful (no slope term at all). Motion on slopes is left entirely to Sable's gravity.
         boolean slope = Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get();
         axle.setSlopeAngle(slope && isClimbing(train, rpm) ? inclineDegrees(sub) : 0.0);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Station stopping (mirrors Create's manual driving): an "approach" prompt appears when a station is on the
+    // leading bogey's edge ahead; the operator holds Space to engage a distance-based braking curve that parks the
+    // train exactly at the marker; pressing W departs. Runs between applyPropulsion (which writes targetSpeed from
+    // the Bearing Axle RPM) and tickMotion (which ramps speed toward targetSpeed), so braking can own targetSpeed.
+    // ---------------------------------------------------------------------------------------------
+
+    /** Constant deceleration used by the station braking curve (blocks/tick²). Tunable. */
+    private static final double STATION_DECELERATION = 0.003;
+    /** Park when the nearest bogey is within this many blocks of the marker (the braking curve has crept it in). */
+    private static final double STATION_PARK_EPSILON = 0.4;
+    /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
+     *  the bogey, so the train always parks at the same offset relative to the marker. */
+    private static final double STATION_FRONT_OFFSET = 4.0;
+    /** Amber/brass colour Create uses for station names in prompts. */
+    private static final int STATION_NAME_COLOR = 7358000;
+    /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
+    private static int stationTickCounter = 0;
+
+    /** A reachable station: the {@code GlobalStation}, the along-rail distance to it, and the travel direction
+     *  toward it ({@code +1} = node1→node2, {@code -1} = reverse). */
+    private record StationTarget(GlobalStation station, double distance, double direction) {}
+
+    /**
+     * Drives the station-stop state machine for one train, reading the mounted operator's controls
+     * ({@code controller}, may be {@code null} when nobody is driving) and pushing HUD prompts as Create does.
+     */
+    private static void tickStation(SableTrain train, AnalogControllerBlockEntity controller) {
+        // Parking is a BEARING AXLE feature: only a powered locomotive (the car carrying a Bearing Axle) can approach
+        // and park at stations — exactly like a Bearing-Axle-driven train. A car that is derailed, a free physics
+        // body, or has no axle (isPowered is set false by applyPropulsion when no axle is present) never enters the
+        // station state machine, and any car that loses its axle mid-stop is released back to RUNNING.
+        if (train.isDerailed() || train.isPhysics() || !train.isPowered()) {
+            if (train.stationState() != StationState.RUNNING) {
+                train.setStationState(StationState.RUNNING);
+                train.setCurrentStation(null);
+                train.setDistanceToStation(Double.MAX_VALUE);
+            }
+            return;
+        }
+
+        boolean spaceHeld = controller != null && controller.isSpaceHeld();
+        boolean forwardHeld = controller != null && controller.isForwardHeld();
+        ServerPlayer operator = controller != null ? operatorOf(train, controller) : null;
+        boolean resend = (stationTickCounter % 10) == 0; // keep the banner's client keepalive (30t) from lapsing
+
+        switch (train.stationState()) {
+            case RUNNING -> {
+                // Speed-and-distance gate (mirrors Navigation.findNearestApproachable): the prompt/arming only
+                // become available once the station is within braking range for the CURRENT speed — so it appears
+                // later when you're slow, earlier when you're fast — and not while still too close to stop cleanly.
+                double brakingDistance = (train.speed() * train.speed()) / (2.0 * STATION_DECELERATION);
+                double minDistance = 0.75 * brakingDistance;
+                double maxDistance = Math.max(32.0, 1.5 * brakingDistance);
+                StationTarget target = scanStation(train, maxDistance, null);
+                if (target == null || target.distance() < minDistance) {
+                    return;
+                }
+                if (spaceHeld) {
+                    // Operator committed: arm the approach — the curve drives the train toward the marker (forward
+                    // or backward, whichever side the station is on) and parks it there.
+                    train.setCurrentStation(target.station());
+                    train.setDistanceToStation(target.distance());
+                    train.setStationDirection(target.direction());
+                    train.setStationState(StationState.STOPPING);
+                } else if (operator != null && resend) {
+                    // "Hold [Jump] to approach <station>" — the prompt the operator acts on.
+                    sendApproachPrompt(operator, target.station());
+                }
+            }
+            case STOPPING -> {
+                if (!spaceHeld) {
+                    // Released before parking: abort and hand control back (matches Create cancelling navigation).
+                    train.setStationState(StationState.RUNNING);
+                    train.setCurrentStation(null);
+                    train.setDistanceToStation(Double.MAX_VALUE);
+                    return;
+                }
+                // Re-MEASURE the live along-rail distance from the nearest bogey to the committed station every tick.
+                // Dead-reckoning (distance -= speed) drifts several blocks because the sampled speed never matches the
+                // sub-step movement exactly; re-scanning ties the stop to the real bogey↔marker geometry, so the train
+                // parks at the SAME spot every time. Search a little past the last known distance to stay bounded.
+                double searchRange = Math.max(32.0, train.distanceToStation() + 8.0);
+                StationTarget live = scanStation(train, searchRange, train.currentStation());
+                if (live == null) {
+                    // Lost sight of the station (rail/switch changed) — release control gracefully.
+                    train.setStationState(StationState.RUNNING);
+                    train.setCurrentStation(null);
+                    train.setDistanceToStation(Double.MAX_VALUE);
+                    return;
+                }
+                double distance = live.distance();
+                train.setDistanceToStation(distance);
+                train.setStationDirection(live.direction());
+                if (distance <= STATION_PARK_EPSILON) {
+                    // A bogey is on the marker: stop and park.
+                    train.setSpeed(0.0);
+                    train.setTargetSpeed(0.0);
+                    train.setStationState(StationState.STOPPED);
+                    return;
+                }
+                // direction × sqrt(2·decel·distance): a speed profile that DRIVES the train toward the marker (it
+                // accelerates from rest up to this, then the shrinking distance tapers it to zero on arrival).
+                // Capped to the train's top speed so it never commands more than the axle can deliver.
+                double mag = Math.min(Math.sqrt(2.0 * STATION_DECELERATION * distance), bearingAxleCapBpt());
+                train.setTargetSpeed(live.direction() * mag); // overrides whatever applyPropulsion just wrote
+                if (operator != null && resend) {
+                    sendStationPrompt(operator, "loconautics.train.approaching_station", train.currentStation());
+                }
+            }
+            case STOPPED -> {
+                train.setTargetSpeed(0.0);
+                if (forwardHeld) {
+                    // Operator pulls away: depart and release the controls lockout next tick.
+                    if (operator != null) {
+                        sendStationPrompt(operator, "loconautics.train.departing_from", train.currentStation());
+                    }
+                    train.setStationState(StationState.DEPARTING);
+                    train.setCurrentStation(null);
+                    train.setDistanceToStation(Double.MAX_VALUE);
+                } else if (operator != null && resend) {
+                    sendStationPrompt(operator, "loconautics.train.arrived_at", train.currentStation());
+                }
+            }
+            case DEPARTING -> {
+                if (Math.abs(train.speed()) > 0.001) {
+                    train.setStationState(StationState.RUNNING);
+                }
+            }
+        }
+    }
+
+    /**
+     * Walks the rail for the nearest approachable {@link GlobalStation}, mirroring how Create's station detects a
+     * train: the <b>front of any bogey is eligible, from either side</b> (Create checks the track one block under a
+     * bogey, forward and backward — see {@code StationBlockEntity.trackClicked}). Because these carriages have no
+     * inherent front, it scouts from every bogey's rail point in <b>both</b> directions, across edges up to
+     * {@code maxDistance}, and returns the nearest station with the travel direction needed to reach it. Steers
+     * straight through junctions and applies the same {@code canApproachFrom} platform-side check. Uses throwaway
+     * copies of each {@link TravellingPoint} so the live carriage is never moved. {@code null} if none in range.
+     */
+    private static StationTarget scanStation(SableTrain train, double maxDistance, GlobalStation target) {
+        RailCarriage carriage = train.car().carriage();
+        StationTarget best = null;
+        var bogeys = train.car().bogeys();
+        if (bogeys.isEmpty()) {
+            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target);
+        } else {
+            for (SableTrain.Bogey bogey : bogeys) {
+                best = nearer(best, scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target));
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Scouts forward and backward from one origin point, returning the nearer approachable station. When
+     * {@code target} is non-null only that station qualifies (used to keep re-measuring the committed stop);
+     * when null any approachable station qualifies (used to find one to approach).
+     */
+    private static StationTarget scoutBothWays(RailCarriage carriage, TravellingPoint origin, double maxDistance,
+                                               GlobalStation target) {
+        if (origin == null || origin.edge == null) {
+            return null;
+        }
+        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target),
+                scoutDirection(carriage, origin, maxDistance, -1.0, target));
+    }
+
+    /** Returns whichever {@link StationTarget} is closer (handling nulls). */
+    private static StationTarget nearer(StationTarget a, StationTarget b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a.distance() <= b.distance() ? a : b;
+    }
+
+    /**
+     * Scouts one direction ({@code direction} = +1 forward / -1 backward) for the nearest approachable station.
+     * If {@code target} is non-null, only that station qualifies (others are passed over); otherwise any does.
+     */
+    private static StationTarget scoutDirection(RailCarriage carriage, TravellingPoint origin,
+                                                double maxDistance, double direction, GlobalStation target) {
+        TravellingPoint scout = new TravellingPoint(
+                origin.node1, origin.node2, origin.edge, origin.position, origin.upsideDown);
+        GlobalStation[] found = { null };
+        double[] foundDistance = { 0.0 };
+        TravellingPoint.IEdgePointListener listener = (distance, pair) -> {
+            if (!(pair.getFirst() instanceof GlobalStation station)) {
+                return false; // skip signals/observers — keep scanning
+            }
+            if (target != null && station != target) {
+                return false; // looking for a specific station — keep scanning past others
+            }
+            Couple<TrackNode> nodes = pair.getSecond(); // already oriented to travel direction by travel()
+            if (!station.canApproachFrom(nodes.getSecond())) {
+                return false;
+            }
+            found[0] = station;
+            foundDistance[0] = Math.abs(distance);
+            return true; // stop the scout at the first approachable station
+        };
+        scout.travel(carriage.graph(), direction * maxDistance,
+                scout.steer(SteerDirection.NONE, carriage.upNormal()),
+                listener, scout.ignoreTurns(), scout.ignorePortals());
+        if (found[0] == null) {
+            return null;
+        }
+        return new StationTarget(found[0], foundDistance[0], direction);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Station prompts: push the operator's Analog Controller HUD banner (same wording/colour as Create).
+    // ---------------------------------------------------------------------------------------------
+
+    /** "Hold [Jump] to approach <station>" — the call-to-action prompt while a station is reachable ahead. */
+    private static void sendApproachPrompt(ServerPlayer player, GlobalStation station) {
+        if (station == null) {
+            return;
+        }
+        Component name = Component.literal(station.name).withStyle(s -> s.withColor(STATION_NAME_COLOR));
+        Component text = Component.translatable("loconautics.train.approach_station",
+                Component.keybind("key.jump"), name);
+        LoconauticsNetwork.sendStationPrompt(player, text, false);
+    }
+
+    /** Builds the amber-named banner Component (matching Create's wording/colour) and sends it to the operator. */
+    private static void sendStationPrompt(ServerPlayer player, String key, GlobalStation station) {
+        if (station == null) {
+            return;
+        }
+        Component name = Component.literal(station.name).withStyle(s -> s.withColor(STATION_NAME_COLOR));
+        LoconauticsNetwork.sendStationPrompt(player, Component.translatable(key, name), false);
+    }
+
+    /** Resolves the {@link ServerPlayer} mounted on the given controller, or {@code null}. */
+    private static ServerPlayer operatorOf(SableTrain train, AnalogControllerBlockEntity controller) {
+        UUID userId = controller.getCurrentUser();
+        if (userId == null) {
+            return null;
+        }
+        return train.level().getPlayerByUUID(userId) instanceof ServerPlayer sp ? sp : null;
+    }
+
+    /** The {@link AnalogControllerBlockEntity} with an active user inside this train's sub-level, or {@code null}. */
+    private static AnalogControllerBlockEntity operatedControllerIn(SableTrain train) {
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        if (container == null) {
+            return null;
+        }
+        Car car = train.car();
+        if (car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return null;
+        }
+        AnalogControllerBlockEntity controller = analogControllerIn(sub);
+        return (controller != null && controller.hasUser()) ? controller : null;
+    }
+
+    /** Scans a sub-level for an {@link AnalogControllerBlock}'s block entity (mirrors {@link #bearingAxleIn}). */
+    private static AnalogControllerBlockEntity analogControllerIn(ServerSubLevel sub) {
+        ServerLevel subLevel = sub.getLevel();
+        var bounds = sub.getPlot().getBoundingBox();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (subLevel.getBlockState(pos).getBlock() instanceof AnalogControllerBlock
+                            && subLevel.getBlockEntity(pos) instanceof AnalogControllerBlockEntity controller) {
+                        return controller;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /** Create's configured train top speed (m/s) — the value both Loconautics caps defer to when set to -1. */
