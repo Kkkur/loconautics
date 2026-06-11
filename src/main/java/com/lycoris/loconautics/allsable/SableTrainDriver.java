@@ -96,6 +96,9 @@ public final class SableTrainDriver {
     /** Debug escape hatch: force the legacy kinematic teleport-pin instead of the constraint-glued drive. */
     private static final boolean USE_KINEMATIC_PIN = false;
 
+    /** Cap (blocks) on the bogey visual rail-snap offset, so a desynced rail follower can't fling the model. */
+    private static final double MAX_BOGEY_VISUAL_OFFSET = 1.5;
+
     /** Pre-step: drive each non-legacy car; legacy cars get springs. */
     public static void onPhysicsTick(SubLevelPhysicsSystem system, double timeStep) {
         forEachCar(system, (pipeline, container, sub, train, car) -> {
@@ -160,9 +163,29 @@ public final class SableTrainDriver {
             return;
         }
         tangent = forwardUnit(carriage);
+        Quaterniond q = carriage.orientation();
+
+        // THE SUB-LEVEL ADAPTS TO THE BOGEYS (Create-style), not the other way around: with 2+ bogeys, the
+        // body's constraint pose is derived FROM the bogeys' own rail points — pinned at their midpoint and
+        // oriented along the chord between them, exactly how Create stretches a carriage between its bogey
+        // anchors. The rigid bogey blocks then land on their rail points by construction, instead of the
+        // bogeys being visually dragged to wherever the body's own follower put them.
+        var bogeys = car.bogeys();
+        if (bogeys.size() >= 2) {
+            Vector3d rear = bogeys.get(0).rail().center();
+            Vector3d front = bogeys.get(bogeys.size() - 1).rail().center();
+            if (rear != null && front != null) {
+                Vector3d chord = new Vector3d(front).sub(rear);
+                if (chord.lengthSquared() > 1.0e-9) {
+                    railPoint = new Vector3d(front).add(rear).mul(0.5);
+                    tangent = new Vector3d(chord).normalize();
+                    q = carriage.orientationTo(chord);
+                }
+            }
+        }
 
         // Body: prismatic joint — perpendicular + rotation hard-locked, tangent free.
-        glueBodyPrismatic(pipeline, bodySub, localAnchor, railPoint, tangent, carriage.orientation());
+        glueBodyPrismatic(pipeline, bodySub, localAnchor, railPoint, tangent, q);
 
         // Bearing Axle propulsion.
         if (train.isPowered()) {
@@ -343,11 +366,50 @@ public final class SableTrainDriver {
      * Each bogey keeps its own {@link RailCarriage} so it tracks the tangent at its own position on the
      * track — necessary for correct yaw on cars where front and rear bogeys are on different parts of a curve.
      */
+    /** Per-tick clamp on the follow correction, so a badly-off follower glides back instead of jumping. */
+    private static final double MAX_FOLLOW_CORRECTION = 0.5;
+
     private static void advanceRail(Car car, double ds) {
         car.carriage().setSpeed(ds);
         car.carriage().tick();
-        for (SableTrain.Bogey bogey : car.bogeys()) {
-            bogey.rail().setSpeed(ds);
+
+        var bogeys = car.bogeys();
+        if (bogeys.isEmpty()) {
+            return;
+        }
+        Vec3 bodyFwd = car.carriage().forward();
+
+        // Create-style follow: bogey followers do NOT advance independently. The leading bogey (last in
+        // front-to-back order) advances by ds; every other follower additionally corrects its travel so the
+        // 3D CHORD distance to the bogey ahead stays equal to their rigid block distance — exactly Create's
+        // Carriage "stress" mechanism (CarriageBogey.getStress / TravellingPoint.follow). This continuously
+        // heals any arc error (coarse seating, reversed axis, past dead-end parks), pinning each bogey to its
+        // own point on the curve instead of letting it hang off the body pose.
+        int n = bogeys.size();
+        SableTrain.Bogey lead = bogeys.get(n - 1);
+        lead.rail().unstick();
+        lead.rail().setSpeed(ds * travelSign(lead, bodyFwd));
+        lead.rail().tick();
+
+        for (int i = n - 2; i >= 0; i--) {
+            SableTrain.Bogey ahead = bogeys.get(i + 1);
+            SableTrain.Bogey bogey = bogeys.get(i);
+            bogey.rail().unstick();
+            double move = ds * travelSign(bogey, bodyFwd);
+
+            Vector3d cAhead = ahead.rail().center();
+            Vector3d cThis = bogey.rail().center();
+            if (cAhead != null && cThis != null) {
+                double chord = cAhead.distance(cThis);
+                double rigid = Math.sqrt(bogey.localPos().distSqr(ahead.localPos()));
+                double err = chord - rigid; // >0: lagging too far behind the bogey ahead
+                Vec3 f = bogey.rail().forward();
+                double toward = (cAhead.x - cThis.x) * f.x + (cAhead.z - cThis.z) * f.z;
+                double corr = Math.max(-MAX_FOLLOW_CORRECTION, Math.min(MAX_FOLLOW_CORRECTION, err));
+                move += toward >= 0.0 ? corr : -corr;
+            }
+
+            bogey.rail().setSpeed(move);
             bogey.rail().tick();
         }
     }
@@ -378,6 +440,12 @@ public final class SableTrainDriver {
                 be.animate(distanceMoved);
             }
         }
+    }
+
+    /** +1/−1 so a follower seated facing the other way still advances along the body's travel direction. */
+    private static double travelSign(SableTrain.Bogey bogey, Vec3 bodyFwd) {
+        Vec3 f = bogey.rail().forward();
+        return (f.x * bodyFwd.x + f.z * bodyFwd.z) < 0.0 ? -1.0 : 1.0;
     }
 
     /** Pins the body sub-level to its rail pose (kinematic-pin fallback path). */
@@ -502,6 +570,11 @@ public final class SableTrainDriver {
     private static int diagCounter = 0;
     private static int massCounter = 0;
 
+    /** Last speed broadcast to clients per train, so the marker only re-syncs when the speed actually moves. */
+    private static final java.util.Map<UUID, Double> SYNCED_SPEED = new java.util.HashMap<>();
+    /** Trains whose last broadcast marker said "derailed" (so a derail flip always re-syncs immediately). */
+    private static final java.util.Set<UUID> SYNCED_DERAILED = new java.util.HashSet<>();
+
     /** Full-syncs every active train sub-level's relocation marker to a player when they join (so the wrench
      *  flow recognises trains that were assembled before they connected). */
     @SubscribeEvent
@@ -525,8 +598,9 @@ public final class SableTrainDriver {
                 applyPropulsion(train);
                 tickStation(train, operatedControllerIn(train));
                 train.tickMotion();
-                updateBogeyYaw(train);
+                updateBogeyYaw(train, diag);
                 updateBogeyWheels(train);
+                syncSpeed(train);
                 if (updateMass) {
                     updateAxleMass(train);
                 }
@@ -539,6 +613,28 @@ public final class SableTrainDriver {
         }
     }
 
+    /**
+     * Re-broadcasts the train's client marker when its speed has moved meaningfully since the last sync, so
+     * clients always know the authoritative speed (drives the train sounds) without per-tick packet spam:
+     * while cruising at constant speed nothing is sent.
+     */
+    private static void syncSpeed(SableTrain train) {
+        double speed = train.speed();
+        boolean derailed = train.isDerailed();
+        Double last = SYNCED_SPEED.get(train.id());
+        boolean lastDerailed = SYNCED_DERAILED.contains(train.id());
+        if (last != null && Math.abs(last - speed) < 0.004 && derailed == lastDerailed) {
+            return;
+        }
+        SYNCED_SPEED.put(train.id(), speed);
+        if (derailed) {
+            SYNCED_DERAILED.add(train.id());
+        } else {
+            SYNCED_DERAILED.remove(train.id());
+        }
+        SableTrainSyncPacket.broadcast(train);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Bogey yaw: compute the visual yaw for every bogey in the car and push it into the BE.
     // ---------------------------------------------------------------------------------------------
@@ -549,7 +645,7 @@ public final class SableTrainDriver {
      * can rotate the bogey's partial model. Works for any bogey type because it targets
      * {@link AbstractBogeyBlockEntity}, which all Create-compatible bogeys extend.
      */
-    private static void updateBogeyYaw(SableTrain train) {
+    private static void updateBogeyYaw(SableTrain train, boolean diag) {
         ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
         if (container == null) {
             return;
@@ -562,6 +658,9 @@ public final class SableTrainDriver {
         }
         if (car.bogeys().isEmpty()) {
             return;
+        }
+        if (train.isDerailed()) {
+            return; // off the rails — the rail followers are stale; the wheels freeze in their last visual pose
         }
 
         // Body forward in world space. Create renders each bogey at its OWN absolute track angle, after undoing
@@ -586,14 +685,21 @@ public final class SableTrainDriver {
 
         ServerLevel subLevel = sub.getLevel();
 
+        int index = 0;
         for (SableTrain.Bogey bogey : car.bogeys()) {
             // Rail tangent at this specific bogey's position on the track.
             Vec3 bogeyFwd = bogey.rail().forward();
             Vector3d bogeyTangent = new Vector3d(bogeyFwd.x, bogeyFwd.y, bogeyFwd.z);
             if (bogeyTangent.lengthSquared() < 1.0e-9) {
+                index++;
                 continue;
             }
             bogeyTangent.normalize();
+            // The bogey model is front-back symmetric: measure against the nearest half-turn of the tangent,
+            // so a follower seated facing the other way doesn't read as a ±180° yaw (wrong pivot direction).
+            if (bodyForward.dot(bogeyTangent) < 0.0) {
+                bogeyTangent.mul(-1.0);
+            }
 
             // Yaw angle: signed angle around Y between body forward and bogey tangent.
             // atan2 of the cross product (Y component) vs dot product gives the signed angle.
@@ -604,11 +710,55 @@ public final class SableTrainDriver {
             // Without the flip the wheels pivot AWAY from the rail instead of turning to follow it.
             float yawDeg = -(float) Math.toDegrees(Math.atan2(cross, dot));
 
-            // Find the bogey's BlockEntity inside the sub-level and push the yaw into it.
+            // Visual position correction: the bogey block is carried rigidly by the body, which sits on the
+            // CHORD between its bogeys — on curves the rigid position drifts off the rail (inward sagitta +
+            // along-track). Create renders each bogey at its own point ON the rail; reproduce that by offsetting
+            // the rendered model from its rigid position to the rail point under it. Horizontal only — the mount
+            // height above the rail stays rigid. Expressed in the body sub-level's local axes, the frame the BE
+            // renderer's pose stack lives in.
             BlockPos worldPos = sub.getPlot().getCenterBlock().offset(bogey.localPos());
-            if (subLevel.getBlockEntity(worldPos) instanceof AbstractBogeyBlockEntity be) {
-                BogeyYawVisual.setLocalYaw(be, yawDeg);
+            float offX = 0.0f, offY = 0.0f, offZ = 0.0f;
+            Vector3d railC = bogey.rail().center();
+            if (railC != null) {
+                Vector3d rigidW = sub.logicalPose().transformPosition(
+                        new Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5),
+                        new Vector3d());
+                Vector3d offW = new Vector3d(railC).sub(rigidW);
+                offW.y = 0.0; // keep the rigid mount height; correct the rail-plane drift only
+                // LATERAL correction only: project out the along-track component. The follower's arc position
+                // is only block-accurate, so the longitudinal part of (rail − rigid) is noise that would drag
+                // the wheels along the track — the perpendicular part is what centres them on the rail line.
+                Vector3d tanH = new Vector3d(bogeyTangent.x, 0.0, bogeyTangent.z);
+                if (tanH.lengthSquared() > 1.0e-9) {
+                    tanH.normalize();
+                    offW.sub(tanH.mul(offW.dot(tanH)));
+                }
+                if (offW.lengthSquared() > MAX_BOGEY_VISUAL_OFFSET * MAX_BOGEY_VISUAL_OFFSET) {
+                    offW.normalize().mul(MAX_BOGEY_VISUAL_OFFSET); // follower glitch — don't fling the model
+                }
+                Vector3d offL = sub.logicalPose().orientation().transformInverse(offW, new Vector3d());
+                offX = (float) offL.x;
+                offY = (float) offL.y;
+                offZ = (float) offL.z;
             }
+
+            // Find the bogey's BlockEntity inside the sub-level and push the visual pose into it.
+            boolean beFound = false;
+            if (subLevel.getBlockEntity(worldPos) instanceof AbstractBogeyBlockEntity be) {
+                BogeyYawVisual.setLocalVisual(be, yawDeg, offX, offY, offZ);
+                beFound = true;
+            }
+
+            if (diag) {
+                double fwdDot = bogeyFwd.x * bodyForward.x + bogeyFwd.z * bodyForward.z;
+                LoconauticsConstants.LOGGER.info(
+                        "[sabletrain] bogey[{}] yaw={} latOff=({}, {}) fwdDotBody={} stopped={} beFound={} railC={}",
+                        index, String.format("%.1f", yawDeg), String.format("%.2f", offX),
+                        String.format("%.2f", offZ), String.format("%.2f", fwdDot),
+                        bogey.rail().stopped(), beFound,
+                        railC == null ? "null" : String.format("(%.1f, %.1f, %.1f)", railC.x, railC.y, railC.z));
+            }
+            index++;
         }
     }
 
@@ -671,7 +821,65 @@ public final class SableTrainDriver {
             LoconauticsConstants.LOGGER.info(
                     "[sabletrain] car {} lost all its bogeys — released from the rail (now a free sub-level)",
                     train.id());
+            return;
         }
+        // Cornering load: derail when mass × speed × turn-rate exceeds the limit (heavier/faster/sharper = worse).
+        if (Config.DERAIL_ON_CURVE.get()) {
+            double lateral = lateralLoad(train, sub);
+            if (lateral > Config.DERAIL_MAX_LATERAL_FORCE.get()) {
+                train.setDerailed(true);
+                LAST_FORWARD.remove(train.id());
+                LoconauticsConstants.LOGGER.info(
+                        "[sabletrain] car {} derailed cornering: load {} > {} (mass*speed*turn)",
+                        train.id(), f(lateral), f(Config.DERAIL_MAX_LATERAL_FORCE.get()));
+                return;
+            }
+        }
+        // Off the end of the track: the carriage's rail point hit a dead end. If it arrives with enough momentum
+        // (mass × speed) and there's no buffer, it flies off the rail instead of parking.
+        if (Config.DERAIL_AT_TRACK_END.get() && car.carriage().stopped()) {
+            double impact = trainMass(sub) * Math.abs(train.speed()) * 20.0; // mass × m/s
+            if (impact > Config.DERAIL_MAX_END_IMPACT.get()) {
+                train.setDerailed(true);
+                LAST_FORWARD.remove(train.id());
+                LoconauticsConstants.LOGGER.info(
+                        "[sabletrain] car {} ran off the track end with impact {} > {} (no buffer) — derailed",
+                        train.id(), f(impact), f(Config.DERAIL_MAX_END_IMPACT.get()));
+            }
+        }
+    }
+
+    /** Body forward (horizontal) from the previous tick, per train — used to measure the turn rate. */
+    private static final java.util.Map<UUID, Vector3d> LAST_FORWARD = new java.util.HashMap<>();
+
+    /**
+     * Cornering load on the rails this tick: {@code mass × speed(m/s) × turnRate(rad/s)}. The turn rate is how
+     * fast the body's heading is rotating (this tick's forward vs last tick's), so it is 0 on straight track and
+     * grows with sharper, faster turns. Multiplying by mass means heavier trains push harder — matching the
+     * "velocity × mass" rule. Returns 0 when there's no previous heading yet (first tick).
+     */
+    private static double lateralLoad(SableTrain train, ServerSubLevel sub) {
+        Vec3 f = train.car().carriage().forward();
+        Vector3d fwd = new Vector3d(f.x, 0.0, f.z);
+        if (fwd.lengthSquared() < 1.0e-9) {
+            return 0.0;
+        }
+        fwd.normalize();
+        Vector3d last = LAST_FORWARD.put(train.id(), new Vector3d(fwd));
+        if (last == null) {
+            return 0.0; // no previous heading to compare against yet
+        }
+        double dYaw = Math.acos(Math.max(-1.0, Math.min(1.0, last.dot(fwd)))); // radians turned this tick
+        double turnRate = dYaw * 20.0;                       // rad/s
+        double speed = Math.abs(train.speed()) * 20.0;       // m/s
+        return trainMass(sub) * speed * turnRate;
+    }
+
+    /** Train mass (kg) from the sub-level's mass tracker, falling back to a live block-sum if unavailable. */
+    private static double trainMass(ServerSubLevel sub) {
+        MassData md = sub.getMassTracker();
+        double m = (md != null && !md.isInvalid()) ? md.getMass() : 0.0;
+        return m > 0.0 ? m : liveMass(sub);
     }
 
     /** True if the body sub-level still contains at least one Create bogey block (the car's wheels). */

@@ -234,6 +234,46 @@ public final class Config {
         BUILDER.pop();
     }
 
+    // ------------------------------------------------------------------ Derailment
+
+    /** Whether a train derails when it corners too hard (lateral force = mass × speed × turn-rate). */
+    public static final ModConfigSpec.BooleanValue DERAIL_ON_CURVE;
+    /** Lateral force (mass × speed × turn-rate) above which a cornering train flies off the rail. */
+    public static final ModConfigSpec.DoubleValue DERAIL_MAX_LATERAL_FORCE;
+    /** Whether a train derails when it runs off the end of a track (with no buffer) above an impact. */
+    public static final ModConfigSpec.BooleanValue DERAIL_AT_TRACK_END;
+    /** Head-on impact (mass × speed) at a dead end above which the train derails instead of parking. */
+    public static final ModConfigSpec.DoubleValue DERAIL_MAX_END_IMPACT;
+
+    static {
+        BUILDER.push("derailment");
+
+        DERAIL_ON_CURVE = BUILDER
+                .comment("Whether a train derails when it takes a curve too hard.",
+                        "The cornering load is mass * speed(m/s) * turn-rate(rad/s) — i.e. heavier, faster, and",
+                        "sharper-turning trains push harder on the rails. Above maxLateralForce it leaves the rail.")
+                .define("derailOnCurve", true);
+
+        DERAIL_MAX_LATERAL_FORCE = BUILDER
+                .comment("Cornering load (mass * speed * turn-rate) above which a train derails on a curve.",
+                        "Higher = harder to derail. TUNE IN-GAME: lower it until reckless cornering derails but",
+                        "normal running does not. Scales with train mass, so heavy trains derail at lower speeds.",
+                        "Default 60.0.")
+                .defineInRange("maxLateralForce", 60.0, 0.0, 1.0e9);
+
+        DERAIL_AT_TRACK_END = BUILDER
+                .comment("Whether a train derails when it runs off the END of a track (no buffer present).",
+                        "Below maxEndImpact it parks at the dead end; above it, it flies off the rail.")
+                .define("derailAtTrackEnd", true);
+
+        DERAIL_MAX_END_IMPACT = BUILDER
+                .comment("Head-on impact (mass * speed in m/s) at a dead end above which the train derails.",
+                        "Higher = harder to derail. Scales with mass. Default 50.0.")
+                .defineInRange("maxEndImpact", 50.0, 0.0, 1.0e9);
+
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {

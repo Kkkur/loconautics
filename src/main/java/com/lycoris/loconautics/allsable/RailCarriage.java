@@ -226,6 +226,12 @@ public final class RailCarriage {
         return stopped;
     }
 
+    /** Clears a dead-end park. Bogey reference rails must keep following their car (the BODY carriage is
+     *  what governs actually stopping the train), so the driver unsticks them before each advance. */
+    public void unstick() {
+        stopped = false;
+    }
+
     public double bogeySpacing() {
         return bogeySpacing;
     }
