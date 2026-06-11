@@ -69,8 +69,10 @@ public final class SableTrain {
     private double speed = 0.0;
     /** Desired speed (blocks/tick). Set by propulsion (bearing axle) or debug. Signed = direction. */
     private double targetSpeed = 0.0;
+    /** Default acceleration magnitude (blocks/tick per tick) outside a station approach. */
+    public static final double DEFAULT_ACCEL = 0.01;
     /** Acceleration magnitude (blocks/tick per tick). */
-    private double accel = 0.01;
+    private double accel = DEFAULT_ACCEL;
     /** True when a Bearing Axle is driving the train this tick: the driver then servos the along-rail speed toward
      *  {@link #targetSpeed}. When false the train is purely force-driven (gravity, propellers, shoves move it). */
     private boolean powered = false;
@@ -102,6 +104,9 @@ public final class SableTrain {
      *  Captured when the station is detected so the braking curve drives the train the right way (carriages have
      *  no inherent front, so a station can be on either side). */
     private double stationDirection = 1.0;
+    /** Total approach distance captured the tick the operator commits (Space): the denominator of the HUD progress
+     *  bar — mirrors {@code CarriageContraptionEntity.navDistanceTotal}. Transient, like Create's. */
+    private double navDistanceTotal = 0.0;
 
     public SableTrain(UUID id, ServerLevel level, Car car, boolean physics) {
         this.id = id;
@@ -239,6 +244,15 @@ public final class SableTrain {
 
     public void setStationDirection(double direction) {
         this.stationDirection = direction;
+    }
+
+    /** Total approach distance at commit time (HUD progress-bar denominator). */
+    public double navDistanceTotal() {
+        return navDistanceTotal;
+    }
+
+    public void setNavDistanceTotal(double distance) {
+        this.navDistanceTotal = distance;
     }
 
     public void setAccel(double accel) {

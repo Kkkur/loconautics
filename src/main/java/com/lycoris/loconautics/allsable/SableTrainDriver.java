@@ -13,6 +13,8 @@ import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlock;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerBlockEntity;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlock;
 import com.lycoris.loconautics.content.bearingaxle.BearingAxleBlockEntity;
+import com.lycoris.loconautics.content.transmission.TransmissionBlock;
+import com.lycoris.loconautics.content.transmission.TransmissionBlockEntity;
 import com.lycoris.loconautics.core.LoconauticsConstants;
 import com.lycoris.loconautics.network.LoconauticsNetwork;
 import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
@@ -25,10 +27,14 @@ import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
 import com.simibubi.create.content.trains.graph.TrackGraph;
 import com.simibubi.create.content.trains.graph.TrackNode;
 import com.simibubi.create.content.trains.station.GlobalStation;
+import com.simibubi.create.content.trains.track.BezierConnection;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 
 import net.createmod.catnip.data.Couple;
+import net.createmod.catnip.theme.Color;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.util.Mth;
 
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
@@ -719,10 +725,25 @@ public final class SableTrainDriver {
         }
         // An axle present means this car is the locomotive: it both drives and brakes (rear cars have no axle and
         // are merely dragged). Downhill free-rolling is handled in applyTangentialDrive, not by withholding power.
-        double rpm = axle.getSpeed();
         train.setPowered(true);
 
         double maxSpeed = bearingAxleCapBpt();
+
+        // Throttle source: the Analog Controller's forward/backward 0–15 signal, decoded by the Transmission block.
+        // We read the Transmission's decoded signal directly because it's updated by the redstone-link callback
+        // (not by ticking), so it stays live inside the sub-level — unlike the Bearing Axle's kinetic RPM, which
+        // never propagates there (block entities in sub-levels don't tick). The Bearing Axle is still the drive
+        // block (locomotive identity, mass, braking); when no Transmission is wired we fall back to its RPM.
+        double rpm;
+        TransmissionBlockEntity transmission = transmissionIn(sub);
+        if (transmission != null) {
+            int power = transmission.getRedstonePower();              // 0..15 (forward magnitude)
+            double dir = transmission.isDirectionActive() ? -1.0 : 1.0; // backward freq active = reverse
+            rpm = dir * (power / 15.0) * 256.0;                       // map the signal to an equivalent axle RPM
+        } else {
+            rpm = axle.getSpeed();
+        }
+
         double target = (rpm / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
         train.setTargetSpeed(target);
@@ -734,27 +755,51 @@ public final class SableTrainDriver {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Station stopping (mirrors Create's manual driving): an "approach" prompt appears when a station is on the
-    // leading bogey's edge ahead; the operator holds Space to engage a distance-based braking curve that parks the
-    // train exactly at the marker; pressing W departs. Runs between applyPropulsion (which writes targetSpeed from
-    // the Bearing Axle RPM) and tickMotion (which ramps speed toward targetSpeed), so braking can own targetSpeed.
+    // Station stopping — a faithful port of Create's manual-driving station approach
+    // (CarriageContraptionEntity.control + Navigation.tick + Train.approachTargetSpeed): an "approach" prompt
+    // appears when a station is in braking range; the operator holds Space to commit, which hands targetSpeed to
+    // Create's navigation speed profile (full speed until inside the braking distance v²/2a, the 10-block approach
+    // cap, the final 1/32 b/t creep that always crosses the marker, and the curve slowdown) until the train parks;
+    // any throttle input departs. Runs between applyPropulsion (which writes targetSpeed from the Bearing Axle RPM)
+    // and tickMotion (which ramps speed toward targetSpeed), so the approach can own targetSpeed.
     // ---------------------------------------------------------------------------------------------
 
-    /** Constant deceleration used by the station braking curve (blocks/tick²). Tunable. */
-    private static final double STATION_DECELERATION = 0.003;
-    /** Park when the nearest bogey is within this many blocks of the marker (the braking curve has crept it in). */
+    /** Park when the nearest bogey is within this many blocks of the marker. Create truncates the carriage's
+     *  travel exactly on the marker (Train.frontSignalListener); a physics-driven body needs a tolerance instead. */
     private static final double STATION_PARK_EPSILON = 0.4;
     /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
      *  the bogey, so the train always parks at the same offset relative to the marker. */
-    private static final double STATION_FRONT_OFFSET = 4.0;
-    /** Amber/brass colour Create uses for station names in prompts. */
-    private static final int STATION_NAME_COLOR = 7358000;
+    private static final double STATION_FRONT_OFFSET = -7.2;
+    /** Brown colour Create uses for station names in the arrived/departing prompts (0x704630). */
+    private static final int STATION_NAME_COLOR = 0x704630;
     /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
     private static int stationTickCounter = 0;
 
-    /** A reachable station: the {@code GlobalStation}, the along-rail distance to it, and the travel direction
-     *  toward it ({@code +1} = node1→node2, {@code -1} = reverse). */
-    private record StationTarget(GlobalStation station, double distance, double direction) {}
+    /** A reachable station: the {@code GlobalStation}, the along-rail distance to it, the travel direction toward
+     *  it ({@code +1} = node1→node2, {@code -1} = reverse), and the distance to the nearest slowdown-worthy curve
+     *  on the way ({@code -1} = none) for Create's turn slowdown. */
+    private record StationTarget(GlobalStation station, double distance, double direction, double distanceToNextCurve) {}
+
+    /** Create's train acceleration in blocks/tick² ({@code Train.acceleration()} for an unpowered/no-fuel train). */
+    private static double trainAcceleration() {
+        return AllConfigs.server().trains.trainAcceleration.getF() / 400.0;
+    }
+
+    /** Create's turning top speed in blocks/tick ({@code Train.maxTurnSpeed()} for an unpowered train). */
+    private static double maxTurnSpeedBpt() {
+        return AllConfigs.server().trains.trainTurningTopSpeed.getF() / 20.0;
+    }
+
+    /** Mirrors {@link com.simibubi.create.content.trains.entity.Navigation#cancelNavigation}: releases the
+     *  reservation and hands the controls back to normal driving. */
+    private static void cancelApproach(SableTrain train) {
+        SableStationParking.cancelReservation(train, train.currentStation());
+        train.setStationState(StationState.RUNNING);
+        train.setCurrentStation(null);
+        train.setDistanceToStation(Double.MAX_VALUE);
+        train.setNavDistanceTotal(0.0);
+        train.setAccel(SableTrain.DEFAULT_ACCEL);
+    }
 
     /**
      * Drives the station-stop state machine for one train, reading the mounted operator's controls
@@ -767,24 +812,24 @@ public final class SableTrainDriver {
         // station state machine, and any car that loses its axle mid-stop is released back to RUNNING.
         if (train.isDerailed() || train.isPhysics() || !train.isPowered()) {
             if (train.stationState() != StationState.RUNNING) {
-                train.setStationState(StationState.RUNNING);
-                train.setCurrentStation(null);
-                train.setDistanceToStation(Double.MAX_VALUE);
+                cancelApproach(train);
             }
             return;
         }
 
         boolean spaceHeld = controller != null && controller.isSpaceHeld();
-        boolean forwardHeld = controller != null && controller.isForwardHeld();
+        boolean throttleHeld = controller != null
+                && (controller.isForwardHeld() || controller.isBackwardHeld());
         ServerPlayer operator = controller != null ? operatorOf(train, controller) : null;
         boolean resend = (stationTickCounter % 10) == 0; // keep the banner's client keepalive (30t) from lapsing
 
         switch (train.stationState()) {
             case RUNNING -> {
-                // Speed-and-distance gate (mirrors Navigation.findNearestApproachable): the prompt/arming only
-                // become available once the station is within braking range for the CURRENT speed — so it appears
-                // later when you're slow, earlier when you're fast — and not while still too close to stop cleanly.
-                double brakingDistance = (train.speed() * train.speed()) / (2.0 * STATION_DECELERATION);
+                // Speed-and-distance gate (Navigation.findNearestApproachable): the prompt/arming only become
+                // available once the station is within braking range for the CURRENT speed — so it appears later
+                // when you're slow, earlier when you're fast — and not while still too close to stop cleanly.
+                double acceleration = trainAcceleration();
+                double brakingDistance = (train.speed() * train.speed()) / (2.0 * acceleration);
                 double minDistance = 0.75 * brakingDistance;
                 double maxDistance = Math.max(32.0, 1.5 * brakingDistance);
                 StationTarget target = scanStation(train, maxDistance, null);
@@ -792,11 +837,14 @@ public final class SableTrainDriver {
                     return;
                 }
                 if (spaceHeld) {
-                    // Operator committed: arm the approach — the curve drives the train toward the marker (forward
+                    // Operator committed (control(): startNavigation + the navDistanceTotal capture that feeds
+                    // the progress bar) — Create's speed profile now drives the train toward the marker (forward
                     // or backward, whichever side the station is on) and parks it there.
                     train.setCurrentStation(target.station());
                     train.setDistanceToStation(target.distance());
                     train.setStationDirection(target.direction());
+                    train.setNavDistanceTotal(target.distance());
+                    train.setAccel(acceleration); // approachTargetSpeed ramps at Create's acceleration()
                     train.setStationState(StationState.STOPPING);
                 } else if (operator != null && resend) {
                     // "Hold [Jump] to approach <station>" — the prompt the operator acts on.
@@ -805,55 +853,56 @@ public final class SableTrainDriver {
             }
             case STOPPING -> {
                 if (!spaceHeld) {
-                    // Released before parking: abort and hand control back (matches Create cancelling navigation).
-                    train.setStationState(StationState.RUNNING);
-                    train.setCurrentStation(null);
-                    train.setDistanceToStation(Double.MAX_VALUE);
+                    // Released before parking (control(): !spaceDown → nav.cancelNavigation()).
+                    cancelApproach(train);
                     return;
                 }
                 // Re-MEASURE the live along-rail distance from the nearest bogey to the committed station every tick.
-                // Dead-reckoning (distance -= speed) drifts several blocks because the sampled speed never matches the
-                // sub-step movement exactly; re-scanning ties the stop to the real bogey↔marker geometry, so the train
-                // parks at the SAME spot every time. Search a little past the last known distance to stay bounded.
+                // (Create dead-reckons distanceToDestination -= actual distance moved; re-scanning yields the same
+                // value without drift, because our advance happens in physics substeps the game tick can't see.)
+                // Search a little past the last known distance to stay bounded.
                 double searchRange = Math.max(32.0, train.distanceToStation() + 8.0);
                 StationTarget live = scanStation(train, searchRange, train.currentStation());
                 if (live == null) {
                     // Lost sight of the station (rail/switch changed) — release control gracefully.
-                    train.setStationState(StationState.RUNNING);
-                    train.setCurrentStation(null);
-                    train.setDistanceToStation(Double.MAX_VALUE);
+                    cancelApproach(train);
                     return;
                 }
                 double distance = live.distance();
                 train.setDistanceToStation(distance);
                 train.setStationDirection(live.direction());
+                // Navigation.tick: destination.reserveFor(train) every tick of the approach.
+                SableStationParking.reserveFor(train, train.currentStation());
+                if (operator != null) {
+                    // control(): the in-cab progress bar, refreshed every tick while Space is held.
+                    sendProgressBar(operator, train);
+                }
                 if (distance <= STATION_PARK_EPSILON) {
-                    // A bogey is on the marker: stop and park.
+                    // Train.frontSignalListener: the marker is crossed → speed = 0, arrive. The reservation is
+                    // kept — a parked holder is what presentSableTrain() reports as the station's present train.
                     train.setSpeed(0.0);
                     train.setTargetSpeed(0.0);
                     train.setStationState(StationState.STOPPED);
                     return;
                 }
-                // direction × sqrt(2·decel·distance): a speed profile that DRIVES the train toward the marker (it
-                // accelerates from rest up to this, then the shrinking distance tapers it to zero on arrival).
-                // Capped to the train's top speed so it never commands more than the axle can deliver.
-                double mag = Math.min(Math.sqrt(2.0 * STATION_DECELERATION * distance), bearingAxleCapBpt());
-                train.setTargetSpeed(live.direction() * mag); // overrides whatever applyPropulsion just wrote
-                if (operator != null && resend) {
-                    sendStationPrompt(operator, "loconautics.train.approaching_station", train.currentStation());
-                }
+                driveApproach(train, distance, live.distanceToNextCurve());
             }
             case STOPPED -> {
                 train.setTargetSpeed(0.0);
-                if (forwardHeld) {
-                    // Operator pulls away: depart and release the controls lockout next tick.
+                if (throttleHeld) {
+                    // control(): ANY throttle input departs — "Departing from <station>" — and trainDeparted
+                    // releases the reservation slot.
                     if (operator != null) {
                         sendStationPrompt(operator, "loconautics.train.departing_from", train.currentStation());
                     }
+                    SableStationParking.cancelReservation(train, train.currentStation());
                     train.setStationState(StationState.DEPARTING);
                     train.setCurrentStation(null);
                     train.setDistanceToStation(Double.MAX_VALUE);
-                } else if (operator != null && resend) {
+                    train.setNavDistanceTotal(0.0);
+                    train.setAccel(SableTrain.DEFAULT_ACCEL);
+                } else if (spaceHeld && operator != null && resend) {
+                    // control(): holding Space while parked shows "Arrived at <station>".
                     sendStationPrompt(operator, "loconautics.train.arrived_at", train.currentStation());
                 }
             }
@@ -863,6 +912,58 @@ public final class SableTrainDriver {
                 }
             }
         }
+    }
+
+    /**
+     * Create's {@code Navigation.tick} speed profile for a manually-driven approach, ported term for term
+     * (signals are skipped — Create ignores them under {@code manualTick} — and throttle is 1):
+     * <ul>
+     *   <li>{@code targetDistance = distance + 0.25} — always overshoot so the marker is crossed;</li>
+     *   <li>final creep — when the remaining distance is about to be covered, command exactly it
+     *       (at least 1/32 b/t) so the train reaches the marker instead of stalling short;</li>
+     *   <li>10-block approach cap — speed limited to {@code topSpeed · (targetDistance/10)}, blended in
+     *       at 50% per tick;</li>
+     *   <li>otherwise full speed until inside the braking distance {@code v²/2a}, then target 0 (the
+     *       {@code approachTargetSpeed} ramp in {@link SableTrain#tickMotion} decelerates at {@code a});</li>
+     *   <li>curve slowdown — brake to {@code maxTurnSpeed} ahead of the nearest qualifying curve.</li>
+     * </ul>
+     */
+    private static void driveApproach(SableTrain train, double distance, double distanceToNextCurve) {
+        double acceleration = trainAcceleration();
+        double brakingDistance = (train.speed() * train.speed()) / (2.0 * acceleration);
+        double speedMod = train.stationDirection();
+        double targetDistance = distance + 0.25; // always overshoot to ensure the marker is crossed
+
+        if (targetDistance - Math.abs(train.speed()) < 1.0 / 32.0) {
+            double v = Math.max(targetDistance, 1.0 / 32.0) * speedMod;
+            train.setSpeed(v);
+            train.setTargetSpeed(v);
+            return;
+        }
+
+        double topSpeed = bearingAxleCapBpt();
+        if (targetDistance < 10.0) {
+            double maxApproachSpeed = topSpeed * (targetDistance / 10.0);
+            double speedRelativeToStation = train.speed() * speedMod;
+            if (speedRelativeToStation > maxApproachSpeed) {
+                double v = train.speed() + (maxApproachSpeed - Math.abs(train.speed())) * 0.5 * speedMod;
+                train.setSpeed(v);
+                train.setTargetSpeed(v);
+                return;
+            }
+        }
+
+        double turnTopSpeed = Math.min(topSpeed, maxTurnSpeedBpt());
+        double targetSpeed = targetDistance > brakingDistance ? topSpeed * speedMod : 0.0;
+        if (distanceToNextCurve != -1.0) {
+            double slowingDistance = brakingDistance - (turnTopSpeed * turnTopSpeed) / (2.0 * acceleration);
+            double targetTurnSpeed =
+                    distanceToNextCurve > slowingDistance ? topSpeed * speedMod : turnTopSpeed * speedMod;
+            if (Math.abs(targetTurnSpeed) < Math.abs(targetSpeed)) {
+                targetSpeed = targetTurnSpeed;
+            }
+        }
+        train.setTargetSpeed(targetSpeed); // overrides whatever applyPropulsion just wrote; tickMotion ramps to it
     }
 
     /**
@@ -879,10 +980,10 @@ public final class SableTrainDriver {
         StationTarget best = null;
         var bogeys = train.car().bogeys();
         if (bogeys.isEmpty()) {
-            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target);
+            best = scoutBothWays(train, carriage, carriage.leading(), maxDistance, target);
         } else {
             for (SableTrain.Bogey bogey : bogeys) {
-                best = nearer(best, scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target));
+                best = nearer(best, scoutBothWays(train, carriage, bogey.rail().leading(), maxDistance, target));
             }
         }
         return best;
@@ -893,13 +994,13 @@ public final class SableTrainDriver {
      * {@code target} is non-null only that station qualifies (used to keep re-measuring the committed stop);
      * when null any approachable station qualifies (used to find one to approach).
      */
-    private static StationTarget scoutBothWays(RailCarriage carriage, TravellingPoint origin, double maxDistance,
-                                               GlobalStation target) {
+    private static StationTarget scoutBothWays(SableTrain self, RailCarriage carriage, TravellingPoint origin,
+                                               double maxDistance, GlobalStation target) {
         if (origin == null || origin.edge == null) {
             return null;
         }
-        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target),
-                scoutDirection(carriage, origin, maxDistance, -1.0, target));
+        return nearer(scoutDirection(self, carriage, origin, maxDistance, 1.0, target),
+                scoutDirection(self, carriage, origin, maxDistance, -1.0, target));
     }
 
     /** Returns whichever {@link StationTarget} is closer (handling nulls). */
@@ -917,7 +1018,7 @@ public final class SableTrainDriver {
      * Scouts one direction ({@code direction} = +1 forward / -1 backward) for the nearest approachable station.
      * If {@code target} is non-null, only that station qualifies (others are passed over); otherwise any does.
      */
-    private static StationTarget scoutDirection(RailCarriage carriage, TravellingPoint origin,
+    private static StationTarget scoutDirection(SableTrain self, RailCarriage carriage, TravellingPoint origin,
                                                 double maxDistance, double direction, GlobalStation target) {
         TravellingPoint scout = new TravellingPoint(
                 origin.node1, origin.node2, origin.edge, origin.position, origin.upsideDown);
@@ -928,6 +1029,7 @@ public final class SableTrainDriver {
                 scout.ignoreEdgePoints(), scout.ignoreTurns(), scout.ignorePortals());
         GlobalStation[] found = { null };
         double[] foundDistance = { 0.0 };
+        double[] curveDistance = { -1.0 };
         TravellingPoint.IEdgePointListener listener = (distance, pair) -> {
             if (!(pair.getFirst() instanceof GlobalStation station)) {
                 return false; // skip signals/observers — keep scanning
@@ -939,41 +1041,90 @@ public final class SableTrainDriver {
             if (!station.canApproachFrom(nodes.getSecond())) {
                 return false;
             }
+            if (target == null && SableStationParking.occupiedByAnother(self, station)) {
+                return false; // findNearestApproachable: pass over stations another train is parked at
+            }
             found[0] = station;
             foundDistance[0] = Math.abs(distance);
             return true; // stop the scout at the first approachable station
         };
-        scout.travel(carriage.graph(), direction * maxDistance,
+        // Curve collection for the turn slowdown, ported from Navigation.tick's turn listener: straight-ish
+        // mild slopes (vertical curves) are exempt; the nearest qualifying curve's distance is kept.
+        TravellingPoint.ITurnListener turnListener = (distance, edge) -> {
+            BezierConnection turn = edge.getTurn();
+            if (turn == null) {
+                return;
+            }
+            double vDistance = Math.abs(turn.starts.getFirst().y - turn.starts.getSecond().y);
+            if (vDistance > 1 / 16f) {
+                if (turn.axes.getFirst()
+                        .multiply(1, 0, 1)
+                        .distanceTo(turn.axes.getSecond()
+                                .multiply(1, 0, 1)
+                                .scale(-1)) < 1 / 64f
+                        && vDistance / turn.getLength() < .225f) {
+                    return;
+                }
+            }
+            if (curveDistance[0] == -1.0 || distance < curveDistance[0]) {
+                curveDistance[0] = distance;
+            }
+        };
+        scout.travel(carriage.graph(), direction * (maxDistance + STATION_FRONT_OFFSET),
                 scout.steer(SteerDirection.NONE, carriage.upNormal()),
-                listener, scout.ignoreTurns(), scout.ignorePortals());
+                listener, turnListener, scout.ignorePortals());
         if (found[0] == null) {
             return null;
         }
-        return new StationTarget(found[0], foundDistance[0], direction);
+        return new StationTarget(found[0], foundDistance[0], direction, curveDistance[0]);
     }
 
     // ---------------------------------------------------------------------------------------------
     // Station prompts: push the operator's Analog Controller HUD banner (same wording/colour as Create).
     // ---------------------------------------------------------------------------------------------
 
-    /** "Hold [Jump] to approach <station>" — the call-to-action prompt while a station is reachable ahead. */
+    /** "Hold [Jump] to approach <station>" — the call-to-action prompt while a station is reachable ahead.
+     *  Create leaves the station name uncoloured in this one ({@code displayApproachStationMessage}). */
     private static void sendApproachPrompt(ServerPlayer player, GlobalStation station) {
         if (station == null) {
             return;
         }
-        Component name = Component.literal(station.name).withStyle(s -> s.withColor(STATION_NAME_COLOR));
         Component text = Component.translatable("loconautics.train.approach_station",
-                Component.keybind("key.jump"), name);
+                Component.keybind("key.jump"), Component.literal(station.name));
         LoconauticsNetwork.sendStationPrompt(player, text, false);
     }
 
-    /** Builds the amber-named banner Component (matching Create's wording/colour) and sends it to the operator. */
+    /** Builds the brown-named banner Component (matching Create's wording/colour) and sends it to the operator. */
     private static void sendStationPrompt(ServerPlayer player, String key, GlobalStation station) {
         if (station == null) {
             return;
         }
         Component name = Component.literal(station.name).withStyle(s -> s.withColor(STATION_NAME_COLOR));
         LoconauticsNetwork.sendStationPrompt(player, Component.translatable(key, name), false);
+    }
+
+    /** Create's in-cab approach progress bar (control()): 30 "|" chars filling amber → green with quadratic
+     *  easing as the train closes in on the marker, sent with the shadow flag like {@code TrainPromptPacket}. */
+    private static void sendProgressBar(ServerPlayer player, SableTrain train) {
+        double total = train.navDistanceTotal();
+        if (total <= 0.0) {
+            return;
+        }
+        double f = train.distanceToStation() / total;
+        int progress = (int) (Mth.clamp(1 - ((1 - f) * (1 - f)), 0, 1) * 30);
+        boolean arrived = progress == 0;
+        MutableComponent whiteComponent = Component.literal("|".repeat(progress));
+        MutableComponent greenComponent = Component.literal("|".repeat(30 - progress));
+
+        int fromColor = 0x00_FFC244;
+        int toColor = 0x00_529915;
+
+        int mixedColor = Color.mixColors(toColor, fromColor, progress / 30f);
+        int targetColor = arrived ? toColor : 0x00_544D45;
+
+        MutableComponent component = greenComponent.withStyle(st -> st.withColor(mixedColor))
+                .append(whiteComponent.withStyle(st -> st.withColor(targetColor)));
+        LoconauticsNetwork.sendStationPrompt(player, component, true);
     }
 
     /** Resolves the {@link ServerPlayer} mounted on the given controller, or {@code null}. */
@@ -1090,6 +1241,25 @@ public final class SableTrainDriver {
                     if (subLevel.getBlockState(pos).getBlock() instanceof BearingAxleBlock
                             && subLevel.getBlockEntity(pos) instanceof BearingAxleBlockEntity axle) {
                         return axle;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Scans a sub-level for a {@link TransmissionBlock}'s block entity (mirrors {@link #bearingAxleIn}). */
+    private static TransmissionBlockEntity transmissionIn(ServerSubLevel sub) {
+        ServerLevel subLevel = sub.getLevel();
+        var bounds = sub.getPlot().getBoundingBox();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (subLevel.getBlockState(pos).getBlock() instanceof TransmissionBlock
+                            && subLevel.getBlockEntity(pos) instanceof TransmissionBlockEntity transmission) {
+                        return transmission;
                     }
                 }
             }

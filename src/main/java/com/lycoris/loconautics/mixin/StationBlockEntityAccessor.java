@@ -24,4 +24,35 @@ public interface StationBlockEntityAccessor {
      */
     @Invoker("exception")
     void loconautics$exception(AssemblyException exception, int carriage);
+
+    // "Train present" display state (the fields StationBlockEntity.tick computes for Create trains and syncs to
+    // the client). StationBlockEntityMixin writes them when a SABLE train is parked at the station so the block
+    // enters parked mode — flag up, disassemble button available — exactly as for a Create train.
+
+    @Accessor("imminentTrain")
+    java.util.UUID loconautics$getImminentTrain();
+
+    @Accessor("imminentTrain")
+    void loconautics$setImminentTrain(java.util.UUID id);
+
+    @Accessor("trainPresent")
+    boolean loconautics$getTrainPresent();
+
+    @Accessor("trainPresent")
+    void loconautics$setTrainPresent(boolean present);
+
+    @Accessor("trainCanDisassemble")
+    boolean loconautics$getTrainCanDisassemble();
+
+    @Accessor("trainCanDisassemble")
+    void loconautics$setTrainCanDisassemble(boolean canDisassemble);
+
+    @Accessor("trainBackwards")
+    void loconautics$setTrainBackwards(boolean backwards);
+
+    @Accessor("trainHasSchedule")
+    void loconautics$setTrainHasSchedule(boolean hasSchedule);
+
+    @Accessor("trainHasAutoSchedule")
+    void loconautics$setTrainHasAutoSchedule(boolean hasAutoSchedule);
 }

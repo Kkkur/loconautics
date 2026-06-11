@@ -372,6 +372,11 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         return raisingSignal;
     }
 
+    /** True while the operator holds S (lower / depart backward). */
+    public boolean isBackwardHeld() {
+        return loweringSignal;
+    }
+
     // ------------------------------------------------------------------ network
 
     private void updateNetwork(Level level) {

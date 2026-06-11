@@ -288,6 +288,15 @@ public class TransmissionBlockEntity extends SplitShaftBlockEntity implements Me
     public ItemStack getDirFreqFirst()    { return dirFreqFirst; }
     public ItemStack getDirFreqSecond()   { return dirFreqSecond; }
 
+    // ------------------------------------------------------------------ decoded analog-controller signal
+
+    /** Decoded analog-controller speed signal, 0 (disengaged) – 15 (full). Updated by the link receiver callback,
+     *  so it stays live even inside a Sable sub-level where block entities don't tick. */
+    public int getRedstonePower() { return redstonePower; }
+
+    /** Decoded analog-controller direction signal — {@code true} = reverse (the backward frequency is active). */
+    public boolean isDirectionActive() { return directionActive; }
+
     // ------------------------------------------------------------------ MenuProvider
 
     @Override
