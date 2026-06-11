@@ -530,12 +530,34 @@ public final class SableTrainSpawner {
         for (BlockPos bp : bogeyPositions) {
             TrackHit bogeyTrack = findRailBelow(level, bp, railDir);
             if (bogeyTrack == null) {
+                LoconauticsConstants.LOGGER.warn(
+                        "[sabletrain] seat: NO rail found under bogey at {} — this bogey will not follow the track", bp);
                 continue; // no rail under this bogey — skip it (no yaw visual, but it still rides the body)
             }
             RailCarriage bogeyRail = RailCarriage.at(bogeyTrack.location(), bogeyTrack.upNormal(), 1.0, 0.0);
             if (bogeyRail == null) {
                 continue;
             }
+            // findRailBelow seats the follower at BLOCK resolution (the track block's graph point), which can
+            // be up to a block away along the arc from where the bogey actually sits. Create's assembler seats
+            // its TravellingPoints at the exact positions — mirror that: advance the follower by the along-track
+            // distance to the bogey block's centre, so its rail point and tangent are sampled at the right spot.
+            Vector3d seatC = bogeyRail.center();
+            Vec3 seatFwd = bogeyRail.forward();
+            double ds0 = 0.0;
+            if (seatC != null) {
+                ds0 = (bp.getX() + 0.5 - seatC.x) * seatFwd.x + (bp.getZ() + 0.5 - seatC.z) * seatFwd.z;
+                if (Math.abs(ds0) > 1.0e-3) {
+                    bogeyRail.setSpeed(ds0);
+                    bogeyRail.tick();
+                    bogeyRail.setSpeed(0.0);
+                }
+            }
+            Vector3d seated = bogeyRail.center();
+            LoconauticsConstants.LOGGER.info(
+                    "[sabletrain] seat: bogey at {} aligned ds0={} -> follower {}", bp,
+                    String.format("%.2f", ds0),
+                    seated == null ? "null" : String.format("(%.1f, %.1f, %.1f)", seated.x, seated.y, seated.z));
             bogeys.add(new SableTrain.Bogey(bp.subtract(bodyAnchor), bogeyRail));
         }
 

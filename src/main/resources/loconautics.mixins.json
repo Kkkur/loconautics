@@ -12,6 +12,7 @@
     "client.RopeWinchRendererMixin",
     "client.RopeWinchBlockEntityAccessor",
     "client.BogeyYawVisualMixin",
+    "client.BogeyYawRendererMixin",
     "client.AssemblyScreenMixin",
     "client.AbstractStationScreenAccessor"
   ],

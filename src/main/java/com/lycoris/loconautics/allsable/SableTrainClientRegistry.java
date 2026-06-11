@@ -21,17 +21,17 @@ import net.neoforged.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public final class SableTrainClientRegistry {
 
-    /** One train sub-level's relocation-relevant facts: its carriage span and current derail state. */
-    public record TrainMarker(double bogeySpacing, boolean derailed) {}
+    /** One train sub-level's facts: its carriage span, derail state, and current speed (blocks/tick, signed). */
+    public record TrainMarker(double bogeySpacing, boolean derailed, double speed) {}
 
     private static final Map<UUID, TrainMarker> TRAINS = new ConcurrentHashMap<>();
 
     private SableTrainClientRegistry() {
     }
 
-    /** Adds or updates the marker for a train sub-level (sent by the server on assembly/derail/relocate/login). */
-    public static void put(UUID subLevelId, double bogeySpacing, boolean derailed) {
-        TRAINS.put(subLevelId, new TrainMarker(bogeySpacing, derailed));
+    /** Adds or updates the marker for a train sub-level (sent on assembly/derail/relocate/login/speed change). */
+    public static void put(UUID subLevelId, double bogeySpacing, boolean derailed, double speed) {
+        TRAINS.put(subLevelId, new TrainMarker(bogeySpacing, derailed, speed));
     }
 
     /** Forgets a train sub-level (sent by the server when the train is removed/destroyed). */
@@ -52,5 +52,10 @@ public final class SableTrainClientRegistry {
     /** True if the given sub-level UUID is a known train sub-level. */
     public static boolean isTrain(UUID subLevelId) {
         return subLevelId != null && TRAINS.containsKey(subLevelId);
+    }
+
+    /** Snapshot of every known train sub-level id (for per-tick iteration, e.g. the sound handler). */
+    public static java.util.Set<UUID> ids() {
+        return java.util.Set.copyOf(TRAINS.keySet());
     }
 }

@@ -24,7 +24,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
  * <p>Mirrors how Create's client already knows its {@code Train}s (via {@code Create.RAILWAYS.sided}); since a
  * {@link SableTrain} is server-only, we replicate just the relocation-relevant facts to clients.
  */
-public record SableTrainSyncPacket(UUID subLevelId, boolean present, double bogeySpacing, boolean derailed)
+public record SableTrainSyncPacket(UUID subLevelId, boolean present, double bogeySpacing, boolean derailed,
+                                   double speed)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<SableTrainSyncPacket> TYPE =
@@ -37,8 +38,10 @@ public record SableTrainSyncPacket(UUID subLevelId, boolean present, double boge
                         buf.writeBoolean(p.present());
                         buf.writeDouble(p.bogeySpacing());
                         buf.writeBoolean(p.derailed());
+                        buf.writeDouble(p.speed());
                     },
-                    buf -> new SableTrainSyncPacket(buf.readUUID(), buf.readBoolean(), buf.readDouble(), buf.readBoolean())
+                    buf -> new SableTrainSyncPacket(buf.readUUID(), buf.readBoolean(), buf.readDouble(),
+                            buf.readBoolean(), buf.readDouble())
             );
 
     @Override
@@ -50,7 +53,8 @@ public record SableTrainSyncPacket(UUID subLevelId, boolean present, double boge
     public static void handle(SableTrainSyncPacket packet, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (packet.present()) {
-                SableTrainClientRegistry.put(packet.subLevelId(), packet.bogeySpacing(), packet.derailed());
+                SableTrainClientRegistry.put(packet.subLevelId(), packet.bogeySpacing(), packet.derailed(),
+                        packet.speed());
             } else {
                 SableTrainClientRegistry.remove(packet.subLevelId());
             }
@@ -63,12 +67,12 @@ public record SableTrainSyncPacket(UUID subLevelId, boolean present, double boge
     public static SableTrainSyncPacket add(SableTrain train) {
         SableTrain.Car car = train.car();
         double spacing = car.carriage() != null ? car.carriage().bogeySpacing() : 1.0;
-        return new SableTrainSyncPacket(car.subLevelId(), true, spacing, train.isDerailed());
+        return new SableTrainSyncPacket(car.subLevelId(), true, spacing, train.isDerailed(), train.speed());
     }
 
     /** Builds a "remove" packet for a sub-level id. */
     public static SableTrainSyncPacket remove(UUID subLevelId) {
-        return new SableTrainSyncPacket(subLevelId, false, 0.0, false);
+        return new SableTrainSyncPacket(subLevelId, false, 0.0, false, 0.0);
     }
 
     /** Broadcasts a train's current marker state to every connected client. */
