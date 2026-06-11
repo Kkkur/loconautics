@@ -150,12 +150,33 @@ public final class LoconauticsRegistries {
     public static final DeferredHolder<Item, SteelCableItem> STEEL_CABLE =
             ITEMS.register("steel_cable", () -> new SteelCableItem(new Item.Properties().stacksTo(16)));
 
+    // ------------------------------------------------------------------ Reinforced Iron Sheet (ported from create_tectonic)
+
+    /** Intermediate crafting ingredient: iron sheet processed through sequenced assembly. */
+    public static final DeferredHolder<Item, Item> REINFORCED_IRON_SHEET =
+            ITEMS.register("reinforced_iron_sheet", () -> new Item(new Item.Properties().stacksTo(64)));
+
+    /** Transitional item used during the reinforced iron sheet sequenced assembly process. */
+    public static final DeferredHolder<Item, Item> UNPROCESSED_REINFORCED_IRON_SHEET =
+            ITEMS.register("unprocessed_reinforced_iron_sheet", () -> new Item(new Item.Properties().stacksTo(64)));
+
     // ------------------------------------------------------------------ Sable Train Relocator
 
     /** Wrench-like tool: right-click a Sable train sub-level to relocate it onto a new rail (see
      *  {@link com.lycoris.loconautics.allsable.SableTrainRelocator}). Uses the vanilla stick texture. */
     public static final DeferredHolder<Item, Item> SABLE_TRAIN_RELOCATOR =
             ITEMS.register("sable_train_relocator", () -> new Item(new Item.Properties().stacksTo(1)));
+
+    public static final DeferredHolder<Block, ReinforcedCasingBlock> REINFORCED_CASING =
+            BLOCKS.register("reinforced_casing", () -> new ReinforcedCasingBlock(
+                    BlockBehaviour.Properties.of()
+                            .strength(3.0f, 6.0f)
+                            .sound(SoundType.NETHERITE_BLOCK)
+                            .requiresCorrectToolForDrops()));
+
+    public static final DeferredHolder<Item, BlockItem> REINFORCED_CASING_ITEM =
+            ITEMS.register("reinforced_casing", () ->
+                    new BlockItem(REINFORCED_CASING.get(), new Item.Properties().stacksTo(64)));
 
     // ------------------------------------------------------------------ Creative tab
 
@@ -171,6 +192,8 @@ public final class LoconauticsRegistries {
                         output.accept(TRANSMISSION_ITEM.get());
                         output.accept(STEEL_CABLE.get());
                         output.accept(SABLE_TRAIN_RELOCATOR.get());
+                        output.accept(REINFORCED_IRON_SHEET.get());
+                        output.accept(UNPROCESSED_REINFORCED_IRON_SHEET.get());
                     })
                     .build());
 

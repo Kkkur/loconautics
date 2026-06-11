@@ -5,6 +5,8 @@
   "block.loconautics.transmission": "Transmission",
   "item.loconautics.sable_train_relocator": "Sable Train Relocator",
   "item.loconautics.steel_cable": "Steel Cable",
+  "item.loconautics.reinforced_iron_sheet": "Reinforced Iron Sheet",
+  "item.loconautics.unprocessed_reinforced_iron_sheet": "Unprocessed Reinforced Iron Sheet",
   "item.loconautics.steel_cable.tooltip.summary": "A heavy-gauge cable for connecting rope holders over long distances",
   "item.loconautics.steel_cable.tooltip.condition1": "When used on a Rope Connector",
   "item.loconautics.steel_cable.tooltip.behaviour1": "Creates a strand with twice the range of a standard rope",
