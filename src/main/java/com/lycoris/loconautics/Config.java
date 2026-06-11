@@ -145,45 +145,40 @@ public final class Config {
 
     // ------------------------------------------------------------------ Derailment
 
-    /** Whether a train derails when it takes a curve faster than its wheels can grip. */
+    /** Whether a train derails when it corners too hard (lateral force = mass × speed × turn-rate). */
     public static final ModConfigSpec.BooleanValue DERAIL_ON_CURVE;
-    /** Wheel-rail grip coefficient used in the safe curve-speed formula. */
-    public static final ModConfigSpec.DoubleValue DERAIL_CURVE_FRICTION;
-    /** Forgiveness multiplier on the safe curve speed before a derail actually triggers. */
-    public static final ModConfigSpec.DoubleValue DERAIL_SPEED_MARGIN;
-    /** Whether a train derails when it runs off the end of a track (with no buffer) above a speed. */
+    /** Lateral force (mass × speed × turn-rate) above which a cornering train flies off the rail. */
+    public static final ModConfigSpec.DoubleValue DERAIL_MAX_LATERAL_FORCE;
+    /** Whether a train derails when it runs off the end of a track (with no buffer) above an impact. */
     public static final ModConfigSpec.BooleanValue DERAIL_AT_TRACK_END;
-    /** Minimum speed (m/s) at which hitting the end of a track derails instead of just parking. */
-    public static final ModConfigSpec.DoubleValue DERAIL_END_MIN_SPEED;
+    /** Head-on impact (mass × speed) at a dead end above which the train derails instead of parking. */
+    public static final ModConfigSpec.DoubleValue DERAIL_MAX_END_IMPACT;
 
     static {
         BUILDER.push("derailment");
 
         DERAIL_ON_CURVE = BUILDER
-                .comment("Whether a train derails when it takes a curve too fast (lateral grip exceeded).",
-                        "Safe curve speed = sqrt(9.81 * radius * friction/(1-friction)); above it (times the",
-                        "margin below) the car leaves the rail and becomes a free physics body.")
+                .comment("Whether a train derails when it takes a curve too hard.",
+                        "The cornering load is mass * speed(m/s) * turn-rate(rad/s) — i.e. heavier, faster, and",
+                        "sharper-turning trains push harder on the rails. Above maxLateralForce it leaves the rail.")
                 .define("derailOnCurve", true);
 
-        DERAIL_CURVE_FRICTION = BUILDER
-                .comment("Wheel-rail grip coefficient (0..1) for the safe curve-speed formula.",
-                        "Higher = grippier = corners faster before derailing. Default 0.4 (steel on steel-ish).")
-                .defineInRange("curveFriction", 0.4, 0.05, 0.95);
-
-        DERAIL_SPEED_MARGIN = BUILDER
-                .comment("Multiplier on the safe curve speed before a derail triggers (forgiveness).",
-                        "1.0 = derail exactly at the physical limit; 1.5 = tolerate 50% over first. Default 1.25.")
-                .defineInRange("speedMargin", 1.25, 1.0, 5.0);
+        DERAIL_MAX_LATERAL_FORCE = BUILDER
+                .comment("Cornering load (mass * speed * turn-rate) above which a train derails on a curve.",
+                        "Higher = harder to derail. TUNE IN-GAME: lower it until reckless cornering derails but",
+                        "normal running does not. Scales with train mass, so heavy trains derail at lower speeds.",
+                        "Default 60.0.")
+                .defineInRange("maxLateralForce", 60.0, 0.0, 1.0e9);
 
         DERAIL_AT_TRACK_END = BUILDER
-                .comment("Whether a train derails when it runs off the END of a track (no buffer) above a speed.",
-                        "Below the speed it simply parks at the dead end; above it, it flies off the rail.")
+                .comment("Whether a train derails when it runs off the END of a track (no buffer present).",
+                        "Below maxEndImpact it parks at the dead end; above it, it flies off the rail.")
                 .define("derailAtTrackEnd", true);
 
-        DERAIL_END_MIN_SPEED = BUILDER
-                .comment("Minimum speed (m/s) at which hitting the end of a track derails instead of parking.",
-                        "Default 4.0 (~0.2 blocks/tick).")
-                .defineInRange("trackEndMinSpeed", 4.0, 0.0, 1000.0);
+        DERAIL_MAX_END_IMPACT = BUILDER
+                .comment("Head-on impact (mass * speed in m/s) at a dead end above which the train derails.",
+                        "Higher = harder to derail. Scales with mass. Default 50.0.")
+                .defineInRange("maxEndImpact", 50.0, 0.0, 1.0e9);
 
         BUILDER.pop();
     }

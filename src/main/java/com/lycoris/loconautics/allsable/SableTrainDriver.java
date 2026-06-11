@@ -524,69 +524,63 @@ public final class SableTrainDriver {
                     train.id());
             return;
         }
-        // Over-speed on a curve: if the train is cornering faster than its wheels can grip, derail.
+        // Cornering load: derail when mass × speed × turn-rate exceeds the limit (heavier/faster/sharper = worse).
         if (Config.DERAIL_ON_CURVE.get()) {
-            double[] cv = curveSafety(train); // {speed m/s, safeMax m/s, radius m} or null
-            if (cv != null && cv[0] > cv[1] * Config.DERAIL_SPEED_MARGIN.get()) {
+            double lateral = lateralLoad(train, sub);
+            if (lateral > Config.DERAIL_MAX_LATERAL_FORCE.get()) {
                 train.setDerailed(true);
+                LAST_FORWARD.remove(train.id());
                 LoconauticsConstants.LOGGER.info(
-                        "[sabletrain] car {} derailed: {} m/s on a ~{} m radius curve (safe ~{} m/s)",
-                        train.id(), f(cv[0]), f(cv[2]), f(cv[1]));
+                        "[sabletrain] car {} derailed cornering: load {} > {} (mass*speed*turn)",
+                        train.id(), f(lateral), f(Config.DERAIL_MAX_LATERAL_FORCE.get()));
                 return;
             }
         }
-        // Off the end of the track: the carriage's rail point hit a dead end (no further track) — if it arrived
-        // at speed (with no buffer to stop it), it flies off the rail instead of parking.
+        // Off the end of the track: the carriage's rail point hit a dead end. If it arrives with enough momentum
+        // (mass × speed) and there's no buffer, it flies off the rail instead of parking.
         if (Config.DERAIL_AT_TRACK_END.get() && car.carriage().stopped()) {
-            double speed = Math.abs(train.speed()) * 20.0; // blocks/tick -> m/s
-            if (speed > Config.DERAIL_END_MIN_SPEED.get()) {
+            double impact = trainMass(sub) * Math.abs(train.speed()) * 20.0; // mass × m/s
+            if (impact > Config.DERAIL_MAX_END_IMPACT.get()) {
                 train.setDerailed(true);
+                LAST_FORWARD.remove(train.id());
                 LoconauticsConstants.LOGGER.info(
-                        "[sabletrain] car {} ran off the end of the track at {} m/s (no buffer) — derailed",
-                        train.id(), f(speed));
+                        "[sabletrain] car {} ran off the track end with impact {} > {} (no buffer) — derailed",
+                        train.id(), f(impact), f(Config.DERAIL_MAX_END_IMPACT.get()));
             }
         }
     }
 
+    /** Body forward (horizontal) from the previous tick, per train — used to measure the turn rate. */
+    private static final java.util.Map<UUID, Vector3d> LAST_FORWARD = new java.util.HashMap<>();
+
     /**
-     * Curve-safety check. Measures the track curvature under the car from the heading difference between its two
-     * end bogeys (each bogey's own rail tangent) over the distance between them — radius {@code r = arc / angle} —
-     * and the physical safe cornering speed {@code vmax = sqrt(g * r * mu/(1-mu))} (the classic adhesion-limit
-     * formula). Returns {@code {speed, vmax, radius}} in m / m·s⁻¹, or {@code null} on straight track / when the
-     * car has fewer than two bogeys (can't measure curvature).
+     * Cornering load on the rails this tick: {@code mass × speed(m/s) × turnRate(rad/s)}. The turn rate is how
+     * fast the body's heading is rotating (this tick's forward vs last tick's), so it is 0 on straight track and
+     * grows with sharper, faster turns. Multiplying by mass means heavier trains push harder — matching the
+     * "velocity × mass" rule. Returns 0 when there's no previous heading yet (first tick).
      */
-    private static double[] curveSafety(SableTrain train) {
-        var bogeys = train.car().bogeys();
-        if (bogeys.size() < 2) {
-            return null;
+    private static double lateralLoad(SableTrain train, ServerSubLevel sub) {
+        Vec3 f = train.car().carriage().forward();
+        Vector3d fwd = new Vector3d(f.x, 0.0, f.z);
+        if (fwd.lengthSquared() < 1.0e-9) {
+            return 0.0;
         }
-        RailCarriage a = bogeys.get(0).rail();
-        RailCarriage b = bogeys.get(bogeys.size() - 1).rail();
-        Vec3 ta = a.forward();
-        Vec3 tb = b.forward();
-        Vector3d da = new Vector3d(ta.x, 0.0, ta.z);
-        Vector3d db = new Vector3d(tb.x, 0.0, tb.z); // horizontal tangents: curvature is the yaw turn rate
-        if (da.lengthSquared() < 1.0e-9 || db.lengthSquared() < 1.0e-9) {
-            return null;
+        fwd.normalize();
+        Vector3d last = LAST_FORWARD.put(train.id(), new Vector3d(fwd));
+        if (last == null) {
+            return 0.0; // no previous heading to compare against yet
         }
-        double theta = Math.acos(Math.max(-1.0, Math.min(1.0, da.normalize().dot(db.normalize()))));
-        if (theta < 1.0e-3) {
-            return null; // essentially straight — no curve limit
-        }
-        Vector3d ca = a.center();
-        Vector3d cb = b.center();
-        if (ca == null || cb == null) {
-            return null;
-        }
-        double arc = ca.distance(cb);
-        if (arc < 1.0e-3) {
-            return null;
-        }
-        double radius = arc / theta;
-        double mu = Config.DERAIL_CURVE_FRICTION.get();
-        double vmax = Math.sqrt(9.81 * radius * (mu / (1.0 - mu)));
-        double speed = Math.abs(train.speed()) * 20.0; // blocks/tick -> m/s
-        return new double[] { speed, vmax, radius };
+        double dYaw = Math.acos(Math.max(-1.0, Math.min(1.0, last.dot(fwd)))); // radians turned this tick
+        double turnRate = dYaw * 20.0;                       // rad/s
+        double speed = Math.abs(train.speed()) * 20.0;       // m/s
+        return trainMass(sub) * speed * turnRate;
+    }
+
+    /** Train mass (kg) from the sub-level's mass tracker, falling back to a live block-sum if unavailable. */
+    private static double trainMass(ServerSubLevel sub) {
+        MassData md = sub.getMassTracker();
+        double m = (md != null && !md.isInvalid()) ? md.getMass() : 0.0;
+        return m > 0.0 ? m : liveMass(sub);
     }
 
     /** True if the body sub-level still contains at least one Create bogey block (the car's wheels). */
