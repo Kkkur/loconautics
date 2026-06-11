@@ -921,6 +921,11 @@ public final class SableTrainDriver {
                                                 double maxDistance, double direction, GlobalStation target) {
         TravellingPoint scout = new TravellingPoint(
                 origin.node1, origin.node2, origin.edge, origin.position, origin.upsideDown);
+        // Shift the detector a fixed distance back along the approach (opposite the scan direction) so the train
+        // always parks at the same spot relative to the marker. This back-move ignores edge points.
+        scout.travel(carriage.graph(), -direction * STATION_FRONT_OFFSET,
+                scout.steer(SteerDirection.NONE, carriage.upNormal()),
+                scout.ignoreEdgePoints(), scout.ignoreTurns(), scout.ignorePortals());
         GlobalStation[] found = { null };
         double[] foundDistance = { 0.0 };
         TravellingPoint.IEdgePointListener listener = (distance, pair) -> {
