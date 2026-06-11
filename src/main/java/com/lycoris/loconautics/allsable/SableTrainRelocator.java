@@ -7,8 +7,8 @@ import java.util.UUID;
 
 import com.lycoris.loconautics.Config;
 import com.lycoris.loconautics.network.packets.SableTrainRelocatePacket;
+import com.lycoris.loconautics.registry.LoconauticsRegistries;
 
-import com.simibubi.create.AllItems;
 import com.simibubi.create.content.trains.entity.TravellingPoint;
 import com.simibubi.create.content.trains.entity.TravellingPoint.ITrackSelector;
 import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
@@ -32,6 +32,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.Position;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -87,6 +88,11 @@ public final class SableTrainRelocator {
         return relocatingSubLevel != null;
     }
 
+    /** True if the stack is the Sable Train Relocator tool (the item that drives this whole flow). */
+    private static boolean isRelocator(ItemStack stack) {
+        return stack.is(LoconauticsRegistries.SABLE_TRAIN_RELOCATOR.get());
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Use-item key: start relocation (wrench on a train sub-level) / confirm / abort.
     // Analogous to ContraptionHandlerClient.rightClickingOnContraptionsGetsHandledLocally + TrainRelocator.onClicked.
@@ -128,7 +134,7 @@ public final class SableTrainRelocator {
         if (!Config.WRENCH_RELOCATION_ENABLED.get()) {
             return;
         }
-        if (!AllItems.WRENCH.isIn(player.getItemInHand(event.getHand()))) {
+        if (!isRelocator(player.getItemInHand(event.getHand()))) {
             return;
         }
         if (!(mc.hitResult instanceof BlockHitResult blockHit) || mc.hitResult.getType() != HitResult.Type.BLOCK) {
@@ -177,7 +183,7 @@ public final class SableTrainRelocator {
             relocatingSubLevel = null; // the train was removed/destroyed under us
             return;
         }
-        if (!AllItems.WRENCH.isIn(player.getMainHandItem())) {
+        if (!isRelocator(player.getMainHandItem())) {
             player.displayClientMessage(
                     CreateLang.translateDirect("train.relocate.abort").withStyle(ChatFormatting.RED), true);
             relocatingSubLevel = null;

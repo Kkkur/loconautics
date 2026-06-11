@@ -3,6 +3,7 @@
   "block.loconautics.bearing_axle": "Bearing Axle",
   "block.loconautics.knuckle": "Knuckle",
   "block.loconautics.transmission": "Transmission",
+  "item.loconautics.sable_train_relocator": "Sable Train Relocator",
   "item.loconautics.steel_cable": "Steel Cable",
   "item.loconautics.steel_cable.tooltip.summary": "A heavy-gauge cable for connecting rope holders over long distances",
   "item.loconautics.steel_cable.tooltip.condition1": "When used on a Rope Connector",
@@ -25,6 +26,7 @@
   "loconautics.station.sabletrain.no_glue": "No glued carriages found, glue your cart together with Super Glue or Honey Glue",
   "loconautics.station.sabletrain.no_bogeys": "No glued bogeys found in the station's range",
   "loconautics.station.sabletrain.missing_bearing_axle": "The frontmost carriage needs a Bearing Axle to be driven",
+  "loconautics.station.sabletrain.too_many_bogeys": "A carriage may have at most %1$s bogeys",
 
   "loconautics.configuration.title": "Loconautics Config",
   "loconautics.configuration.section.loconautics.common.toml": "Loconautics Config",
@@ -35,6 +37,8 @@
   "loconautics.configuration.train.bearingAxleMaxSpeed.tooltip": "Max speed the Bearing Axle drives a train to. -1 = use Create's train top speed.",
   "loconautics.configuration.train.trainMaxSpeed": "Train Max Speed (m/s)",
   "loconautics.configuration.train.trainMaxSpeed.tooltip": "Absolute speed cap for a train sub-level from any source. -1 = use Create's train top speed.",
+  "loconautics.configuration.train.maxBogeysPerCarriage": "Max Bogeys Per Carriage",
+  "loconautics.configuration.train.maxBogeysPerCarriage.tooltip": "Maximum Create bogeys allowed in one carriage (glued cluster). Default 2, matching Create.",
 
   "loconautics.configuration.bearing_axle.massDivisor": "Mass Divisor",
   "loconautics.configuration.bearing_axle.massDivisor.tooltip": "Divides total train mass (kpg) to get stress impact per RPM. Lower = more stress per kg.",

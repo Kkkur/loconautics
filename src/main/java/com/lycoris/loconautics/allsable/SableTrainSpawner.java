@@ -228,6 +228,17 @@ public final class SableTrainSpawner {
         // Assemble front-to-back: frontmost carriage first, then the rest ordered back along the track.
         carriages.sort(java.util.Comparator.comparingDouble(c -> projectionAlong(c, stationTrack, railDir)));
 
+        // A carriage may carry at most this many bogeys (Create's structural limit is 2; configurable). The
+        // carriage index in the error matches the front-to-back ordering Create's own assembler uses.
+        int maxBogeys = Config.MAX_BOGEYS_PER_CARRIAGE.get();
+        for (int i = 0; i < carriages.size(); i++) {
+            if (countBogeysIn(level, carriages.get(i)) > maxBogeys) {
+                acc.loconautics$exception(new AssemblyException(
+                        Component.translatable("loconautics.station.sabletrain.too_many_bogeys", maxBogeys)), i + 1);
+                return;
+            }
+        }
+
         // All validation passed — assemble each cluster as its own independent Sable car. No links are created
         // between cars: coupling them (steel cable, knuckle, …) is the player's job at runtime.
         Set<BlockPos> assembled = new HashSet<>();
@@ -361,6 +372,17 @@ public final class SableTrainSpawner {
             }
         }
         return false;
+    }
+
+    /** Number of Create train bogey blocks in the cluster (a carriage is capped at maxBogeysPerCarriage). */
+    private static int countBogeysIn(ServerLevel level, Set<BlockPos> cluster) {
+        int count = 0;
+        for (BlockPos p : cluster) {
+            if (level.getBlockState(p).getBlock() instanceof AbstractBogeyBlock) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** True if any block in the cluster is a {@code loconautics:bearing_axle}. */
@@ -664,7 +686,7 @@ public final class SableTrainSpawner {
         best.setDerailed(true);
         SableTrainPersistence.persist(best); // remember the derailed state across restarts
         SableTrainSyncPacket.broadcast(best); // update the client marker's derail state (gates derailedOnly relocation)
-        msg(player, "derailed cart " + best.id().toString().substring(0, 8) + " — released from the rail");
+        msg(player, "derailed cart " + best.id().toString().substring(0, 8) + ", released from the rail");
         return 1;
     }
 

@@ -66,6 +66,9 @@ public final class SableTrain {
      * (for any reason: lost wheels, excessive speed on a curve, a collision) and the car leaves the rail next tick.
      */
     private boolean derailed = false;
+    /** Latest total weight (kg) of the whole hauled consist (this car + everything coupled to it), refreshed by
+     *  {@link SableTrainDriver}. Drives weight-scaled acceleration/braking. 0 until first computed. */
+    private double haulMass = 0.0;
 
     public SableTrain(UUID id, ServerLevel level, Car car, boolean physics) {
         this.id = id;
@@ -139,6 +142,16 @@ public final class SableTrain {
      */
     public void setDerailed(boolean derailed) {
         this.derailed = derailed;
+    }
+
+    /** Total weight (kg) of the whole hauled consist, or 0 if not yet computed. */
+    public double haulMass() {
+        return haulMass;
+    }
+
+    /** Updates the cached hauled-consist weight (called by {@link SableTrainDriver} from the game tick). */
+    public void setHaulMass(double haulMass) {
+        this.haulMass = haulMass;
     }
 
     public void setAccel(double accel) {

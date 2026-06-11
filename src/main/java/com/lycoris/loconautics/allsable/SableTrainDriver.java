@@ -26,7 +26,6 @@ import dev.ryanhcode.sable.api.physics.constraint.generic.GenericConstraintConfi
 import dev.ryanhcode.sable.api.physics.force.ForceTotal;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.physics.mass.MassData;
-import dev.ryanhcode.sable.physics.config.block_properties.PhysicsBlockPropertyHelper;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.Pose3d;
@@ -188,14 +187,90 @@ public final class SableTrainDriver {
             return;
         }
         MassData md = sub.getMassTracker();
-        double mass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
+        double locoMass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
+        // The WHOLE hauled consist's weight governs how briskly the train can change speed; the impulse itself is
+        // applied to the driven body's own mass (the rope constraints drag the rest along).
+        double consistMass = train.haulMass() > 0.0 ? train.haulMass() : locoMass;
+
+        Vector3d vel = handle.getLinearVelocity(new Vector3d());
+        // Downhill: free-roll. The engine neither pulls nor brakes against gravity — exactly how a real train
+        // coasts down a grade. Sable's gravity accelerates it, held in check by the global speed cap (capTrainSpeed).
+        if (vel.y < -1.0e-3) {
+            return;
+        }
         double vTarget = train.targetSpeed() * 20.0;
-        double vCurrent = handle.getLinearVelocity(new Vector3d()).dot(tangent);
-        double accel = Math.max(-MAX_DRIVE_ACCEL, Math.min(MAX_DRIVE_ACCEL, DRIVE_K * (vTarget - vCurrent)));
-        Vector3d worldImpulse = new Vector3d(tangent).mul(mass * accel * dt);
+        double vCurrent = vel.dot(tangent);
+        double desiredAccel = DRIVE_K * (vTarget - vCurrent);
+
+        // Speeding up uses the weight-scaled traction ceiling (heavier accelerates slower); slowing down uses the
+        // braking ceiling, whose GRIP scales with weight — lighter consists slip and slide further, heavier ones
+        // grip and stop predictably.
+        boolean braking = Math.abs(vTarget) < Math.abs(vCurrent);
+        double limit = braking ? brakeDecelLimit(consistMass) : tractionAccelLimit(consistMass);
+        double accel = Math.max(-limit, Math.min(limit, desiredAccel));
+
+        Vector3d worldImpulse = new Vector3d(tangent).mul(locoMass * accel * dt);
         ForceTotal forces = new ForceTotal();
         forces.applyLinearImpulse(sub.logicalPose().transformNormalInverse(worldImpulse, new Vector3d()));
         handle.applyForcesAndReset(forces);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Weight-scaled acceleration / braking / wheel-slip (train.realism config).
+    // ---------------------------------------------------------------------------------------------
+
+    /** Max acceleration (m/s²) the consist can pull, scaled inversely with its weight and capped. */
+    private static double tractionAccelLimit(double consistMass) {
+        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_ACCELERATION.get()) {
+            return MAX_DRIVE_ACCEL;
+        }
+        double scaled = Config.REALISM_BASE_ACCELERATION.get()
+                * (Config.REALISM_REFERENCE_MASS.get() / Math.max(1.0, consistMass));
+        return Math.min(scaled, Config.REALISM_MAX_ACCELERATION.get());
+    }
+
+    /**
+     * Max braking deceleration (m/s²): the base deceleration scaled by weight-based braking GRIP (adhesion), capped.
+     * Heavier consists grip toward full adhesion and stop predictably; lighter ones slip (lower adhesion → weaker
+     * braking → they slide further). Braking is NOT scaled inversely with mass — weight changes grip, not raw force.
+     */
+    private static double brakeDecelLimit(double consistMass) {
+        if (!Config.REALISM_ENABLED.get()) {
+            return MAX_DRIVE_ACCEL;
+        }
+        double decel = Config.REALISM_BASE_DECELERATION.get() * brakingAdhesion(consistMass);
+        return Math.min(decel, Config.REALISM_MAX_ACCELERATION.get());
+    }
+
+    /** Braking grip (0..1): lighter consists slip (apply less braking force), heavier ones grip fully. */
+    private static double brakingAdhesion(double consistMass) {
+        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_BRAKING_SLIP.get()) {
+            return 1.0;
+        }
+        double minAdhesion = Config.REALISM_MIN_BRAKING_ADHESION.get();
+        double full = Config.REALISM_FULL_ADHESION_MASS.get();
+        double adhesion = minAdhesion + (1.0 - minAdhesion) * (Math.max(1.0, consistMass) / full);
+        return Math.max(minAdhesion, Math.min(1.0, adhesion));
+    }
+
+    /**
+     * Absolute incline of the body at the train, in degrees (0 = level). Read from the sub-level's real physics
+     * pose — the angle its (originally world-up) local up-axis is tilted away from vertical — so it reflects exactly
+     * how Sable is sitting the body, on a rail slope or any other tilt. Direction-independent: steeper = more stress.
+     */
+    private static double inclineDegrees(ServerSubLevel sub) {
+        Quaterniond q = sub.logicalPose().orientation();
+        Vector3d up = q.transform(new Vector3d(0.0, 1.0, 0.0)); // body up in world space
+        double cos = Math.max(-1.0, Math.min(1.0, up.y));        // cos(tilt) = up · worldUp
+        return Math.toDegrees(Math.acos(cos));
+    }
+
+    /** True if the train is heading up the incline (so the slope stress term applies). Uses the live travel
+     *  direction when moving, else the throttle direction; downhill/level returns false (least stress). */
+    private static boolean isClimbing(SableTrain train, double rpm) {
+        Vec3 forward = train.car().carriage().forward(); // unit rail tangent (trailing -> leading)
+        double travelDir = Math.abs(train.speed()) > 1.0e-4 ? Math.signum(train.speed()) : (rpm >= 0.0 ? 1.0 : -1.0);
+        return travelDir * forward.y > 1.0e-4;
     }
 
     private static Vector3d forwardUnit(RailCarriage carriage) {
@@ -556,9 +631,16 @@ public final class SableTrainDriver {
                 || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
             return;
         }
-        double total = liveMass(sub);
+        // Only the carriage that actually carries a Bearing Axle needs a weight — and that weight is the WHOLE
+        // consist it is hauling (its own blocks + every carriage coupled behind it), resolved modularly across all
+        // registered couplers by TrainConsist. Carriages without an axle skip the (now consist-wide) computation.
         BearingAxleBlockEntity axle = bearingAxleIn(sub);
-        if (axle != null && total != axle.getTrainMass()) {
+        if (axle == null) {
+            return;
+        }
+        double total = TrainConsist.totalMass(train.level(), sub.getUniqueId());
+        train.setHaulMass(total); // cache for the physics-tick drive (weight-scaled accel/braking)
+        if (total != axle.getTrainMass()) {
             axle.setTrainMass(total);
         }
     }
@@ -610,16 +692,31 @@ public final class SableTrainDriver {
         if (container == null) {
             return;
         }
-        BearingAxleBlockEntity axle = findBearingAxle(train, container);
+        Car car = train.car();
+        if (car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            train.setPowered(false);
+            return;
+        }
+        BearingAxleBlockEntity axle = bearingAxleIn(sub);
         if (axle == null) {
             train.setPowered(false);
             return;
         }
+        // An axle present means this car is the locomotive: it both drives and brakes (rear cars have no axle and
+        // are merely dragged). Downhill free-rolling is handled in applyTangentialDrive, not by withholding power.
+        double rpm = axle.getSpeed();
         train.setPowered(true);
+
         double maxSpeed = bearingAxleCapBpt();
-        double target = (axle.getSpeed() / 256.0) * maxSpeed;
+        double target = (rpm / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
         train.setTargetSpeed(target);
+
+        // Slope stress applies ONLY while climbing — hauling the consist uphill costs extra stress; descending it
+        // is the least stressful (no slope term at all). Motion on slopes is left entirely to Sable's gravity.
+        boolean slope = Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get();
+        axle.setSlopeAngle(slope && isClimbing(train, rpm) ? inclineDegrees(sub) : 0.0);
     }
 
     /** Create's configured train top speed (m/s) — the value both Loconautics caps defer to when set to -1. */
@@ -676,20 +773,10 @@ public final class SableTrainDriver {
         return bearingAxleIn(sub);
     }
 
+    /** Summed physics block mass (kg) of one sub-level. Delegates to {@link TrainConsist#subLevelMass} so the
+     *  per-sub-level weight calculation lives in exactly one place. */
     private static double liveMass(ServerSubLevel sub) {
-        ServerLevel subLevel = sub.getLevel();
-        var bounds = sub.getPlot().getBoundingBox();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        double mass = 0.0;
-        for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
-            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
-                for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
-                    mass += PhysicsBlockPropertyHelper.getMass(subLevel, pos.set(x, y, z),
-                            subLevel.getBlockState(pos));
-                }
-            }
-        }
-        return mass;
+        return TrainConsist.subLevelMass(sub);
     }
 
     private static BearingAxleBlockEntity bearingAxleIn(ServerSubLevel sub) {

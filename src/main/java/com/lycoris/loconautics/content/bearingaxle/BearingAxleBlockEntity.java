@@ -24,6 +24,8 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     // ---------------------------------------------------------------------------
 
     private double totalMassKg = 0.0;
+    /** Rail incline (degrees) the axle currently sits on, pushed by {@code SableTrainDriver}. Adds slope stress. */
+    private double slopeAngleDeg = 0.0;
 
     /**
      * Called by {@code SableTrainDriver.updateAxleMass} (every 10 ticks, when the summed block mass changes) to
@@ -39,9 +41,14 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
             return;
         }
         this.totalMassKg = massKg;
-        this.lastStressApplied = calculateStressApplied();
+        // calculateStressApplied() refreshes lastStressApplied from the new mass. We must push that value into the
+        // network with updateStressFor(this, stress): the network sums each member's STORED stress
+        // (members.get(be)), set only when a member is added or via updateStressFor — updateNetwork()/calculateStress()
+        // re-read that stale stored value and never our new impact, so the heavier train never raised stress (and so
+        // never overstressed). updateStressFor overwrites the stored value, then recalculates + syncs to the source.
+        float stress = calculateStressApplied();
         if (this.hasNetwork()) {
-            this.getOrCreateNetwork().updateNetwork();
+            this.getOrCreateNetwork().updateStressFor(this, stress);
         }
         this.networkDirty = false;
         this.setChanged();
@@ -50,6 +57,26 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
 
     public double getTrainMass() {
         return totalMassKg;
+    }
+
+    /**
+     * Sets the rail incline (degrees) the axle sits on, pushed once per game tick by {@code SableTrainDriver}. A
+     * steeper angle raises the axle's stress impact. Recomputes stress through the network the same way
+     * {@link #setTrainMass} does, with an epsilon guard so a steady incline doesn't spam network updates.
+     */
+    public void setSlopeAngle(double degrees) {
+        double a = Math.max(0.0, degrees);
+        if (Math.abs(a - this.slopeAngleDeg) < 1.0e-3) {
+            return;
+        }
+        this.slopeAngleDeg = a;
+        float stress = calculateStressApplied();
+        if (this.hasNetwork()) {
+            this.getOrCreateNetwork().updateStressFor(this, stress);
+        }
+        this.networkDirty = false;
+        this.setChanged();
+        this.sendData();
     }
 
     // ---------------------------------------------------------------------------
@@ -69,7 +96,12 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     public float calculateStressApplied() {
         double divisor = Config.MASS_DIVISOR.get();
         double base    = Config.BASE_IMPACT.get();
-        this.lastStressApplied = (float) (base + (totalMassKg / divisor));
+        // Slope term: extra stress added purely from the rail incline angle (SU per degree). The steeper the angle,
+        // the more stress the axle consumes. Gated by the realism config.
+        double slope = (Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get())
+                ? Config.SLOPE_STRESS_FACTOR.get() * slopeAngleDeg
+                : 0.0;
+        this.lastStressApplied = (float) (base + (totalMassKg / divisor) + slope);
         return this.lastStressApplied;
     }
 
@@ -122,12 +154,16 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
         tag.putDouble("TotalMassKg", totalMassKg);
+        // Sync the incline too, so the CLIENT goggle's calculateStressApplied() shows the slope stress term
+        // (without this the client always read 0 and the stress impact never appeared to change on slopes).
+        tag.putDouble("SlopeAngle", slopeAngleDeg);
     }
 
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
         totalMassKg = tag.getDouble("TotalMassKg");
+        slopeAngleDeg = tag.getDouble("SlopeAngle");
     }
 
     // ---------------------------------------------------------------------------

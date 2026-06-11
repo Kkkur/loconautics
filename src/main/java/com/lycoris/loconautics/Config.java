@@ -24,6 +24,34 @@ public final class Config {
     /** Absolute cap (m/s) on a train sub-level's speed from ANY source (thrusters, propellers, physics wand,
      *  collisions, gravity on slopes, …). -1 = defer to Create's train top speed; any other value is the hard cap. */
     public static final ModConfigSpec.DoubleValue TRAIN_MAX_SPEED;
+    /** Maximum number of Create bogeys allowed in a single carriage (one glued cluster). Default 2, matching
+     *  Create's structural limit of two bogeys per carriage. */
+    public static final ModConfigSpec.IntValue MAX_BOGEYS_PER_CARRIAGE;
+
+    // --- train.realism: weight- and slope-based physics realism (all nested under "train") ---
+    /** Master switch for every realism behaviour below. When false the train drives with flat, weight-independent
+     *  acceleration (legacy behaviour). */
+    public static final ModConfigSpec.BooleanValue REALISM_ENABLED;
+    /** Scale acceleration AND braking deceleration inversely with the hauled consist's weight. */
+    public static final ModConfigSpec.BooleanValue WEIGHT_SCALES_ACCELERATION;
+    /** The consist mass (kg) at which {@code baseAcceleration}/{@code baseDeceleration} apply directly. */
+    public static final ModConfigSpec.DoubleValue REALISM_REFERENCE_MASS;
+    /** Acceleration (m/s²) at {@code referenceMass}; scales as referenceMass/mass for heavier/lighter consists. */
+    public static final ModConfigSpec.DoubleValue REALISM_BASE_ACCELERATION;
+    /** Braking deceleration (m/s²) at {@code referenceMass}; scales the same way. */
+    public static final ModConfigSpec.DoubleValue REALISM_BASE_DECELERATION;
+    /** Absolute ceiling (m/s²) on accel/decel, so a near-empty consist can't change speed unrealistically fast. */
+    public static final ModConfigSpec.DoubleValue REALISM_MAX_ACCELERATION;
+    /** Scale braking grip with weight: lighter trains slip (brake weaker, slide further), heavier ones grip. */
+    public static final ModConfigSpec.BooleanValue WEIGHT_SCALES_BRAKING_SLIP;
+    /** Braking adhesion (0..1) of a near-zero-mass train — the fraction of braking force it can actually apply. */
+    public static final ModConfigSpec.DoubleValue REALISM_MIN_BRAKING_ADHESION;
+    /** Consist mass (kg) at/above which braking adhesion is full (1.0 — no slip). */
+    public static final ModConfigSpec.DoubleValue REALISM_FULL_ADHESION_MASS;
+    /** Add stress impact from the rail incline (steeper = more). Motion on slopes is left to Sable's gravity. */
+    public static final ModConfigSpec.BooleanValue SLOPE_EFFECTS_ENABLED;
+    /** Extra stress impact (SU) added per degree of rail incline — the steeper the angle, the more stress. */
+    public static final ModConfigSpec.DoubleValue SLOPE_STRESS_FACTOR;
 
     static {
         BUILDER.push("train");
@@ -40,7 +68,70 @@ public final class Config {
                         "-1 defers to Create's train top speed (trainTopSpeed). Any other value is the hard cap.")
                 .defineInRange("trainMaxSpeed", -1.0, -1.0, 1000.0);
 
-        BUILDER.pop();
+        MAX_BOGEYS_PER_CARRIAGE = BUILDER
+                .comment("Maximum number of Create bogeys allowed in a single carriage (one glued cluster).",
+                        "Create caps a carriage at 2 bogeys; assembly is refused if any carriage exceeds this. Default: 2.")
+                .defineInRange("maxBogeysPerCarriage", 2, 1, 16);
+
+        // ----- train.realism: weight- and slope-based driving realism -----
+        BUILDER.push("realism");
+
+        REALISM_ENABLED = BUILDER
+                .comment("Master switch for weight/slope realism. When false, trains accelerate, brake and climb",
+                        "with flat, weight-independent behaviour (legacy).")
+                .define("enabled", true);
+
+        WEIGHT_SCALES_ACCELERATION = BUILDER
+                .comment("Heavier consists take longer to reach top speed and longer to stop.",
+                        "Acceleration/braking deceleration scale as referenceMass / consistMass.")
+                .define("weightScalesAcceleration", true);
+
+        REALISM_REFERENCE_MASS = BUILDER
+                .comment("Consist mass (kg) at which baseAcceleration/baseDeceleration apply directly.",
+                        "Lighter consists accelerate/brake faster, heavier ones slower.")
+                .defineInRange("referenceMass", 1000.0, 1.0, 1000000.0);
+
+        REALISM_BASE_ACCELERATION = BUILDER
+                .comment("Acceleration (m/s^2) of a referenceMass consist. Scales with referenceMass/consistMass.")
+                .defineInRange("baseAcceleration", 4.0, 0.0, 1000.0);
+
+        REALISM_BASE_DECELERATION = BUILDER
+                .comment("Braking deceleration (m/s^2) of a referenceMass consist. Scales with referenceMass/consistMass.")
+                .defineInRange("baseDeceleration", 6.0, 0.0, 1000.0);
+
+        REALISM_MAX_ACCELERATION = BUILDER
+                .comment("Absolute ceiling (m/s^2) on acceleration and braking, so a near-empty consist can't",
+                        "change speed unrealistically fast.")
+                .defineInRange("maxAcceleration", 20.0, 0.0, 1000.0);
+
+        WEIGHT_SCALES_BRAKING_SLIP = BUILDER
+                .comment("Lighter trains have more wheel slip when braking (brake weaker, slide further);",
+                        "heavier trains grip and stop more predictably.")
+                .define("weightScalesBrakingSlip", true);
+
+        REALISM_MIN_BRAKING_ADHESION = BUILDER
+                .comment("Braking grip (0..1) of a near-zero-mass train: the fraction of braking force it can apply",
+                        "before its wheels slip. Lower = more sliding for light trains.")
+                .defineInRange("minBrakingAdhesion", 0.35, 0.0, 1.0);
+
+        REALISM_FULL_ADHESION_MASS = BUILDER
+                .comment("Consist mass (kg) at/above which braking grip is full (1.0, no slip).")
+                .defineInRange("fullAdhesionMass", 2000.0, 1.0, 1000000.0);
+
+        SLOPE_EFFECTS_ENABLED = BUILDER
+                .comment("The Bearing Axle adds stress impact from the rail incline (steeper = more stress).",
+                        "Motion on slopes is NOT altered here — it is left to Sable's gravity acting on the consist",
+                        "mass (uphill naturally slows, downhill naturally speeds up, capped by trainMaxSpeed).")
+                .define("slopeEffects", true);
+
+        SLOPE_STRESS_FACTOR = BUILDER
+                .comment("Extra stress impact (SU) added per DEGREE of rail incline (steeper angle = more stress).",
+                        "E.g. 0.5 on a 30-degree slope adds 0.5 * 30 = 15 SU on top of the base + weight impact.")
+                .defineInRange("slopeStressPerDegree", 0.5, 0.0, 100.0);
+
+        BUILDER.pop(); // realism
+
+        BUILDER.pop(); // train
     }
 
     // -------------------------------------------------------------------------

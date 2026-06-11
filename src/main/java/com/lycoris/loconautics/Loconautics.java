@@ -36,6 +36,10 @@ public final class Loconautics {
     private void commonSetup(FMLCommonSetupEvent event) {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
         com.lycoris.loconautics.allsable.SableTrainDriver.register();
+        // Register coupling mechanisms so a hauling Bearing Axle accounts for the whole coupled consist's weight.
+        // Future couplers (knuckle, etc.) just register their own CouplingProvider here.
+        com.lycoris.loconautics.allsable.TrainConsist.registerProvider(
+                new com.lycoris.loconautics.allsable.RopeCouplingProvider());
     }
 
     /**

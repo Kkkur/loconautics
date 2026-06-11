@@ -150,6 +150,13 @@ public final class LoconauticsRegistries {
     public static final DeferredHolder<Item, SteelCableItem> STEEL_CABLE =
             ITEMS.register("steel_cable", () -> new SteelCableItem(new Item.Properties().stacksTo(16)));
 
+    // ------------------------------------------------------------------ Sable Train Relocator
+
+    /** Wrench-like tool: right-click a Sable train sub-level to relocate it onto a new rail (see
+     *  {@link com.lycoris.loconautics.allsable.SableTrainRelocator}). Uses the vanilla stick texture. */
+    public static final DeferredHolder<Item, Item> SABLE_TRAIN_RELOCATOR =
+            ITEMS.register("sable_train_relocator", () -> new Item(new Item.Properties().stacksTo(1)));
+
     // ------------------------------------------------------------------ Creative tab
 
     public static final net.neoforged.neoforge.registries.DeferredHolder<CreativeModeTab, CreativeModeTab>
@@ -163,6 +170,7 @@ public final class LoconauticsRegistries {
                         output.accept(KNUCKLE_ITEM.get());
                         output.accept(TRANSMISSION_ITEM.get());
                         output.accept(STEEL_CABLE.get());
+                        output.accept(SABLE_TRAIN_RELOCATOR.get());
                     })
                     .build());
 
