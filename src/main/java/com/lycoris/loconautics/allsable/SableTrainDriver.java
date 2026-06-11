@@ -389,7 +389,7 @@ public final class SableTrainDriver {
     /** Full-syncs every active train sub-level's relocation marker to a player when they join (so the wrench
      *  flow recognises trains that were assembled before they connected). */
     @SubscribeEvent
-    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedIn event) {
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             SableTrainSyncPacket.syncAllTo(player);
         }
