@@ -5,6 +5,7 @@ import java.util.WeakHashMap;
 
 import org.joml.Vector3d;
 
+import com.lycoris.loconautics.mixin.AbstractBogeyBlockEntityAccessor;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlockEntity;
 
@@ -77,7 +78,12 @@ public final class BogeyWheelAnimator {
                 ? state.getValue(AbstractBogeyBlock.AXIS) : Direction.Axis.X;
         Vector3d a = axis == Direction.Axis.X ? new Vector3d(1, 0, 0) : new Vector3d(0, 0, 1);
         sub.renderPose().orientation().transform(a);
-        double dist = dx * a.x + dz * a.z;
+        // Negated so the wheels roll in the direction of travel (Create's animate() subtracts the angle).
+        double dist = -(dx * a.x + dz * a.z);
         be.animate((float) dist);
+        // animate() only setValue()s the wheel-angle LerpedFloat, leaving its previous snapshot stale so
+        // getVirtualAngle() can't interpolate. Tick the chaser to snapshot value -> previousValue (the float
+        // is idle/angular with no chase target, so this only advances the snapshot, not the value itself).
+        ((AbstractBogeyBlockEntityAccessor) be).loconautics$getVirtualAnimation().tickChaser();
     }
 }

@@ -38,9 +38,12 @@ public final class Loconautics {
         LoconauticsConstants.LOGGER.info("Loconautics common setup");
         com.lycoris.loconautics.allsable.SableTrainDriver.register();
         // Register coupling mechanisms so a hauling Bearing Axle accounts for the whole coupled consist's weight.
+        // Edges from every provider are unioned, so a consist linked by a mix of coupler types resolves as one.
         // Future couplers (knuckle, etc.) just register their own CouplingProvider here.
         com.lycoris.loconautics.allsable.TrainConsist.registerProvider(
                 new com.lycoris.loconautics.allsable.RopeCouplingProvider());
+        com.lycoris.loconautics.allsable.TrainConsist.registerProvider(
+                new com.lycoris.loconautics.allsable.SpringCouplingProvider());
     }
 
     /**

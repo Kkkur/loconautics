@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.mixin.client;
 
+import com.lycoris.loconautics.allsable.BogeyWheelAnimator;
 import com.lycoris.loconautics.allsable.BogeyYawVisual;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
@@ -68,6 +69,11 @@ public abstract class BogeyYawVisualMixin {
         if (this.loconautics$blockEntity == null) {
             return;
         }
+        // Spin the wheels/side rods by the distance travelled this frame (Create's own animate() path).
+        // This is the Flywheel-visual render path Sable actually uses for train bogeys, so the wheel
+        // animation must be driven from here too — not only the vanilla BogeyBlockEntityRenderer path.
+        BogeyWheelAnimator.frame(this.loconautics$blockEntity);
+
         float targetYaw = BogeyYawVisual.getLocalYaw(this.loconautics$blockEntity);
         float delta = targetYaw - this.loconautics$lastYaw;
         if (Math.abs(delta) < 1.0e-4f) {

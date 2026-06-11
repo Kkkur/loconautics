@@ -274,6 +274,27 @@ public final class Config {
         BUILDER.pop();
     }
 
+    // ------------------------------------------------------------------ Diagnostics
+
+    /** Verbose logging of the carriage collision "bounce" loop (per-car velocity/energy across the physics solve,
+     *  rail slide vs speed, speed-cap activations, rope coupling extension, consist-mass staleness). Heavy log
+     *  spam — enable only while diagnosing. All such lines carry the {@code [bounce]} tag. */
+    public static final ModConfigSpec.BooleanValue BOUNCE_DEBUG;
+
+    static {
+        BUILDER.push("diagnostics");
+
+        BOUNCE_DEBUG = BUILDER
+                .comment("Verbose per-substep/per-tick logging of the carriage collision 'bounce' loop:",
+                        "per-car velocity and kinetic energy across the physics solve (PRE/POST), rail slide vs",
+                        "speed, speed-cap activations, rope coupling extension, and consist-mass staleness.",
+                        "Every line is tagged [bounce]. Spams the log heavily — enable only while diagnosing.",
+                        "Default: false.")
+                .define("bounceDebug", false);
+
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private Config() {
