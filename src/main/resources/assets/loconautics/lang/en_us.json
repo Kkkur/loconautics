@@ -26,6 +26,7 @@
   "loconautics.train.departing_from": "Departing from %s",
 
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
+  "loconautics.station.unnamed_train": "Unnamed Train",
   "loconautics.assembly.missing_bearing_axle": "No Bearing Axle found in the assembly area",
 
   "loconautics.station.sabletrain.disabled": "Sable physics mode is disabled in the config",

@@ -1,11 +1,14 @@
 package com.lycoris.loconautics.mixin;
 
+import com.lycoris.loconautics.allsable.SableTrain;
 import com.lycoris.loconautics.allsable.SableTrainSpawner;
 import com.lycoris.loconautics.network.packets.StationParkedSyncPacket;
 
 import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
+
+import java.util.List;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -50,6 +53,14 @@ public abstract class StationBlockEntitySableMixin extends SmartBlockEntity {
     @Unique
     private boolean loconautics$parked;
 
+    /** Last broadcast train name, so a rename re-broadcasts immediately (not only on the 20-tick refresh). */
+    @Unique
+    private String loconautics$name = "";
+
+    /** Last broadcast consist carriage spans, so a coupling change re-broadcasts immediately. */
+    @Unique
+    private List<Integer> loconautics$carriages = List.of();
+
     /** Server-side tick counter for the periodic parked-state re-broadcast. */
     @Unique
     private int loconautics$refreshTick;
@@ -61,17 +72,27 @@ public abstract class StationBlockEntitySableMixin extends SmartBlockEntity {
             return;
         }
         boolean parked = false;
+        String name = "";
+        List<Integer> carriages = List.of();
         GlobalStation station = this.getStation();
         if (!this.isAssembling() && station != null) {
-            parked = SableTrainSpawner.findParkedTrain(serverLevel, station) != null;
+            SableTrain train = SableTrainSpawner.findParkedTrain(serverLevel, station);
+            if (train != null) {
+                parked = true;
+                name = SableTrainSpawner.trainName(serverLevel, train);
+                carriages = SableTrainSpawner.consistCarriageIcons(serverLevel, train);
+            }
         }
 
-        if (parked != loconautics$parked) {
+        if (parked != loconautics$parked || !name.equals(loconautics$name)
+                || !carriages.equals(loconautics$carriages)) {
             loconautics$parked = parked;
-            StationParkedSyncPacket.broadcast(this.getBlockPos(), parked);
+            loconautics$name = name;
+            loconautics$carriages = carriages;
+            StationParkedSyncPacket.broadcast(this.getBlockPos(), parked, name, carriages);
         } else if (parked && loconautics$refreshTick % 20 == 0) {
             // Refresh: covers clients that began tracking this station after the flag first went true.
-            StationParkedSyncPacket.broadcast(this.getBlockPos(), true);
+            StationParkedSyncPacket.broadcast(this.getBlockPos(), true, name, carriages);
         }
         loconautics$refreshTick++;
     }

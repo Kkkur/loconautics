@@ -1,5 +1,6 @@
 package com.lycoris.loconautics.allsable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -31,21 +32,52 @@ public final class SableTrainClientRegistry {
     /** Station block positions where a Sable train is currently parked (synced via StationParkedSyncPacket). */
     private static final Set<BlockPos> PARKED_STATIONS = ConcurrentHashMap.newKeySet();
 
+    /** Display name of the train parked at each parked station (frontmost car's sub-level name; "" if unnamed). */
+    private static final Map<BlockPos, String> PARKED_NAMES = new ConcurrentHashMap<>();
+
+    /** Carriage-icon spans of the consist parked at each station (front car first; empty when none). */
+    private static final Map<BlockPos, int[]> PARKED_CARRIAGES = new ConcurrentHashMap<>();
+
+    private static final int[] NO_CARRIAGES = new int[0];
+
     private SableTrainClientRegistry() {
     }
 
-    /** Marks (or unmarks) a station position as having a parked Sable train. */
-    public static void setStationParked(BlockPos pos, boolean parked) {
+    /** Marks (or unmarks) a station position as having a parked Sable train, recording its train name + consist
+     *  carriage spans while parked. */
+    public static void setStationParked(BlockPos pos, boolean parked, String name, List<Integer> carriages) {
         if (parked) {
-            PARKED_STATIONS.add(pos.immutable());
+            BlockPos key = pos.immutable();
+            PARKED_STATIONS.add(key);
+            PARKED_NAMES.put(key, name == null ? "" : name);
+            int[] spans = NO_CARRIAGES;
+            if (carriages != null && !carriages.isEmpty()) {
+                spans = new int[carriages.size()];
+                for (int i = 0; i < spans.length; i++) {
+                    spans[i] = carriages.get(i);
+                }
+            }
+            PARKED_CARRIAGES.put(key, spans);
         } else {
             PARKED_STATIONS.remove(pos);
+            PARKED_NAMES.remove(pos);
+            PARKED_CARRIAGES.remove(pos);
         }
     }
 
     /** True if a Sable train is parked at the station at {@code pos}. */
     public static boolean isStationParked(BlockPos pos) {
         return PARKED_STATIONS.contains(pos);
+    }
+
+    /** Display name of the train parked at {@code pos}, or "" if none/unnamed. */
+    public static String stationTrainName(BlockPos pos) {
+        return PARKED_NAMES.getOrDefault(pos, "");
+    }
+
+    /** Carriage-icon spans of the consist parked at {@code pos} (front car first), or an empty array if none. */
+    public static int[] stationCarriages(BlockPos pos) {
+        return PARKED_CARRIAGES.getOrDefault(pos, NO_CARRIAGES);
     }
 
     /** Snapshot of every station position with a parked Sable train (for per-tick flag driving). */
@@ -67,6 +99,8 @@ public final class SableTrainClientRegistry {
     public static void clear() {
         TRAINS.clear();
         PARKED_STATIONS.clear();
+        PARKED_NAMES.clear();
+        PARKED_CARRIAGES.clear();
     }
 
     /** The marker for this sub-level, or {@code null} if it is not a (known) train sub-level. */

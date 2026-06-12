@@ -1194,7 +1194,7 @@ public final class SableTrainDriver {
     private static final double STATION_PARK_EPSILON = 0.4;
     /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
      *  the bogey, so the train always parks at the same offset relative to the marker. */
-    private static final double STATION_FRONT_OFFSET = -1.5;
+    private static final double STATION_FRONT_OFFSET = -2;
     /** Amber/brass colour Create uses for station names in prompts. */
     private static final int STATION_NAME_COLOR = 7358000;
     /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
@@ -1355,15 +1355,46 @@ public final class SableTrainDriver {
      * straight through junctions and applies the same {@code canApproachFrom} platform-side check. Uses throwaway
      * copies of each {@link TravellingPoint} so the live carriage is never moved. {@code null} if none in range.
      */
+    /**
+     * True if {@code station} is reachable within {@code maxDistance} blocks along the rail from {@code train}
+     * (same track graph + within detection range), using the very scout the station-stop detector uses. Lets the
+     * station disassemble button grab every Sable train sitting in the station's detection range, not just the one
+     * that drove in and parked. Derailed cars are off the rails and so never in range.
+     */
+    public static boolean isStationInRange(SableTrain train, GlobalStation station, double maxDistance,
+                                           double frontOvershoot) {
+        if (train == null || station == null || train.isDerailed()) {
+            return false;
+        }
+        return scanStation(train, maxDistance, station, frontOvershoot) != null;
+    }
+
+    /** Same station by object identity or stable graph id (instances can differ across the graph; ids do not). */
+    private static boolean sameStation(GlobalStation a, GlobalStation b) {
+        return a == b || (a != null && b != null && a.id != null && a.id.equals(b.id));
+    }
+
     private static StationTarget scanStation(SableTrain train, double maxDistance, GlobalStation target) {
+        return scanStation(train, maxDistance, target, 0.0);
+    }
+
+    /**
+     * As {@link #scanStation(SableTrain, double, GlobalStation)}, but a station found within {@code frontOvershoot}
+     * blocks is accepted even when the bogey sits on its non-platform side — so a car that overshoots the marker by
+     * a little still counts as "at the station". {@code frontOvershoot = 0} reproduces Create's strict approach-side
+     * detection used by the live station-stop loop.
+     */
+    private static StationTarget scanStation(SableTrain train, double maxDistance, GlobalStation target,
+                                             double frontOvershoot) {
         RailCarriage carriage = train.car().carriage();
         StationTarget best = null;
         var bogeys = train.car().bogeys();
         if (bogeys.isEmpty()) {
-            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target);
+            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target, frontOvershoot);
         } else {
             for (SableTrain.Bogey bogey : bogeys) {
-                best = nearer(best, scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target));
+                best = nearer(best,
+                        scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target, frontOvershoot));
             }
         }
         return best;
@@ -1375,12 +1406,12 @@ public final class SableTrainDriver {
      * when null any approachable station qualifies (used to find one to approach).
      */
     private static StationTarget scoutBothWays(RailCarriage carriage, TravellingPoint origin, double maxDistance,
-                                               GlobalStation target) {
+                                               GlobalStation target, double frontOvershoot) {
         if (origin == null || origin.edge == null) {
             return null;
         }
-        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target),
-                scoutDirection(carriage, origin, maxDistance, -1.0, target));
+        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target, frontOvershoot),
+                scoutDirection(carriage, origin, maxDistance, -1.0, target, frontOvershoot));
     }
 
     /** Returns whichever {@link StationTarget} is closer (handling nulls). */
@@ -1399,7 +1430,8 @@ public final class SableTrainDriver {
      * If {@code target} is non-null, only that station qualifies (others are passed over); otherwise any does.
      */
     private static StationTarget scoutDirection(RailCarriage carriage, TravellingPoint origin,
-                                                double maxDistance, double direction, GlobalStation target) {
+                                                double maxDistance, double direction, GlobalStation target,
+                                                double frontOvershoot) {
         TravellingPoint scout = new TravellingPoint(
                 origin.node1, origin.node2, origin.edge, origin.position, origin.upsideDown);
         // Shift the detector a fixed distance back along the approach (opposite the scan direction) so the train
@@ -1413,11 +1445,13 @@ public final class SableTrainDriver {
             if (!(pair.getFirst() instanceof GlobalStation station)) {
                 return false; // skip signals/observers — keep scanning
             }
-            if (target != null && station != target) {
+            if (target != null && !sameStation(station, target)) {
                 return false; // looking for a specific station — keep scanning past others
             }
             Couple<TrackNode> nodes = pair.getSecond(); // already oriented to travel direction by travel()
-            if (!station.canApproachFrom(nodes.getSecond())) {
+            // Wrong-side approach is normally rejected, but a car that overshot the marker by up to frontOvershoot
+            // blocks is now on the far side of the station yet still "at" it — accept it within that tolerance.
+            if (!station.canApproachFrom(nodes.getSecond()) && Math.abs(distance) > frontOvershoot) {
                 return false;
             }
             found[0] = station;

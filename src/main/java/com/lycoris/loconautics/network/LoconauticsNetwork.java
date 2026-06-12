@@ -4,6 +4,7 @@ import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
 import com.lycoris.loconautics.network.packets.AssembleSableTrainPacket;
 import com.lycoris.loconautics.network.packets.DisassembleSableTrainPacket;
 import com.lycoris.loconautics.network.packets.StationParkedSyncPacket;
+import com.lycoris.loconautics.network.packets.StationSetTrainNamePacket;
 import com.lycoris.loconautics.network.packets.SableTrainRelocatePacket;
 import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
@@ -96,6 +97,13 @@ public final class LoconauticsNetwork {
                 StationParkedSyncPacket.TYPE,
                 StationParkedSyncPacket.STREAM_CODEC,
                 StationParkedSyncPacket::handle
+        );
+
+        // Client -> Server: name the Sable train parked at a station (station train-name box).
+        registrar.playToServer(
+                StationSetTrainNamePacket.TYPE,
+                StationSetTrainNamePacket.STREAM_CODEC,
+                StationSetTrainNamePacket::handle
         );
 
         // Server -> Client: marks (or unmarks) a Sable sub-level as a relocatable train sub-level.
