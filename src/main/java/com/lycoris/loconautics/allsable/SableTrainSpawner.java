@@ -21,11 +21,14 @@ import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.graph.TrackGraphHelper;
 import com.simibubi.create.content.trains.graph.TrackGraphLocation;
+import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
 import com.simibubi.create.content.trains.track.ITrackBlock;
 import com.simibubi.create.foundation.utility.CreateLang;
 
 import dev.simulated_team.simulated.content.entities.honey_glue.HoneyGlueEntity;
+import dev.simulated_team.simulated.util.SimAssemblyHelper;
+import dev.simulated_team.simulated.util.SimMathUtils;
 
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper;
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper.GatherResult;
@@ -51,6 +54,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.phys.AABB;
@@ -244,6 +248,7 @@ public final class SableTrainSpawner {
         // between cars: coupling them (steel cable, knuckle, …) is the player's job at runtime.
         Set<BlockPos> assembled = new HashSet<>();
         int built = 0;
+        SableTrain frontTrain = null; // the frontmost car (nearest the station marker), assembled first
         for (Set<BlockPos> cluster : carriages) {
             BoundingBox3i bounds = boundsOf(cluster);
             BlockPos anchor = frontmostBlock(cluster, stationTrack, railDir);
@@ -262,6 +267,9 @@ public final class SableTrainSpawner {
             SableTrainPersistence.persist(train);
             SableTrainSyncPacket.broadcast(train); // mark this body sub-level as a train sub-level on clients
             assembled.addAll(cluster);
+            if (frontTrain == null) {
+                frontTrain = train;
+            }
             built++;
         }
         if (built == 0) {
@@ -269,17 +277,9 @@ public final class SableTrainSpawner {
             return;
         }
 
-        // Remove the glue entities that linked the now-assembled blocks (their blocks have moved into sub-levels,
-        // so the glue would otherwise dangle over empty space).
-        for (Entity g : glue) {
-            AABB box = g.getBoundingBox();
-            for (BlockPos p : assembled) {
-                if (box.contains(Vec3.atCenterOf(p))) {
-                    g.discard();
-                    break;
-                }
-            }
-        }
+        // A freshly assembled train sits on the station marker — mark its front car present so the station block
+        // shows it arrived (flag + disassemble) immediately, without waiting for it to be driven away and parked.
+        frontTrain.setAtStation(station.getStation());
 
         // Success: clear any previous error and drop the station out of assembly mode, exactly like Create does
         // after a normal assembly. The new cars sit idle (throttle 0, glued to the rail) until the player drives
@@ -655,6 +655,247 @@ public final class SableTrainSpawner {
         }
         lastTrainId = null;
         return n;
+    }
+
+    // ============================================================================================
+    // Station parking + disassembly (mirrors Create's station disassemble, for Sable trains).
+    // ============================================================================================
+
+    /**
+     * The Sable train currently parked (stopped) at {@code station} in {@code level}, or {@code null} if none.
+     * A train counts as parked when its station-stop state machine is {@link SableTrain.StationState#STOPPED} at
+     * exactly this station (durable: the train holds {@code STOPPED} until the operator pulls away). Used both to
+     * light up the station's disassemble button and to resolve which train that button disassembles.
+     */
+    public static SableTrain findParkedTrain(ServerLevel level, GlobalStation station) {
+        if (station == null) {
+            return null;
+        }
+        for (SableTrain train : SableTrainRegistry.all()) {
+            if (train.level() != level || train.isDerailed()) {
+                continue;
+            }
+            // Use the durable atStation marker (set at assembly and when the car parks, cleared when it rolls away)
+            // rather than the transient, powered-only stationState — so an idle/un-crewed train still reads present.
+            // Match by the station's stable graph id, not object identity: the GlobalStation our driver/assembler
+            // captured can be a different instance from the one the station BE's edge point returns, though they are
+            // the same station on the same graph (Create keys stations by this id everywhere).
+            GlobalStation at = train.atStation();
+            if (at != null && (at == station || (at.id != null && at.id.equals(station.id)))) {
+                return train;
+            }
+        }
+        return null;
+    }
+
+    /** Display name of a Sable train (its front car's sub-level name), or {@code ""} when unnamed/missing. */
+    public static String trainName(ServerLevel level, SableTrain train) {
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        UUID subId = train == null ? null : train.car().subLevelId();
+        if (container == null || subId == null
+                || !(container.getSubLevel(subId) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return "";
+        }
+        String n = sub.getName();
+        return n == null ? "" : n;
+    }
+
+    /**
+     * Carriage-icon spans for the consist parked at {@code front}, front car first. Each value is the car's body
+     * span (its {@link RailCarriage} bogeySpacing rounded to whole blocks), fed to Create's {@code TrainIconType}
+     * so the station screen draws one carriage icon per coupled car; the front car's value is unused (it is drawn
+     * as the engine). Coupled cars behind the front are ordered nearest-first, matching {@link #nameConsist}.
+     */
+    public static List<Integer> consistCarriageIcons(ServerLevel level, SableTrain front) {
+        List<Integer> out = new ArrayList<>();
+        if (front == null) {
+            return out;
+        }
+        out.add(spanOf(front));
+
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        UUID frontId = front.car().subLevelId();
+        if (container == null || frontId == null
+                || !(container.getSubLevel(frontId) instanceof ServerSubLevel frontSub) || frontSub.isRemoved()) {
+            return out;
+        }
+        Vector3dc fp = frontSub.logicalPose().position();
+
+        List<SableTrain> behind = new ArrayList<>();
+        for (UUID id : TrainConsist.connectedSubLevels(level, frontId)) {
+            if (id.equals(frontId)) {
+                continue;
+            }
+            SableTrain t = SableTrainRegistry.bySubLevel(id);
+            if (t != null && container.getSubLevel(id) instanceof ServerSubLevel s && !s.isRemoved()) {
+                behind.add(t);
+            }
+        }
+        behind.sort(java.util.Comparator.comparingDouble(t -> {
+            UUID id = t.car().subLevelId();
+            if (id != null && container.getSubLevel(id) instanceof ServerSubLevel s && !s.isRemoved()) {
+                Vector3dc p = s.logicalPose().position();
+                double dx = p.x() - fp.x();
+                double dz = p.z() - fp.z();
+                return dx * dx + dz * dz;
+            }
+            return Double.MAX_VALUE;
+        }));
+        for (SableTrain t : behind) {
+            out.add(spanOf(t));
+        }
+        return out;
+    }
+
+    /** A car's carriage-icon span: its rail body length in whole blocks (>= 1). */
+    private static int spanOf(SableTrain train) {
+        return (int) Math.max(1, Math.round(train.car().carriage().bogeySpacing()));
+    }
+
+    /** Server entry for the station train-name box: names the whole consist parked at {@code stationPos}. */
+    public static void setTrainNameFromStation(ServerPlayer player, BlockPos stationPos, String name) {
+        ServerLevel level = player.serverLevel();
+        if (!(level.getBlockEntity(stationPos) instanceof StationBlockEntity station)) {
+            return;
+        }
+        SableTrain front = findParkedTrain(level, station.getStation());
+        if (front != null) {
+            nameConsist(level, front, name == null ? "" : name);
+        }
+    }
+
+    /**
+     * Names the whole coupled consist: the frontmost car ({@code front}) gets {@code base}, and every car coupled
+     * behind it gets {@code "<base> Carriage N"} (N from 1, ordered nearest-to-front first). The name is written onto
+     * each Sable sub-level via {@link ServerSubLevel#setName}, which persists it (Sable saves {@code display_name})
+     * and syncs it to clients, so the Simulated nameplate reflects it too.
+     */
+    public static void nameConsist(ServerLevel level, SableTrain front, String base) {
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return;
+        }
+        UUID frontId = front.car().subLevelId();
+        if (frontId == null
+                || !(container.getSubLevel(frontId) instanceof ServerSubLevel frontSub) || frontSub.isRemoved()) {
+            return;
+        }
+        Vector3dc fp = frontSub.logicalPose().position();
+
+        // Coupled cars behind the front, ordered by distance from the front car (nearest first = Carriage 1).
+        List<ServerSubLevel> behind = new ArrayList<>();
+        for (UUID id : TrainConsist.connectedSubLevels(level, frontId)) {
+            if (id.equals(frontId)) {
+                continue;
+            }
+            if (container.getSubLevel(id) instanceof ServerSubLevel s && !s.isRemoved()) {
+                behind.add(s);
+            }
+        }
+        behind.sort(java.util.Comparator.comparingDouble(s -> {
+            Vector3dc p = s.logicalPose().position();
+            double dx = p.x() - fp.x();
+            double dz = p.z() - fp.z();
+            return dx * dx + dz * dz;
+        }));
+
+        frontSub.setName(base);
+        int n = 1;
+        for (ServerSubLevel s : behind) {
+            s.setName(base + " Carriage " + n);
+            n++;
+        }
+        LoconauticsConstants.LOGGER.info("[sabletrain] named consist '{}' ({} car(s)) from station", base,
+                behind.size() + 1);
+    }
+
+    /** How far along the rail (blocks) from the station marker a Sable car counts as "in the station's detection
+     *  range" for the disassemble button — the same order as the station-stop approach window. */
+    private static final double STATION_DISASSEMBLE_RANGE = 32.0;
+
+    /** Extra tolerance (blocks) past the station marker on the far side: a frontmost carriage that overshoots the
+     *  marker a little still counts as in range, despite sitting on the station's non-platform side. */
+    private static final double STATION_DISASSEMBLE_OVERSHOOT = 2.0;
+
+    /**
+     * Server entry for the station disassemble button: disassembles <b>every</b> Sable train sitting on the same
+     * track within the station's detection range (not just the single car that drove in and parked), so a whole
+     * parked consist or several cars stopped at the platform all come apart in one click. "In range" reuses the
+     * station-stop detector's own rail scout ({@link SableTrainDriver#isStationInRange}), which inherently filters
+     * to the station's own track graph and the platform-side approach.
+     */
+    public static void disassembleFromStation(ServerPlayer player, BlockPos stationPos) {
+        ServerLevel level = player.serverLevel();
+        if (!(level.getBlockEntity(stationPos) instanceof StationBlockEntity station)) {
+            return;
+        }
+        GlobalStation global = station.getStation();
+        if (global == null) {
+            return;
+        }
+        int disassembled = 0;
+        // Snapshot the registry first: disassembleSableTrain mutates it as it removes each car.
+        for (SableTrain train : new ArrayList<>(SableTrainRegistry.all())) {
+            if (train.level() != level || train.isDerailed()) {
+                continue;
+            }
+            // The frontmost car parks ~1.5 blocks PAST the marker (the driver's STATION_FRONT_OFFSET back-shift),
+            // i.e. on the station's far side where the platform-side scout is unreliable — but it carries the durable
+            // atStation marker (the same flag that lit this button), so match that directly. Cars coupled/queued
+            // behind it sit on the platform side and are caught by the along-rail scout.
+            if ((isParkedAt(train, global)
+                    || SableTrainDriver.isStationInRange(train, global, STATION_DISASSEMBLE_RANGE,
+                            STATION_DISASSEMBLE_OVERSHOOT))
+                    && disassembleSableTrain(train)) {
+                disassembled++;
+            }
+        }
+        LoconauticsConstants.LOGGER.info("[sabletrain] station at {} disassembled {} Sable car(s) in detection range",
+                stationPos, disassembled);
+    }
+
+    /** True if {@code train} holds the durable "present at this station" marker (matched by stable graph id, like
+     *  {@link #findParkedTrain}); the frontmost parked car that lit the disassemble button. */
+    private static boolean isParkedAt(SableTrain train, GlobalStation station) {
+        GlobalStation at = train.atStation();
+        return at != null && (at == station || (at.id != null && at.id.equals(station.id)));
+    }
+
+    /**
+     * Disassembles a Sable train back into the world, reusing Simulated's physics-assembler disassembly path
+     * ({@link SimAssemblyHelper#disassembleSubLevel}) so the blocks (and any glue / Create contraptions inside the
+     * sub-level) are written back to the world exactly as the Physics Assembler does it. A railed, {@code STOPPED}
+     * train is already grid-aligned by the driver's rail constraint, so we skip the assembler's free-body alignment
+     * dance and only replicate the bits that call for: anchor a sub-level block, find where the live pose maps it
+     * into the world, and derive the 90° grid rotation from the (already rail-aligned) yaw.
+     */
+    public static boolean disassembleSableTrain(SableTrain train) {
+        ServerLevel level = train.level();
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        UUID subId = train.car().subLevelId();
+        if (container == null || subId == null
+                || !(container.getSubLevel(subId) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return false;
+        }
+
+        BlockPos anchor = sub.getPlot().getCenterBlock();
+        BlockPos goal = BlockPos.containing(sub.logicalPose().transformPosition(Vec3.atCenterOf(anchor)));
+        double yaw = SimMathUtils.getClosestYaw(sub.logicalPose().orientation());
+        int turns = -Mth.floor(yaw / (Math.PI / 2.0) + 0.5);
+        Rotation rotation = SimAssemblyHelper.rotationFrom90DegRots(turns);
+
+        SimAssemblyHelper.disassembleSubLevel(level, sub, anchor, goal, rotation, true);
+
+        // Stop driving it and forget it everywhere, then drop the now-empty sub-level husk.
+        SableTrainRegistry.remove(train.id());
+        SableTrainPersistence.unpersist(level.getServer(), train.id());
+        SableTrainSyncPacket.broadcastRemoval(subId);
+        if (!sub.isRemoved()) {
+            container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
+        }
+        LoconauticsConstants.LOGGER.info("[sabletrain] disassembled train {} (sub-level {}) back into the world at {}",
+                train.id(), subId, goal);
+        return true;
     }
 
     /** How close the player's look ray must pass to a car's centre to target it for {@link #derailLookedAt}. */

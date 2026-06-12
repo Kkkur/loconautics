@@ -6,7 +6,8 @@
     "AbstractBogeyBlockEntityAccessor",
     "RopeStrandHolderBehaviorAccessor",
     "RopeStrandHolderDestroyMixin",
-    "StationBlockEntityAccessor"
+    "StationBlockEntityAccessor",
+    "StationBlockEntitySableMixin"
   ],
   "client": [
     "client.RopeConnectorRendererMixin",
@@ -16,6 +17,7 @@
     "client.BogeyYawRendererMixin",
     "client.AssemblyScreenMixin",
     "client.AbstractStationScreenAccessor",
+    "client.StationScreenMixin",
     "client.BogeyYawVisualMixin"
   ],
   "injectors": {

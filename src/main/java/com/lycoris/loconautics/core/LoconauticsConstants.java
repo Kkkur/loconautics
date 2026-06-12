@@ -21,7 +21,7 @@ public final class LoconauticsConstants {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     /** Networking channel/payload version. Bump when the packet wire format changes. */
-    public static final int NETWORK_VERSION = 1;
+    public static final int NETWORK_VERSION = 3;
 
     /** Builds a ResourceLocation in this mod's namespace. */
     public static ResourceLocation id(String path) {

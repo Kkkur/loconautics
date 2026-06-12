@@ -88,7 +88,6 @@ public final class SableTrainDriver {
 
     // Linear-bearing drive (DEFAULT trains): prismatic joint along the rail.
     private static final double DRIVE_K = 6.0;
-    private static final double MAX_DRIVE_ACCEL = 20.0;
 
     /** Live constraints, keyed by the body sub-level UUID they glue to the rail. Reused across substeps (frames
      *  updated in place) — never rebuilt per tick — so Sable's solver keeps its warm-start state. */
@@ -319,6 +318,12 @@ public final class SableTrainDriver {
         if (handle == null) {
             return;
         }
+        // REALISTIC mode, consist over the (multiplier-scaled) mass cap: the axle produces no tractive effort at all.
+        // The prismatic joint still holds the car on the rail and gravity still acts, so it can free-roll downhill
+        // but cannot be pulled. (applyPropulsion sets this flag each game tick and zeroes targetSpeed.)
+        if (train.isOverloaded()) {
+            return;
+        }
         MassData md = sub.getMassTracker();
         double locoMass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
         // The WHOLE hauled consist's weight governs how briskly the train can change speed; the impulse itself is
@@ -352,14 +357,16 @@ public final class SableTrainDriver {
     // Weight-scaled acceleration / braking / wheel-slip (train.realism config).
     // ---------------------------------------------------------------------------------------------
 
-    /** Max acceleration (m/s²) the consist can pull, scaled inversely with its weight and capped. */
+    /**
+     * Max acceleration (m/s²) the consist can pull, scaled inversely with its weight. Always-on in both physics
+     * modes (heavier = slower acceleration). Clamped between {@link Config#MIN_ACCELERATION} (so an arbitrarily
+     * heavy consist still always creeps forward — the "train always moves" guarantee) and the absolute ceiling.
+     */
     private static double tractionAccelLimit(double consistMass) {
-        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_ACCELERATION.get()) {
-            return MAX_DRIVE_ACCEL;
-        }
-        double scaled = Config.REALISM_BASE_ACCELERATION.get()
-                * (Config.REALISM_REFERENCE_MASS.get() / Math.max(1.0, consistMass));
-        return Math.min(scaled, Config.REALISM_MAX_ACCELERATION.get());
+        double scaled = Config.DYNAMICS_BASE_ACCELERATION.get()
+                * (Config.DYNAMICS_REFERENCE_MASS.get() / Math.max(1.0, consistMass));
+        return Math.max(Config.MIN_ACCELERATION.get(),
+                Math.min(scaled, Config.DYNAMICS_MAX_ACCELERATION.get()));
     }
 
     /**
@@ -368,20 +375,17 @@ public final class SableTrainDriver {
      * braking → they slide further). Braking is NOT scaled inversely with mass — weight changes grip, not raw force.
      */
     private static double brakeDecelLimit(double consistMass) {
-        if (!Config.REALISM_ENABLED.get()) {
-            return MAX_DRIVE_ACCEL;
-        }
-        double decel = Config.REALISM_BASE_DECELERATION.get() * brakingAdhesion(consistMass);
-        return Math.min(decel, Config.REALISM_MAX_ACCELERATION.get());
+        double decel = Config.DYNAMICS_BASE_DECELERATION.get() * brakingAdhesion(consistMass);
+        return Math.min(decel, Config.DYNAMICS_MAX_ACCELERATION.get());
     }
 
     /** Braking grip (0..1): lighter consists slip (apply less braking force), heavier ones grip fully. */
     private static double brakingAdhesion(double consistMass) {
-        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_BRAKING_SLIP.get()) {
+        if (!Config.WEIGHT_SCALES_BRAKING_SLIP.get()) {
             return 1.0;
         }
-        double minAdhesion = Config.REALISM_MIN_BRAKING_ADHESION.get();
-        double full = Config.REALISM_FULL_ADHESION_MASS.get();
+        double minAdhesion = Config.DYNAMICS_MIN_BRAKING_ADHESION.get();
+        double full = Config.DYNAMICS_FULL_ADHESION_MASS.get();
         double adhesion = minAdhesion + (1.0 - minAdhesion) * (Math.max(1.0, consistMass) / full);
         return Math.max(minAdhesion, Math.min(1.0, adhesion));
     }
@@ -793,6 +797,7 @@ public final class SableTrainDriver {
                 checkDerailment(train, diag);
                 applyPropulsion(train);
                 tickStation(train, operatedControllerIn(train));
+                updateStationPresence(train);
                 train.tickMotion();
                 updateBogeyYaw(train, diag);
                 updateBogeyWheels(train);
@@ -1356,16 +1361,45 @@ public final class SableTrainDriver {
         // An axle present means this car is the locomotive: it both drives and brakes (rear cars have no axle and
         // are merely dragged). Downhill free-rolling is handled in applyTangentialDrive, not by withholding power.
         double rpm = axle.getSpeed();
+        // Overstress consistency (both drive paths): getSpeed() already returns 0 while the kinetic network is
+        // overstressed, so an overstressed network stops the train identically whether the axle is driven directly
+        // or through a Transmission (the Transmission only feeds RPM into this same network). Make the invariant
+        // explicit so it can never silently diverge.
+        if (axle.isOverStressed()) {
+            rpm = 0.0;
+        }
         train.setPowered(true);
 
         double maxSpeed = bearingAxleCapBpt();
         double target = (rpm / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
+
+        // REALISTIC mode mass cap: a consist heavier than the axle's (multiplier-scaled) maximum pullable mass
+        // produces no tractive effort. ARCADE mode never caps. haulMass <= 0 means "not yet computed" (the first
+        // few ticks after assembly) — treat as movable so a fresh train is never briefly frozen.
+        double cap = Config.BASE_MAX_PULLABLE_MASS.get() * axle.getMultiplier();
+        boolean overCap = Config.PHYSICS_MODE.get() == Config.PhysicsMode.REALISTIC
+                && train.haulMass() > 0.0
+                && train.haulMass() > cap;
+        train.setOverloaded(overCap);
+        if (overCap) {
+            target = 0.0;
+            // Tell the operator why the train won't move (rate-limited to the shared banner keepalive cadence).
+            if (Math.abs(rpm) > 1.0e-3 && (stationTickCounter % 10) == 0) {
+                AnalogControllerBlockEntity controller = operatedControllerIn(train);
+                ServerPlayer operator = controller != null ? operatorOf(train, controller) : null;
+                if (operator != null) {
+                    Component text = Component.translatable("loconautics.train.too_heavy",
+                            Component.literal(String.format("%.0f", train.haulMass() - cap)));
+                    LoconauticsNetwork.sendStationPrompt(operator, text, false);
+                }
+            }
+        }
         train.setTargetSpeed(target);
 
         // Slope stress applies ONLY while climbing — hauling the consist uphill costs extra stress; descending it
         // is the least stressful (no slope term at all). Motion on slopes is left entirely to Sable's gravity.
-        boolean slope = Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get();
+        boolean slope = Config.SLOPE_EFFECTS_ENABLED.get();
         axle.setSlopeAngle(slope && isClimbing(train, rpm) ? inclineDegrees(sub) : 0.0);
     }
 
@@ -1382,7 +1416,7 @@ public final class SableTrainDriver {
     private static final double STATION_PARK_EPSILON = 0.4;
     /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
      *  the bogey, so the train always parks at the same offset relative to the marker. */
-    private static final double STATION_FRONT_OFFSET = -3.5;
+    private static final double STATION_FRONT_OFFSET = -1.5;
     /** Amber/brass colour Create uses for station names in prompts. */
     private static final int STATION_NAME_COLOR = 7358000;
     /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
@@ -1468,6 +1502,7 @@ public final class SableTrainDriver {
                     train.setSpeed(0.0);
                     train.setTargetSpeed(0.0);
                     train.setStationState(StationState.STOPPED);
+                    train.setAtStation(train.currentStation()); // durable "present at station" marker
                     return;
                 }
                 // direction × sqrt(2·decel·distance): a speed profile that DRIVES the train toward the marker (it
@@ -1501,6 +1536,38 @@ public final class SableTrainDriver {
         }
     }
 
+    /** Squared distance (blocks²) a parked car must travel from its rest spot before it counts as having left. */
+    private static final double LEFT_STATION_DISTANCE_SQR = 16.0; // 4 blocks
+
+    /**
+     * Clears a car's durable {@link SableTrain#atStation} "present at station" marker once it has physically moved
+     * away from where it parked. Instantaneous speed is an unreliable "moving" signal (a car held at rest still
+     * reports small residual servo speed), so we record the body position when it first comes to rest at a station
+     * and drop the marker only after the body has travelled a real distance from there.
+     */
+    private static void updateStationPresence(SableTrain train) {
+        if (train.atStation() == null) {
+            return;
+        }
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        Car car = train.car();
+        if (container == null || car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return;
+        }
+        Vector3dc p = sub.logicalPose().position();
+        Vector3dc anchor = train.atStationPos();
+        if (anchor == null) {
+            train.setAtStationPos(new Vector3d(p)); // first rest position at the station
+            return;
+        }
+        double dx = p.x() - anchor.x();
+        double dz = p.z() - anchor.z();
+        if (dx * dx + dz * dz > LEFT_STATION_DISTANCE_SQR) {
+            train.setAtStation(null); // moved away — no longer present
+        }
+    }
+
     /**
      * Walks the rail for the nearest approachable {@link GlobalStation}, mirroring how Create's station detects a
      * train: the <b>front of any bogey is eligible, from either side</b> (Create checks the track one block under a
@@ -1510,15 +1577,46 @@ public final class SableTrainDriver {
      * straight through junctions and applies the same {@code canApproachFrom} platform-side check. Uses throwaway
      * copies of each {@link TravellingPoint} so the live carriage is never moved. {@code null} if none in range.
      */
+    /**
+     * True if {@code station} is reachable within {@code maxDistance} blocks along the rail from {@code train}
+     * (same track graph + within detection range), using the very scout the station-stop detector uses. Lets the
+     * station disassemble button grab every Sable train sitting in the station's detection range, not just the one
+     * that drove in and parked. Derailed cars are off the rails and so never in range.
+     */
+    public static boolean isStationInRange(SableTrain train, GlobalStation station, double maxDistance,
+                                           double frontOvershoot) {
+        if (train == null || station == null || train.isDerailed()) {
+            return false;
+        }
+        return scanStation(train, maxDistance, station, frontOvershoot) != null;
+    }
+
+    /** Same station by object identity or stable graph id (instances can differ across the graph; ids do not). */
+    private static boolean sameStation(GlobalStation a, GlobalStation b) {
+        return a == b || (a != null && b != null && a.id != null && a.id.equals(b.id));
+    }
+
     private static StationTarget scanStation(SableTrain train, double maxDistance, GlobalStation target) {
+        return scanStation(train, maxDistance, target, 0.0);
+    }
+
+    /**
+     * As {@link #scanStation(SableTrain, double, GlobalStation)}, but a station found within {@code frontOvershoot}
+     * blocks is accepted even when the bogey sits on its non-platform side — so a car that overshoots the marker by
+     * a little still counts as "at the station". {@code frontOvershoot = 0} reproduces Create's strict approach-side
+     * detection used by the live station-stop loop.
+     */
+    private static StationTarget scanStation(SableTrain train, double maxDistance, GlobalStation target,
+                                             double frontOvershoot) {
         RailCarriage carriage = train.car().carriage();
         StationTarget best = null;
         var bogeys = train.car().bogeys();
         if (bogeys.isEmpty()) {
-            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target);
+            best = scoutBothWays(carriage, carriage.leading(), maxDistance, target, frontOvershoot);
         } else {
             for (SableTrain.Bogey bogey : bogeys) {
-                best = nearer(best, scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target));
+                best = nearer(best,
+                        scoutBothWays(carriage, bogey.rail().leading(), maxDistance, target, frontOvershoot));
             }
         }
         return best;
@@ -1530,12 +1628,12 @@ public final class SableTrainDriver {
      * when null any approachable station qualifies (used to find one to approach).
      */
     private static StationTarget scoutBothWays(RailCarriage carriage, TravellingPoint origin, double maxDistance,
-                                               GlobalStation target) {
+                                               GlobalStation target, double frontOvershoot) {
         if (origin == null || origin.edge == null) {
             return null;
         }
-        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target),
-                scoutDirection(carriage, origin, maxDistance, -1.0, target));
+        return nearer(scoutDirection(carriage, origin, maxDistance, 1.0, target, frontOvershoot),
+                scoutDirection(carriage, origin, maxDistance, -1.0, target, frontOvershoot));
     }
 
     /** Returns whichever {@link StationTarget} is closer (handling nulls). */
@@ -1554,7 +1652,8 @@ public final class SableTrainDriver {
      * If {@code target} is non-null, only that station qualifies (others are passed over); otherwise any does.
      */
     private static StationTarget scoutDirection(RailCarriage carriage, TravellingPoint origin,
-                                                double maxDistance, double direction, GlobalStation target) {
+                                                double maxDistance, double direction, GlobalStation target,
+                                                double frontOvershoot) {
         TravellingPoint scout = new TravellingPoint(
                 origin.node1, origin.node2, origin.edge, origin.position, origin.upsideDown);
         // Shift the detector a fixed distance back along the approach (opposite the scan direction) so the train
@@ -1568,11 +1667,13 @@ public final class SableTrainDriver {
             if (!(pair.getFirst() instanceof GlobalStation station)) {
                 return false; // skip signals/observers — keep scanning
             }
-            if (target != null && station != target) {
+            if (target != null && !sameStation(station, target)) {
                 return false; // looking for a specific station — keep scanning past others
             }
             Couple<TrackNode> nodes = pair.getSecond(); // already oriented to travel direction by travel()
-            if (!station.canApproachFrom(nodes.getSecond())) {
+            // Wrong-side approach is normally rejected, but a car that overshot the marker by up to frontOvershoot
+            // blocks is now on the far side of the station yet still "at" it — accept it within that tolerance.
+            if (!station.canApproachFrom(nodes.getSecond()) && Math.abs(distance) > frontOvershoot) {
                 return false;
             }
             found[0] = station;

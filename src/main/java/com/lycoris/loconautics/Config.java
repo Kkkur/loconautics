@@ -28,26 +28,38 @@ public final class Config {
      *  Create's structural limit of two bogeys per carriage. */
     public static final ModConfigSpec.IntValue MAX_BOGEYS_PER_CARRIAGE;
 
-    // --- train.realism: weight- and slope-based physics realism (all nested under "train") ---
-    /** Master switch for every realism behaviour below. When false the train drives with flat, weight-independent
-     *  acceleration (legacy behaviour). */
-    public static final ModConfigSpec.BooleanValue REALISM_ENABLED;
-    /** Scale acceleration AND braking deceleration inversely with the hauled consist's weight. */
-    public static final ModConfigSpec.BooleanValue WEIGHT_SCALES_ACCELERATION;
+    // --- train.physics: physics mode + mass-cap (the realistic/arcade toggle) ---
+    /**
+     * Physics mode. ARCADE: any consist is always movable (no mass cap). REALISTIC: a consist heavier than the
+     * (multiplier-scaled) {@link #BASE_MAX_PULLABLE_MASS} produces no tractive effort. Mass-scaled acceleration and
+     * SU scaling apply identically in BOTH modes.
+     */
+    public enum PhysicsMode { ARCADE, REALISTIC }
+
+    /** Selected {@link PhysicsMode}. */
+    public static final ModConfigSpec.EnumValue<PhysicsMode> PHYSICS_MODE;
+    /** REALISTIC mode only: the x1 maximum pullable consist mass (kg). The bearing axle's gear multiplier scales
+     *  this cap proportionally (x2/x4/x8). A consist above the scaled cap cannot be driven. */
+    public static final ModConfigSpec.DoubleValue BASE_MAX_PULLABLE_MASS;
+    /** Floor (m/s²) on the weight-scaled traction limit, so an arbitrarily heavy consist still always creeps forward
+     *  (the "train always moves" guarantee). Applies in both modes. */
+    public static final ModConfigSpec.DoubleValue MIN_ACCELERATION;
+
+    // --- train.dynamics: weight- and slope-based driving dynamics (always-on in both modes) ---
     /** The consist mass (kg) at which {@code baseAcceleration}/{@code baseDeceleration} apply directly. */
-    public static final ModConfigSpec.DoubleValue REALISM_REFERENCE_MASS;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_REFERENCE_MASS;
     /** Acceleration (m/s²) at {@code referenceMass}; scales as referenceMass/mass for heavier/lighter consists. */
-    public static final ModConfigSpec.DoubleValue REALISM_BASE_ACCELERATION;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_BASE_ACCELERATION;
     /** Braking deceleration (m/s²) at {@code referenceMass}; scales the same way. */
-    public static final ModConfigSpec.DoubleValue REALISM_BASE_DECELERATION;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_BASE_DECELERATION;
     /** Absolute ceiling (m/s²) on accel/decel, so a near-empty consist can't change speed unrealistically fast. */
-    public static final ModConfigSpec.DoubleValue REALISM_MAX_ACCELERATION;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_MAX_ACCELERATION;
     /** Scale braking grip with weight: lighter trains slip (brake weaker, slide further), heavier ones grip. */
     public static final ModConfigSpec.BooleanValue WEIGHT_SCALES_BRAKING_SLIP;
     /** Braking adhesion (0..1) of a near-zero-mass train — the fraction of braking force it can actually apply. */
-    public static final ModConfigSpec.DoubleValue REALISM_MIN_BRAKING_ADHESION;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_MIN_BRAKING_ADHESION;
     /** Consist mass (kg) at/above which braking adhesion is full (1.0 — no slip). */
-    public static final ModConfigSpec.DoubleValue REALISM_FULL_ADHESION_MASS;
+    public static final ModConfigSpec.DoubleValue DYNAMICS_FULL_ADHESION_MASS;
     /** Add stress impact from the rail incline (steeper = more). Motion on slopes is left to Sable's gravity. */
     public static final ModConfigSpec.BooleanValue SLOPE_EFFECTS_ENABLED;
     /** Extra stress impact (SU) added per degree of rail incline — the steeper the angle, the more stress. */
@@ -73,33 +85,47 @@ public final class Config {
                         "Create caps a carriage at 2 bogeys; assembly is refused if any carriage exceeds this. Default: 2.")
                 .defineInRange("maxBogeysPerCarriage", 2, 1, 16);
 
-        // ----- train.realism: weight- and slope-based driving realism -----
-        BUILDER.push("realism");
+        // ----- train.physics: physics mode + mass cap (realistic/arcade toggle) -----
+        BUILDER.push("physics");
 
-        REALISM_ENABLED = BUILDER
-                .comment("Master switch for weight/slope realism. When false, trains accelerate, brake and climb",
-                        "with flat, weight-independent behaviour (legacy).")
-                .define("enabled", true);
+        PHYSICS_MODE = BUILDER
+                .comment("Physics mode.",
+                        "ARCADE: any consist is always movable (no maximum pullable mass).",
+                        "REALISTIC: a consist heavier than baseMaxPullableMassKg (scaled by the bearing axle's gear",
+                        "multiplier) cannot be driven at all.",
+                        "Mass-scaled acceleration and SU cost apply identically in BOTH modes.")
+                .defineEnum("mode", PhysicsMode.ARCADE);
 
-        WEIGHT_SCALES_ACCELERATION = BUILDER
-                .comment("Heavier consists take longer to reach top speed and longer to stop.",
-                        "Acceleration/braking deceleration scale as referenceMass / consistMass.")
-                .define("weightScalesAcceleration", true);
+        BASE_MAX_PULLABLE_MASS = BUILDER
+                .comment("REALISTIC mode only: the x1 maximum pullable consist mass (kg).",
+                        "The bearing axle's gear multiplier (x1/x2/x4/x8) raises this cap proportionally (and costs",
+                        "proportionally more SU). A consist above the scaled cap produces no tractive effort.")
+                .defineInRange("baseMaxPullableMassKg", 10000.0, 1.0, 1.0e9);
 
-        REALISM_REFERENCE_MASS = BUILDER
+        MIN_ACCELERATION = BUILDER
+                .comment("Floor (m/s^2) on the weight-scaled traction limit, so an arbitrarily heavy consist still",
+                        "always creeps forward (the 'train always moves' guarantee). Applies in both modes.")
+                .defineInRange("minAcceleration", 0.25, 0.0, 1000.0);
+
+        BUILDER.pop(); // physics
+
+        // ----- train.dynamics: weight- and slope-based driving dynamics (always-on in both modes) -----
+        BUILDER.push("dynamics");
+
+        DYNAMICS_REFERENCE_MASS = BUILDER
                 .comment("Consist mass (kg) at which baseAcceleration/baseDeceleration apply directly.",
                         "Lighter consists accelerate/brake faster, heavier ones slower.")
                 .defineInRange("referenceMass", 1000.0, 1.0, 1000000.0);
 
-        REALISM_BASE_ACCELERATION = BUILDER
+        DYNAMICS_BASE_ACCELERATION = BUILDER
                 .comment("Acceleration (m/s^2) of a referenceMass consist. Scales with referenceMass/consistMass.")
                 .defineInRange("baseAcceleration", 4.0, 0.0, 1000.0);
 
-        REALISM_BASE_DECELERATION = BUILDER
+        DYNAMICS_BASE_DECELERATION = BUILDER
                 .comment("Braking deceleration (m/s^2) of a referenceMass consist. Scales with referenceMass/consistMass.")
                 .defineInRange("baseDeceleration", 6.0, 0.0, 1000.0);
 
-        REALISM_MAX_ACCELERATION = BUILDER
+        DYNAMICS_MAX_ACCELERATION = BUILDER
                 .comment("Absolute ceiling (m/s^2) on acceleration and braking, so a near-empty consist can't",
                         "change speed unrealistically fast.")
                 .defineInRange("maxAcceleration", 20.0, 0.0, 1000.0);
@@ -109,12 +135,12 @@ public final class Config {
                         "heavier trains grip and stop more predictably.")
                 .define("weightScalesBrakingSlip", true);
 
-        REALISM_MIN_BRAKING_ADHESION = BUILDER
+        DYNAMICS_MIN_BRAKING_ADHESION = BUILDER
                 .comment("Braking grip (0..1) of a near-zero-mass train: the fraction of braking force it can apply",
                         "before its wheels slip. Lower = more sliding for light trains.")
                 .defineInRange("minBrakingAdhesion", 0.35, 0.0, 1.0);
 
-        REALISM_FULL_ADHESION_MASS = BUILDER
+        DYNAMICS_FULL_ADHESION_MASS = BUILDER
                 .comment("Consist mass (kg) at/above which braking grip is full (1.0, no slip).")
                 .defineInRange("fullAdhesionMass", 2000.0, 1.0, 1000000.0);
 
@@ -129,7 +155,7 @@ public final class Config {
                         "E.g. 0.5 on a 30-degree slope adds 0.5 * 30 = 15 SU on top of the base + weight impact.")
                 .defineInRange("slopeStressPerDegree", 0.5, 0.0, 100.0);
 
-        BUILDER.pop(); // realism
+        BUILDER.pop(); // dynamics
 
         BUILDER.pop(); // train
     }
@@ -146,8 +172,9 @@ public final class Config {
 
         MASS_DIVISOR = BUILDER
                 .comment("Divides total train mass (kg) to produce the stress impact per RPM.",
-                        "Lower values = more stress per kg. Default: 50.0 (100 kg train → 2.0 impact).")
-                .defineInRange("massDivisor", 10.0, 1.0, 1000.0);
+                        "Lower values = more stress per kg. Default: 500.0 (500 kg train → +1.0 impact, so",
+                        "baseImpact 1.0 + 1.0 = 2.0 SU at 1 RPM). The gear multiplier scales the whole impact.")
+                .defineInRange("massDivisor", 500.0, 1.0, 100000.0);
 
         BASE_IMPACT = BUILDER
                 .comment("Minimum stress impact regardless of train mass.",

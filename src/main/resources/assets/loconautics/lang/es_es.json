@@ -11,6 +11,7 @@
   "itemGroup.loconautics.main": "Loconautics",
 
   "loconautics.station.assemble_physics_train": "Ensamblar como Tren Físico",
+  "loconautics.station.unnamed_train": "Tren sin nombre",
 
   "loconautics.configuration.title": "Configuración de Loconautics",
   "loconautics.configuration.section.loconautics.common.toml": "Configuración de Loconautics",

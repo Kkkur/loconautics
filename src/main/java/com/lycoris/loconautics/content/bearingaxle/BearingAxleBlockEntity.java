@@ -5,6 +5,8 @@ import com.lycoris.loconautics.foundation.LoconauticsLang;
 import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.CenteredSideValueBoxTransform;
+import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollValueBehaviour;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -26,6 +28,14 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     private double totalMassKg = 0.0;
     /** Rail incline (degrees) the axle currently sits on, pushed by {@code SableTrainDriver}. Adds slope stress. */
     private double slopeAngleDeg = 0.0;
+
+    /**
+     * Gear multiplier selector, wrench-scrolled in-world. Stores the exponent (0..3); the actual multiplier is
+     * {@code 1 << value} → x1/x2/x4/x8 (see {@link #getMultiplier()}). In REALISTIC mode the multiplier raises the
+     * maximum pullable consist mass proportionally; in both modes it scales the axle's SU stress impact by the same
+     * factor. Its value is persisted and synced by Create's behaviour serialization (NBT key {@code ScrollValue}).
+     */
+    private ScrollValueBehaviour gearRatio;
 
     /**
      * Called by {@code SableTrainDriver.updateAxleMass} (every 10 ticks, when the summed block mass changes) to
@@ -57,6 +67,24 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
 
     public double getTrainMass() {
         return totalMassKg;
+    }
+
+    /** The active gear multiplier: x1/x2/x4/x8 (defaults to 1 before behaviours are attached). */
+    public int getMultiplier() {
+        return gearRatio == null ? 1 : (1 << gearRatio.getValue());
+    }
+
+    /**
+     * Recomputes and pushes the stress impact through the network after the gear multiplier changes. BEs inside Sable
+     * sub-levels don't tick, so we do here what {@code tick()} would — exactly the workaround {@link #setTrainMass}
+     * uses. {@link ScrollValueBehaviour#setValue} already follows the callback with {@code setChanged()/sendData()}.
+     */
+    private void onGearChanged() {
+        float stress = calculateStressApplied();
+        if (this.hasNetwork()) {
+            this.getOrCreateNetwork().updateStressFor(this, stress);
+        }
+        this.networkDirty = false;
     }
 
     // ---------------------------------------------------------------------------
@@ -126,11 +154,13 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
         double divisor = Config.MASS_DIVISOR.get();
         double base    = Config.BASE_IMPACT.get();
         // Slope term: extra stress added purely from the rail incline angle (SU per degree). The steeper the angle,
-        // the more stress the axle consumes. Gated by the realism config.
-        double slope = (Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get())
+        // the more stress the axle consumes.
+        double slope = Config.SLOPE_EFFECTS_ENABLED.get()
                 ? Config.SLOPE_STRESS_FACTOR.get() * slopeAngleDeg
                 : 0.0;
-        this.lastStressApplied = (float) (base + (totalMassKg / divisor) + slope);
+        // The gear multiplier scales the WHOLE impact: a higher gear hauls a proportionally larger mass cap and
+        // costs proportionally more SU. Identical in both physics modes (only the mass cap differs by mode).
+        this.lastStressApplied = (float) ((base + (totalMassKg / divisor) + slope) * getMultiplier());
         return this.lastStressApplied;
     }
 
@@ -144,14 +174,38 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
 
         LoconauticsLang.translate("gui.goggles.bearing_axle_stats").forGoggles(tooltip);
 
-        // Train Weight
+        boolean realistic = Config.PHYSICS_MODE.get() == Config.PhysicsMode.REALISTIC;
+        double maxPullable = Config.BASE_MAX_PULLABLE_MASS.get() * getMultiplier();
+        boolean overCap = realistic && totalMassKg > maxPullable;
+
+        // Gear Ratio (x1/x2/x4/x8)
+        LoconauticsLang.translate("gui.goggles.gear_ratio")
+                .style(ChatFormatting.GRAY)
+                .forGoggles(tooltip);
+        LoconauticsLang.builder().text("x" + getMultiplier())
+                .style(ChatFormatting.AQUA)
+                .forGoggles(tooltip, 1);
+
+        // Train Weight — red when over the (multiplier-scaled) cap in REALISTIC mode.
         LoconauticsLang.translate("gui.goggles.train_weight")
                 .style(ChatFormatting.GRAY)
                 .forGoggles(tooltip);
         LoconauticsLang.number(totalMassKg)
                 .translate("gui.goggles.unit_kg")
-                .style(totalMassKg > 0 ? ChatFormatting.GOLD : ChatFormatting.DARK_GRAY)
+                .style(overCap ? ChatFormatting.RED
+                        : totalMassKg > 0 ? ChatFormatting.GOLD : ChatFormatting.DARK_GRAY)
                 .forGoggles(tooltip, 1);
+
+        // Max Pullable (REALISTIC mode only)
+        if (realistic) {
+            LoconauticsLang.translate("gui.goggles.max_pullable")
+                    .style(ChatFormatting.GRAY)
+                    .forGoggles(tooltip);
+            LoconauticsLang.number(maxPullable)
+                    .translate("gui.goggles.unit_kg")
+                    .style(overCap ? ChatFormatting.RED : ChatFormatting.GREEN)
+                    .forGoggles(tooltip, 1);
+        }
 
         // Stress Impact (at 1 RPM)
         float impact = calculateStressApplied();
@@ -226,5 +280,15 @@ public class BearingAxleBlockEntity extends KineticBlockEntity implements IHaveG
     }
 
     @Override
-    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
+        // Wrench-scrolled gear multiplier (x1/x2/x4/x8), stored as the exponent 0..3. Recomputes stress on change.
+        gearRatio = new ScrollValueBehaviour(
+                LoconauticsLang.translate("gui.goggles.gear_ratio").component(),
+                this, new CenteredSideValueBoxTransform());
+        gearRatio.between(0, 3);
+        gearRatio.withFormatter(exp -> "x" + (1 << exp));
+        gearRatio.requiresWrench();
+        gearRatio.withCallback(exp -> onGearChanged());
+        behaviours.add(gearRatio);
+    }
 }
