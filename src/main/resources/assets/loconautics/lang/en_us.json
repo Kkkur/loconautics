@@ -24,6 +24,7 @@
   "loconautics.train.approaching_station": "Approaching %s",
   "loconautics.train.arrived_at": "Arrived at %s",
   "loconautics.train.departing_from": "Departing from %s",
+  "loconautics.train.too_heavy": "Consist too heavy: %s kpg over the limit",
 
   "loconautics.station.assemble_physics_train": "Assemble as Physics Train",
   "loconautics.station.unnamed_train": "Unnamed Train",
@@ -48,12 +49,21 @@
   "loconautics.configuration.train.maxBogeysPerCarriage": "Max Bogeys Per Carriage",
   "loconautics.configuration.train.maxBogeysPerCarriage.tooltip": "Maximum Create bogeys allowed in one carriage (glued cluster). Default 2, matching Create.",
 
+  "loconautics.configuration.train.physics.mode": "Physics Mode",
+  "loconautics.configuration.train.physics.mode.tooltip": "ARCADE: any consist is always movable. REALISTIC: a consist over the (multiplier-scaled) max pullable mass cannot move. Mass-scaled acceleration and SU cost apply in both.",
+  "loconautics.configuration.train.physics.baseMaxPullableMassKg": "Base Max Pullable Mass (kpg)",
+  "loconautics.configuration.train.physics.baseMaxPullableMassKg.tooltip": "REALISTIC mode only: the x1 maximum pullable consist mass. The bearing axle gear multiplier scales this cap (and SU cost).",
+  "loconautics.configuration.train.physics.minAcceleration": "Minimum Acceleration (m/s^2)",
+  "loconautics.configuration.train.physics.minAcceleration.tooltip": "Floor on weight-scaled acceleration so any consist always creeps forward. Applies in both modes.",
+
   "loconautics.configuration.bearing_axle.massDivisor": "Mass Divisor",
   "loconautics.configuration.bearing_axle.massDivisor.tooltip": "Divides total train mass (kpg) to get stress impact per RPM. Lower = more stress per kg.",
   "loconautics.configuration.bearing_axle.baseImpact": "Base Stress Impact",
   "loconautics.configuration.bearing_axle.baseImpact.tooltip": "Minimum stress impact even on an empty train.",
 
   "loconautics.gui.goggles.bearing_axle_stats": "Bearing Axle",
+  "loconautics.gui.goggles.gear_ratio": "Gear Ratio",
+  "loconautics.gui.goggles.max_pullable": "Max Pullable",
   "loconautics.gui.goggles.train_weight": "Train Weight",
   "loconautics.gui.goggles.unit_kg": "kpg",
   "loconautics.gui.goggles.stress_impact": "Stress Impact",

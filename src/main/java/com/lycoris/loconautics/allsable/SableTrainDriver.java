@@ -88,7 +88,6 @@ public final class SableTrainDriver {
 
     // Linear-bearing drive (DEFAULT trains): prismatic joint along the rail.
     private static final double DRIVE_K = 6.0;
-    private static final double MAX_DRIVE_ACCEL = 20.0;
 
     /** Live constraints, keyed by the body sub-level UUID they glue to the rail. Reused across substeps (frames
      *  updated in place) — never rebuilt per tick — so Sable's solver keeps its warm-start state. */
@@ -303,6 +302,12 @@ public final class SableTrainDriver {
         if (handle == null) {
             return;
         }
+        // REALISTIC mode, consist over the (multiplier-scaled) mass cap: the axle produces no tractive effort at all.
+        // The prismatic joint still holds the car on the rail and gravity still acts, so it can free-roll downhill
+        // but cannot be pulled. (applyPropulsion sets this flag each game tick and zeroes targetSpeed.)
+        if (train.isOverloaded()) {
+            return;
+        }
         MassData md = sub.getMassTracker();
         double locoMass = (md != null && !md.isInvalid()) ? md.getMass() : 1.0;
         // The WHOLE hauled consist's weight governs how briskly the train can change speed; the impulse itself is
@@ -336,14 +341,16 @@ public final class SableTrainDriver {
     // Weight-scaled acceleration / braking / wheel-slip (train.realism config).
     // ---------------------------------------------------------------------------------------------
 
-    /** Max acceleration (m/s²) the consist can pull, scaled inversely with its weight and capped. */
+    /**
+     * Max acceleration (m/s²) the consist can pull, scaled inversely with its weight. Always-on in both physics
+     * modes (heavier = slower acceleration). Clamped between {@link Config#MIN_ACCELERATION} (so an arbitrarily
+     * heavy consist still always creeps forward — the "train always moves" guarantee) and the absolute ceiling.
+     */
     private static double tractionAccelLimit(double consistMass) {
-        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_ACCELERATION.get()) {
-            return MAX_DRIVE_ACCEL;
-        }
-        double scaled = Config.REALISM_BASE_ACCELERATION.get()
-                * (Config.REALISM_REFERENCE_MASS.get() / Math.max(1.0, consistMass));
-        return Math.min(scaled, Config.REALISM_MAX_ACCELERATION.get());
+        double scaled = Config.DYNAMICS_BASE_ACCELERATION.get()
+                * (Config.DYNAMICS_REFERENCE_MASS.get() / Math.max(1.0, consistMass));
+        return Math.max(Config.MIN_ACCELERATION.get(),
+                Math.min(scaled, Config.DYNAMICS_MAX_ACCELERATION.get()));
     }
 
     /**
@@ -352,20 +359,17 @@ public final class SableTrainDriver {
      * braking → they slide further). Braking is NOT scaled inversely with mass — weight changes grip, not raw force.
      */
     private static double brakeDecelLimit(double consistMass) {
-        if (!Config.REALISM_ENABLED.get()) {
-            return MAX_DRIVE_ACCEL;
-        }
-        double decel = Config.REALISM_BASE_DECELERATION.get() * brakingAdhesion(consistMass);
-        return Math.min(decel, Config.REALISM_MAX_ACCELERATION.get());
+        double decel = Config.DYNAMICS_BASE_DECELERATION.get() * brakingAdhesion(consistMass);
+        return Math.min(decel, Config.DYNAMICS_MAX_ACCELERATION.get());
     }
 
     /** Braking grip (0..1): lighter consists slip (apply less braking force), heavier ones grip fully. */
     private static double brakingAdhesion(double consistMass) {
-        if (!Config.REALISM_ENABLED.get() || !Config.WEIGHT_SCALES_BRAKING_SLIP.get()) {
+        if (!Config.WEIGHT_SCALES_BRAKING_SLIP.get()) {
             return 1.0;
         }
-        double minAdhesion = Config.REALISM_MIN_BRAKING_ADHESION.get();
-        double full = Config.REALISM_FULL_ADHESION_MASS.get();
+        double minAdhesion = Config.DYNAMICS_MIN_BRAKING_ADHESION.get();
+        double full = Config.DYNAMICS_FULL_ADHESION_MASS.get();
         double adhesion = minAdhesion + (1.0 - minAdhesion) * (Math.max(1.0, consistMass) / full);
         return Math.max(minAdhesion, Math.min(1.0, adhesion));
     }
@@ -1168,16 +1172,45 @@ public final class SableTrainDriver {
         // An axle present means this car is the locomotive: it both drives and brakes (rear cars have no axle and
         // are merely dragged). Downhill free-rolling is handled in applyTangentialDrive, not by withholding power.
         double rpm = axle.getSpeed();
+        // Overstress consistency (both drive paths): getSpeed() already returns 0 while the kinetic network is
+        // overstressed, so an overstressed network stops the train identically whether the axle is driven directly
+        // or through a Transmission (the Transmission only feeds RPM into this same network). Make the invariant
+        // explicit so it can never silently diverge.
+        if (axle.isOverStressed()) {
+            rpm = 0.0;
+        }
         train.setPowered(true);
 
         double maxSpeed = bearingAxleCapBpt();
         double target = (rpm / 256.0) * maxSpeed;
         target = Math.max(-maxSpeed, Math.min(maxSpeed, target));
+
+        // REALISTIC mode mass cap: a consist heavier than the axle's (multiplier-scaled) maximum pullable mass
+        // produces no tractive effort. ARCADE mode never caps. haulMass <= 0 means "not yet computed" (the first
+        // few ticks after assembly) — treat as movable so a fresh train is never briefly frozen.
+        double cap = Config.BASE_MAX_PULLABLE_MASS.get() * axle.getMultiplier();
+        boolean overCap = Config.PHYSICS_MODE.get() == Config.PhysicsMode.REALISTIC
+                && train.haulMass() > 0.0
+                && train.haulMass() > cap;
+        train.setOverloaded(overCap);
+        if (overCap) {
+            target = 0.0;
+            // Tell the operator why the train won't move (rate-limited to the shared banner keepalive cadence).
+            if (Math.abs(rpm) > 1.0e-3 && (stationTickCounter % 10) == 0) {
+                AnalogControllerBlockEntity controller = operatedControllerIn(train);
+                ServerPlayer operator = controller != null ? operatorOf(train, controller) : null;
+                if (operator != null) {
+                    Component text = Component.translatable("loconautics.train.too_heavy",
+                            Component.literal(String.format("%.0f", train.haulMass() - cap)));
+                    LoconauticsNetwork.sendStationPrompt(operator, text, false);
+                }
+            }
+        }
         train.setTargetSpeed(target);
 
         // Slope stress applies ONLY while climbing — hauling the consist uphill costs extra stress; descending it
         // is the least stressful (no slope term at all). Motion on slopes is left entirely to Sable's gravity.
-        boolean slope = Config.REALISM_ENABLED.get() && Config.SLOPE_EFFECTS_ENABLED.get();
+        boolean slope = Config.SLOPE_EFFECTS_ENABLED.get();
         axle.setSlopeAngle(slope && isClimbing(train, rpm) ? inclineDegrees(sub) : 0.0);
     }
 

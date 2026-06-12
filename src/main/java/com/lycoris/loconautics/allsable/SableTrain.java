@@ -84,6 +84,10 @@ public final class SableTrain {
     /** Latest total weight (kg) of the whole hauled consist (this car + everything coupled to it), refreshed by
      *  {@link SableTrainDriver}. Drives weight-scaled acceleration/braking. 0 until first computed. */
     private double haulMass = 0.0;
+    /** REALISTIC mode: true when the hauled consist exceeds the bearing axle's (multiplier-scaled) maximum pullable
+     *  mass. While set, {@link SableTrainDriver} applies no tractive effort (the train can't pull but gravity still
+     *  acts, so it may still roll downhill). Always false in ARCADE mode. Set each game tick by applyPropulsion. */
+    private boolean overloaded = false;
 
     // ---------------------------------------------------------------------------------------------
     // Station stopping (driven entirely by SableTrainDriver.tickStation).
@@ -148,6 +152,7 @@ public final class SableTrain {
         this.car = new Car(car.subLevelId(), newCarriage, newBogeys, car.localLead(), car.localTrail());
         this.speed = 0.0;
         this.targetSpeed = 0.0;
+        this.overloaded = false;
         this.stationState = StationState.RUNNING;
         this.distanceToStation = Double.MAX_VALUE;
         this.dwellTicks = 0;
@@ -201,6 +206,16 @@ public final class SableTrain {
     /** Updates the cached hauled-consist weight (called by {@link SableTrainDriver} from the game tick). */
     public void setHaulMass(double haulMass) {
         this.haulMass = haulMass;
+    }
+
+    /** REALISTIC mode: true when the consist exceeds the axle's (multiplier-scaled) maximum pullable mass. */
+    public boolean isOverloaded() {
+        return overloaded;
+    }
+
+    /** Sets the overloaded state (see {@link #overloaded}); set each game tick by {@link SableTrainDriver}. */
+    public void setOverloaded(boolean overloaded) {
+        this.overloaded = overloaded;
     }
 
     // ---------------------------------------------------------------------------------------------
