@@ -24,4 +24,20 @@ public interface StationBlockEntityAccessor {
      */
     @Invoker("exception")
     void loconautics$exception(AssemblyException exception, int carriage);
+
+    /**
+     * Client-side setter for Create's {@code trainPresent} flag. We drive it for parked Sable trains so Create's
+     * own station-flag animation + arrival sound play exactly as they do for a Create train (a Sable train and a
+     * Create train can never share a station, so this never conflicts with Create's own bookkeeping).
+     */
+    @Accessor("trainPresent")
+    void loconautics$setTrainPresent(boolean value);
+
+    /**
+     * Client-side setter for Create's {@code trainCanDisassemble} flag. We set it for a present Sable train so
+     * Create's own screen tooltip reads "disassemble train" instead of the "train not aligned" warning it shows
+     * when a train is present but Create thinks it can't be disassembled.
+     */
+    @Accessor("trainCanDisassemble")
+    void loconautics$setTrainCanDisassemble(boolean value);
 }

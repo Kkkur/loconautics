@@ -700,6 +700,7 @@ public final class SableTrainDriver {
                 checkDerailment(train);
                 applyPropulsion(train);
                 tickStation(train, operatedControllerIn(train));
+                updateStationPresence(train);
                 train.tickMotion();
                 updateBogeyYaw(train, diag);
                 updateBogeyWheels(train);
@@ -1193,7 +1194,7 @@ public final class SableTrainDriver {
     private static final double STATION_PARK_EPSILON = 0.4;
     /** Fixed back-shift of the bogey "front detector" along the approach (blocks): the detector sits this far behind
      *  the bogey, so the train always parks at the same offset relative to the marker. */
-    private static final double STATION_FRONT_OFFSET = -3.5;
+    private static final double STATION_FRONT_OFFSET = -1.5;
     /** Amber/brass colour Create uses for station names in prompts. */
     private static final int STATION_NAME_COLOR = 7358000;
     /** Shared cadence (in game ticks) for re-sending a live banner so its client keepalive never lapses. */
@@ -1279,6 +1280,7 @@ public final class SableTrainDriver {
                     train.setSpeed(0.0);
                     train.setTargetSpeed(0.0);
                     train.setStationState(StationState.STOPPED);
+                    train.setAtStation(train.currentStation()); // durable "present at station" marker
                     return;
                 }
                 // direction × sqrt(2·decel·distance): a speed profile that DRIVES the train toward the marker (it
@@ -1309,6 +1311,38 @@ public final class SableTrainDriver {
                     train.setStationState(StationState.RUNNING);
                 }
             }
+        }
+    }
+
+    /** Squared distance (blocks²) a parked car must travel from its rest spot before it counts as having left. */
+    private static final double LEFT_STATION_DISTANCE_SQR = 16.0; // 4 blocks
+
+    /**
+     * Clears a car's durable {@link SableTrain#atStation} "present at station" marker once it has physically moved
+     * away from where it parked. Instantaneous speed is an unreliable "moving" signal (a car held at rest still
+     * reports small residual servo speed), so we record the body position when it first comes to rest at a station
+     * and drop the marker only after the body has travelled a real distance from there.
+     */
+    private static void updateStationPresence(SableTrain train) {
+        if (train.atStation() == null) {
+            return;
+        }
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(train.level());
+        Car car = train.car();
+        if (container == null || car.subLevelId() == null
+                || !(container.getSubLevel(car.subLevelId()) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return;
+        }
+        Vector3dc p = sub.logicalPose().position();
+        Vector3dc anchor = train.atStationPos();
+        if (anchor == null) {
+            train.setAtStationPos(new Vector3d(p)); // first rest position at the station
+            return;
+        }
+        double dx = p.x() - anchor.x();
+        double dz = p.z() - anchor.z();
+        if (dx * dx + dz * dz > LEFT_STATION_DISTANCE_SQR) {
+            train.setAtStation(null); // moved away — no longer present
         }
     }
 

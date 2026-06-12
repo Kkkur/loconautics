@@ -1,9 +1,11 @@
 package com.lycoris.loconautics.allsable;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.minecraft.core.BlockPos;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -26,7 +28,29 @@ public final class SableTrainClientRegistry {
 
     private static final Map<UUID, TrainMarker> TRAINS = new ConcurrentHashMap<>();
 
+    /** Station block positions where a Sable train is currently parked (synced via StationParkedSyncPacket). */
+    private static final Set<BlockPos> PARKED_STATIONS = ConcurrentHashMap.newKeySet();
+
     private SableTrainClientRegistry() {
+    }
+
+    /** Marks (or unmarks) a station position as having a parked Sable train. */
+    public static void setStationParked(BlockPos pos, boolean parked) {
+        if (parked) {
+            PARKED_STATIONS.add(pos.immutable());
+        } else {
+            PARKED_STATIONS.remove(pos);
+        }
+    }
+
+    /** True if a Sable train is parked at the station at {@code pos}. */
+    public static boolean isStationParked(BlockPos pos) {
+        return PARKED_STATIONS.contains(pos);
+    }
+
+    /** Snapshot of every station position with a parked Sable train (for per-tick flag driving). */
+    public static Set<BlockPos> parkedStations() {
+        return Set.copyOf(PARKED_STATIONS);
     }
 
     /** Adds or updates the marker for a train sub-level (sent on assembly/derail/relocate/login/speed change). */
@@ -42,6 +66,7 @@ public final class SableTrainClientRegistry {
     /** Drops every marker (on disconnect, so a fresh server re-syncs from scratch). */
     public static void clear() {
         TRAINS.clear();
+        PARKED_STATIONS.clear();
     }
 
     /** The marker for this sub-level, or {@code null} if it is not a (known) train sub-level. */

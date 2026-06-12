@@ -2,6 +2,8 @@ package com.lycoris.loconautics.network;
 
 import com.lycoris.loconautics.network.packets.AnalogControllerInputPacket;
 import com.lycoris.loconautics.network.packets.AssembleSableTrainPacket;
+import com.lycoris.loconautics.network.packets.DisassembleSableTrainPacket;
+import com.lycoris.loconautics.network.packets.StationParkedSyncPacket;
 import com.lycoris.loconautics.network.packets.SableTrainRelocatePacket;
 import com.lycoris.loconautics.network.packets.SableTrainSyncPacket;
 import com.lycoris.loconautics.network.packets.SteelCableStrandPacket;
@@ -80,6 +82,20 @@ public final class LoconauticsNetwork {
                 AssembleSableTrainPacket.TYPE,
                 AssembleSableTrainPacket.STREAM_CODEC,
                 AssembleSableTrainPacket::handle
+        );
+
+        // Client -> Server: disassemble the Sable train parked at a station (station disassemble button).
+        registrar.playToServer(
+                DisassembleSableTrainPacket.TYPE,
+                DisassembleSableTrainPacket.STREAM_CODEC,
+                DisassembleSableTrainPacket::handle
+        );
+
+        // Server -> Client: a Sable train is (un)parked at a station, so its disassemble button can show.
+        registrar.playToClient(
+                StationParkedSyncPacket.TYPE,
+                StationParkedSyncPacket.STREAM_CODEC,
+                StationParkedSyncPacket::handle
         );
 
         // Server -> Client: marks (or unmarks) a Sable sub-level as a relocatable train sub-level.

@@ -21,11 +21,14 @@ import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
 import com.simibubi.create.content.trains.graph.TrackGraphHelper;
 import com.simibubi.create.content.trains.graph.TrackGraphLocation;
+import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
 import com.simibubi.create.content.trains.track.ITrackBlock;
 import com.simibubi.create.foundation.utility.CreateLang;
 
 import dev.simulated_team.simulated.content.entities.honey_glue.HoneyGlueEntity;
+import dev.simulated_team.simulated.util.SimAssemblyHelper;
+import dev.simulated_team.simulated.util.SimMathUtils;
 
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper;
 import dev.ryanhcode.sable.api.SubLevelAssemblyHelper.GatherResult;
@@ -50,6 +53,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.phys.AABB;
@@ -243,6 +247,7 @@ public final class SableTrainSpawner {
         // between cars: coupling them (steel cable, knuckle, …) is the player's job at runtime.
         Set<BlockPos> assembled = new HashSet<>();
         int built = 0;
+        SableTrain frontTrain = null; // the frontmost car (nearest the station marker), assembled first
         for (Set<BlockPos> cluster : carriages) {
             BoundingBox3i bounds = boundsOf(cluster);
             BlockPos anchor = frontmostBlock(cluster, stationTrack, railDir);
@@ -261,6 +266,9 @@ public final class SableTrainSpawner {
             SableTrainPersistence.persist(train);
             SableTrainSyncPacket.broadcast(train); // mark this body sub-level as a train sub-level on clients
             assembled.addAll(cluster);
+            if (frontTrain == null) {
+                frontTrain = train;
+            }
             built++;
         }
         if (built == 0) {
@@ -268,17 +276,9 @@ public final class SableTrainSpawner {
             return;
         }
 
-        // Remove the glue entities that linked the now-assembled blocks (their blocks have moved into sub-levels,
-        // so the glue would otherwise dangle over empty space).
-        for (Entity g : glue) {
-            AABB box = g.getBoundingBox();
-            for (BlockPos p : assembled) {
-                if (box.contains(Vec3.atCenterOf(p))) {
-                    g.discard();
-                    break;
-                }
-            }
-        }
+        // A freshly assembled train sits on the station marker — mark its front car present so the station block
+        // shows it arrived (flag + disassemble) immediately, without waiting for it to be driven away and parked.
+        frontTrain.setAtStation(station.getStation());
 
         // Success: clear any previous error and drop the station out of assembly mode, exactly like Create does
         // after a normal assembly. The new cars sit idle (throttle 0, glued to the rail) until the player drives
@@ -654,6 +654,86 @@ public final class SableTrainSpawner {
         }
         lastTrainId = null;
         return n;
+    }
+
+    // ============================================================================================
+    // Station parking + disassembly (mirrors Create's station disassemble, for Sable trains).
+    // ============================================================================================
+
+    /**
+     * The Sable train currently parked (stopped) at {@code station} in {@code level}, or {@code null} if none.
+     * A train counts as parked when its station-stop state machine is {@link SableTrain.StationState#STOPPED} at
+     * exactly this station (durable: the train holds {@code STOPPED} until the operator pulls away). Used both to
+     * light up the station's disassemble button and to resolve which train that button disassembles.
+     */
+    public static SableTrain findParkedTrain(ServerLevel level, GlobalStation station) {
+        if (station == null) {
+            return null;
+        }
+        for (SableTrain train : SableTrainRegistry.all()) {
+            if (train.level() != level || train.isDerailed()) {
+                continue;
+            }
+            // Use the durable atStation marker (set at assembly and when the car parks, cleared when it rolls away)
+            // rather than the transient, powered-only stationState — so an idle/un-crewed train still reads present.
+            // Match by the station's stable graph id, not object identity: the GlobalStation our driver/assembler
+            // captured can be a different instance from the one the station BE's edge point returns, though they are
+            // the same station on the same graph (Create keys stations by this id everywhere).
+            GlobalStation at = train.atStation();
+            if (at != null && (at == station || (at.id != null && at.id.equals(station.id)))) {
+                return train;
+            }
+        }
+        return null;
+    }
+
+    /** Server entry for the station disassemble button: disassembles the Sable train parked at {@code stationPos}. */
+    public static void disassembleFromStation(ServerPlayer player, BlockPos stationPos) {
+        ServerLevel level = player.serverLevel();
+        if (!(level.getBlockEntity(stationPos) instanceof StationBlockEntity station)) {
+            return;
+        }
+        SableTrain train = findParkedTrain(level, station.getStation());
+        if (train != null) {
+            disassembleSableTrain(train);
+        }
+    }
+
+    /**
+     * Disassembles a Sable train back into the world, reusing Simulated's physics-assembler disassembly path
+     * ({@link SimAssemblyHelper#disassembleSubLevel}) so the blocks (and any glue / Create contraptions inside the
+     * sub-level) are written back to the world exactly as the Physics Assembler does it. A railed, {@code STOPPED}
+     * train is already grid-aligned by the driver's rail constraint, so we skip the assembler's free-body alignment
+     * dance and only replicate the bits that call for: anchor a sub-level block, find where the live pose maps it
+     * into the world, and derive the 90° grid rotation from the (already rail-aligned) yaw.
+     */
+    public static boolean disassembleSableTrain(SableTrain train) {
+        ServerLevel level = train.level();
+        ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
+        UUID subId = train.car().subLevelId();
+        if (container == null || subId == null
+                || !(container.getSubLevel(subId) instanceof ServerSubLevel sub) || sub.isRemoved()) {
+            return false;
+        }
+
+        BlockPos anchor = sub.getPlot().getCenterBlock();
+        BlockPos goal = BlockPos.containing(sub.logicalPose().transformPosition(Vec3.atCenterOf(anchor)));
+        double yaw = SimMathUtils.getClosestYaw(sub.logicalPose().orientation());
+        int turns = -Mth.floor(yaw / (Math.PI / 2.0) + 0.5);
+        Rotation rotation = SimAssemblyHelper.rotationFrom90DegRots(turns);
+
+        SimAssemblyHelper.disassembleSubLevel(level, sub, anchor, goal, rotation, true);
+
+        // Stop driving it and forget it everywhere, then drop the now-empty sub-level husk.
+        SableTrainRegistry.remove(train.id());
+        SableTrainPersistence.unpersist(level.getServer(), train.id());
+        SableTrainSyncPacket.broadcastRemoval(subId);
+        if (!sub.isRemoved()) {
+            container.removeSubLevel(sub, SubLevelRemovalReason.REMOVED);
+        }
+        LoconauticsConstants.LOGGER.info("[sabletrain] disassembled train {} (sub-level {}) back into the world at {}",
+                train.id(), subId, goal);
+        return true;
     }
 
     /** How close the player's look ray must pass to a car's centre to target it for {@link #derailLookedAt}. */

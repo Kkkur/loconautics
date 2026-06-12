@@ -57,10 +57,20 @@ public final class BogeyWheelAnimator {
     /** Called once per rendered frame per bogey; advances the wheel animation by the distance moved. */
     public static void frame(AbstractBogeyBlockEntity be) {
         ClientSubLevel sub = Sable.HELPER.getContainingClient(be);
-        if (sub == null || !SableTrainClientRegistry.isTrain(sub.getUniqueId())) {
+        if (sub == null) {
             return;
         }
+        SableTrainClientRegistry.TrainMarker marker = SableTrainClientRegistry.get(sub.getUniqueId());
+        if (marker == null) {
+            return;
+        }
+        // Keep indexing the bogey (particles read RENDERED) even when derailed; only skip the wheel spin.
         RENDERED.put(be, sub.getUniqueId());
+        if (marker.derailed()) {
+            // Drop the baseline so recovery re-seats from the current pose instead of spinning across the gap.
+            LAST_POS.remove(be);
+            return;
+        }
         Vec3 w = sub.renderPose().transformPosition(Vec3.atCenterOf(be.getBlockPos()));
         Vector3d pos = new Vector3d(w.x, w.y, w.z);
         Vector3d last = LAST_POS.put(be, pos);

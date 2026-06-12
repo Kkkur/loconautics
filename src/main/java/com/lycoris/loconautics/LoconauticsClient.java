@@ -6,6 +6,7 @@ import com.lycoris.loconautics.allsable.SableTrainParticles;
 import com.lycoris.loconautics.allsable.SableTrainSounds;
 import com.lycoris.loconautics.client.LoconauticsPartialModels;
 import com.lycoris.loconautics.client.LoconauticsSpriteShifts;
+import com.lycoris.loconautics.client.StationParkingFlagClient;
 import com.lycoris.loconautics.client.ponder.LoconauticsPonderPlugin;
 import com.lycoris.loconautics.content.steelcable.SteelCableTracker;
 import com.lycoris.loconautics.content.analogcontroller.AnalogControllerClientHandler;
@@ -125,6 +126,7 @@ public final class LoconauticsClient {
         SableTrainRelocator.clientTick();
         SableTrainSounds.tickAll();
         SableTrainParticles.tickAll();
+        StationParkingFlagClient.tick();
     }
 
     /** Use-item key: starts/confirms/aborts a Sable train-sub-level wrench relocation (see {@link SableTrainRelocator}). */
@@ -154,5 +156,6 @@ public final class LoconauticsClient {
         SteelCableTracker.clearClient();
         SableTrainClientRegistry.clear();
         SableTrainSounds.stopAll();
+        StationParkingFlagClient.clear();
     }
 }
