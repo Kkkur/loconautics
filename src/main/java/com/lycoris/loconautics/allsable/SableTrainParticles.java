@@ -21,6 +21,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -77,7 +78,12 @@ public final class SableTrainParticles {
                 ACTIVE.remove(id);
                 continue;
             }
-            ACTIVE.computeIfAbsent(id, k -> new SableTrainParticles()).tick(mc, clientSub);
+            try {
+                ACTIVE.computeIfAbsent(id, k -> new SableTrainParticles()).tick(mc, clientSub);
+            } catch (Throwable t) {
+                com.lycoris.loconautics.core.LoconauticsConstants.LOGGER
+                        .warn("[sabletrain] particle tick failed for train {}", id, t);
+            }
         }
     }
 
@@ -156,17 +162,20 @@ public final class SableTrainParticles {
 
         Vec3 drift = new Vec3(motion.x, motion.y, motion.z).scale(0.75);
         boolean spark = depressurise == 0 || depressurise > 10;
-        float cutoff = length < 0.125 ? 0.0f : 0.125f;
+        // Create's flat 0.125 cruise cutoff yields ~1.5% per wheel corner per tick — practically invisible
+        // at our pace. Scale the trickle with speed instead (clearly visible, still light), and keep
+        // Create's full spark shower under braking.
+        float cutoff = length < 0.08f ? 0.0f : Mth.clamp((float) length * 0.6f, 0.15f, 0.5f);
         if (length > 0.1666666716337204) {
             cutoff = Math.max(cutoff, brakes.getValue() * 1.15f);
         }
 
         if (++diagTick % 20 == 0) {
             com.lycoris.loconautics.core.LoconauticsConstants.LOGGER.info(
-                    "[sabletrain] particles: train {} len={} cutoff={} bogeys={} spark={} depres={} brakes={}",
+                    "[sabletrain] particles: train {} len={} cutoff={} bogeys={} rendered={} spark={} depres={} brakes={}",
                     sub.getUniqueId().toString().substring(0, 8), String.format("%.3f", length),
-                    String.format("%.3f", cutoff), bogeys.size(), spark, depressurise,
-                    String.format("%.2f", brakes.getValue()));
+                    String.format("%.3f", cutoff), bogeys.size(), BogeyWheelAnimator.renderedCount(),
+                    spark, depressurise, String.format("%.2f", brakes.getValue()));
         }
 
         if (bogeys.isEmpty()) {
@@ -210,7 +219,7 @@ public final class SableTrainParticles {
 
         ParticleOptions contact = be.getStyle().contactParticle;
         ParticleOptions smoke = be.getStyle().smokeParticle;
-        double yOff = spark ? -1.4 : -0.5;   // wheel-rail contact vs just above the axle (block centre frame)
+        double yOff = spark ? -1.1 : -0.4;   // wheel-rail contact (just at rail-top, not buried) vs axle height
 
         for (int j : new int[] {1, -1}) {
             if (r.nextFloat() > cutoff && (!smokeLeniency || r.nextInt(4) == 0)) {

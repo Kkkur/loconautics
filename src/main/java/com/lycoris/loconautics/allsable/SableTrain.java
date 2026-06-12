@@ -81,6 +81,10 @@ public final class SableTrain {
      * (for any reason: lost wheels, excessive speed on a curve, a collision) and the car leaves the rail next tick.
      */
     private boolean derailed = false;
+    /** Ticks remaining in the post-relocate/re-seat "settle" window, during which speed-based derailment is
+     *  suppressed so the freshly-snapped body can settle onto the rail without a spurious cornering spike
+     *  instantly re-derailing it (see {@link #relocate}). */
+    private int settleGrace = 0;
     /** Latest total weight (kg) of the whole hauled consist (this car + everything coupled to it), refreshed by
      *  {@link SableTrainDriver}. Drives weight-scaled acceleration/braking. 0 until first computed. */
     private double haulMass = 0.0;
@@ -136,10 +140,21 @@ public final class SableTrain {
         this.car = new Car(car.subLevelId(), newCarriage, newBogeys, car.localLead(), car.localTrail());
         this.speed = 0.0;
         this.targetSpeed = 0.0;
+        this.settleGrace = 30; // ~1.5 s to settle onto the rail before speed-based derail can fire again
         this.stationState = StationState.RUNNING;
         this.distanceToStation = Double.MAX_VALUE;
         this.dwellTicks = 0;
         this.currentStation = null;
+    }
+
+    /** True while the car is still settling after a relocate/re-seat (speed-based derail suppressed). Decrements
+     *  the grace counter — call once per game tick. */
+    public boolean isSettling() {
+        if (settleGrace > 0) {
+            settleGrace--;
+            return true;
+        }
+        return false;
     }
 
     public double speed() {

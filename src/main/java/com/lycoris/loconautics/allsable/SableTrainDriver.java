@@ -108,15 +108,23 @@ public final class SableTrainDriver {
             if (Config.BOUNCE_DEBUG.get()) {
                 logBounceVel("PRE ", sub, train, car);
             }
-            // Global speed cap FIRST, so it applies no matter what is pushing the car — the bearing-axle drive,
-            // thrusters, a physics wand, collisions, gravity on a slope, anything — and regardless of drive mode.
-            capTrainSpeed(sub);
             // Derailed cars (e.g. all wheels destroyed) are released from the rail and left as a free physics
             // body — no constraint, no spring, no pin. Detection happens once per game tick in checkDerailment().
+            // Handled BEFORE the speed cap: a free body must keep its tumble/slide (the cap zeroes angular
+            // velocity, which is wrong off the rails).
             if (train.isDerailed()) {
                 releaseConstraint(sub.getUniqueId());
+                if (DERAIL_KICKED.add(train.id())) {
+                    applyDerailKick(sub, train); // one-time hop off the rails so the wheels don't sink/clip
+                }
                 return;
             }
+            if (DERAIL_KICKED.remove(train.id())) {
+                CORNERING.remove(train.id()); // back on the rails after a derail — restart cornering measurement
+            }
+            // Global speed cap, so it applies no matter what is pushing the car — the bearing-axle drive,
+            // thrusters, a physics wand, collisions, gravity on a slope, anything — and regardless of drive mode.
+            capTrainSpeed(sub);
             if (train.isPhysics()) {
                 applyBogeySprings(sub, car, timeStep, system.getLevel());
                 return;
@@ -213,9 +221,12 @@ public final class SableTrainDriver {
         Vector3d tangent = forwardUnit(carriage);
         Vector3dc localAnchor = new Vector3d(car.localLead()).add(car.localTrail()).mul(0.5);
 
-        // Measure the body's slide along the tangent and advance the rail by it.
+        // Measure the body's slide along the tangent and advance the rail by it. Clamped: a snap/teleport
+        // mismatch must never leap the followers blocks down the track in one substep (normal slides are
+        // tiny fractions of a block) — the runaway after relocation came from exactly such a leap.
         Vector3d anchorWorld = bodySub.logicalPose().transformPosition(localAnchor, new Vector3d());
         double slide = anchorWorld.sub(railPoint, new Vector3d()).dot(tangent);
+        slide = Math.max(-2.0, Math.min(2.0, slide));
         advanceRail(car, slide);
         animateBogeyWheels(car, bodySub, slide);
 
@@ -244,6 +255,11 @@ public final class SableTrainDriver {
                 }
             }
         }
+
+        // Smooth the body's TARGET orientation toward the rail pose with a lerp, so the car eases into curves
+        // instead of snapping its heading each substep — a gentler, more animated turn (Lycoris' request). The
+        // position/tangent stay exact (the car still rides the rail precisely); only the rotation is eased.
+        q = smoothBodyOrientation(bodySub.getUniqueId(), q);
 
         // Body: prismatic joint — perpendicular + rotation hard-locked, tangent free.
         glueBodyPrismatic(pipeline, bodySub, localAnchor, railPoint, tangent, q);
@@ -418,6 +434,83 @@ public final class SableTrainDriver {
         if (handle != null) {
             handle.remove();
         }
+        SMOOTHED_ORIENTATION.remove(id); // drop the yaw-lerp state so a re-railed car starts fresh
+    }
+
+    /** Trains that have already received their one-time derail kick (re-armed when they get back on the rails). */
+    private static final java.util.Set<UUID> DERAIL_KICKED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Per-body smoothed target orientation for the rail constraint (the yaw lerp). */
+    private static final java.util.Map<UUID, Quaterniond> SMOOTHED_ORIENTATION =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /** Yaw lerp factor per physics substep: how fast the body's rotation chases the rail pose (0 = frozen,
+     *  1 = instant/no smoothing). ~0.6 eases turns without visibly lagging the rail. */
+    private static final double ORIENTATION_LERP = 0.6;
+
+    /**
+     * Eases the body's constraint target orientation toward {@code target} by {@link #ORIENTATION_LERP} each
+     * substep (a spherical lerp on the quaternion), so curves animate smoothly instead of the heading snapping.
+     * A large jump (≥ ~60°, e.g. just after a relocate/derail) snaps straight to the target so the body doesn't
+     * crawl across a big reorientation.
+     */
+    private static Quaterniond smoothBodyOrientation(UUID id, Quaterniond target) {
+        Quaterniond smoothed = SMOOTHED_ORIENTATION.get(id);
+        if (smoothed == null || smoothed.dot(target) < 0.5) { // first sample, or a big jump → snap
+            smoothed = new Quaterniond(target);
+        } else {
+            smoothed.slerp(target, ORIENTATION_LERP).normalize();
+        }
+        SMOOTHED_ORIENTATION.put(id, new Quaterniond(smoothed));
+        return smoothed;
+    }
+
+    /**
+     * One-time impulse the instant a car derails: lift the body so its wheels clear the rail/ground (otherwise
+     * the bogeys hang below the body and clip/sink into the floor), then add an upward + outward hop so it
+     * visibly leaves the rails and lands beside them instead of grinding through the world. Forward momentum is
+     * preserved (the kick is ADDED to the current velocity).
+     */
+    private static void applyDerailKick(ServerSubLevel sub, SableTrain train) {
+        // Lift the body clear of the rail/ground so the wheels (which hang below the body) don't end up buried
+        // and the next collision solve resolves on TOP of the surface, not inside it.
+        sub.logicalPose().position().add(0.0, 1.0, 0.0);
+        sub.updateLastPose();
+
+        RigidBodyHandle handle = RigidBodyHandle.of(sub);
+        if (handle == null) {
+            return;
+        }
+        // Gentle upward settle + a SMALL outward nudge so it tips off the rails — kept small so it never flings
+        // the car into a wall / off the loaded area (that was making relocated/derailed trains vanish or stick).
+        Vector3d outward = derailOutward(train);
+        Vector3d kick = new Vector3d(outward).mul(1.0); // outward m/s (was 3.5 — too violent)
+        kick.y += 2.5;                                  // upward m/s (was 5.0)
+        handle.addLinearAndAngularVelocity(kick, new Vector3d());
+        LoconauticsConstants.LOGGER.info("[sabletrain] car {} kicked off the rails (lift + hop)", train.id());
+    }
+
+    /** Horizontal "outward" unit vector for a derailing car: perpendicular to its heading, on the outside of
+     *  the curve it was taking (falls back to an arbitrary side on straight track). */
+    private static Vector3d derailOutward(SableTrain train) {
+        Cornering c = CORNERING.get(train.id());
+        Vector3d fwd;
+        if (c != null && c.lastHeading != null) {
+            fwd = new Vector3d(c.lastHeading);
+        } else {
+            Vec3 f = train.car().carriage().forward();
+            fwd = new Vector3d(f.x, 0.0, f.z);
+        }
+        if (fwd.lengthSquared() < 1.0e-9) {
+            return new Vector3d(1, 0, 0);
+        }
+        fwd.normalize();
+        Vector3d left = new Vector3d(-fwd.z, 0.0, fwd.x); // +90° about Y
+        if (c != null && c.windowStartHeading != null) {
+            // Sign of the turn: cross(start, now).y > 0 = turning left → centre is left → outward is right.
+            double turn = c.windowStartHeading.x * fwd.z - c.windowStartHeading.z * fwd.x;
+            return turn > 0.0 ? left.negate() : left;
+        }
+        return left;
     }
 
     /** Releases joints whose body sub-level is no longer part of any live train. */
@@ -697,7 +790,7 @@ public final class SableTrainDriver {
         stationTickCounter++;
         for (SableTrain train : SableTrainRegistry.all()) {
             try {
-                checkDerailment(train);
+                checkDerailment(train, diag);
                 applyPropulsion(train);
                 tickStation(train, operatedControllerIn(train));
                 train.tickMotion();
@@ -915,7 +1008,7 @@ public final class SableTrainDriver {
      * sub-level. This is the one place that decides "is this car still on the rail?", so future derailment rules
      * (over-speed on curves, collisions, manual uncoupling) only need to call {@code train.setDerailed(true)}.
      */
-    private static void checkDerailment(SableTrain train) {
+    private static void checkDerailment(SableTrain train, boolean diagCornering) {
         if (train.isDerailed() || train.isPhysics()) {
             return; // already free, or a legacy free-physics car that was never rail-bound
         }
@@ -942,9 +1035,13 @@ public final class SableTrainDriver {
         // end normally); no rail under the car any more means the track is gone — derail.
         if (!railsValid(train) && !SableTrainSpawner.reseatOnRail(train, sub)) {
             train.setDerailed(true);
-            LAST_FORWARD.remove(train.id());
             LoconauticsConstants.LOGGER.info(
                     "[sabletrain] car {} lost its track (rail broken underneath) — derailed", train.id());
+            return;
+        }
+        // Just relocated/re-seated: let the freshly-snapped body settle onto the rail for a moment before any
+        // speed-based derail can fire, so a transient heading swing doesn't instantly re-derail it.
+        if (train.isSettling()) {
             return;
         }
         // The speed-based rules below only apply while the train is travelling under its OWN drive (the
@@ -953,15 +1050,15 @@ public final class SableTrainDriver {
         if (!train.isPowered() || Math.abs(train.targetSpeed()) < 0.01) {
             return;
         }
-        // Cornering load: derail when mass × speed × turn-rate exceeds the limit (heavier/faster/sharper = worse).
+        // Cornering: derail when the centripetal load (speed² × curvature × massFactor) exceeds the limit —
+        // a sharp curve fails at high speed, a gentle curve only at extreme speed, straights never.
         if (Config.DERAIL_ON_CURVE.get()) {
-            double lateral = lateralLoad(train, sub);
-            if (lateral > Config.DERAIL_MAX_LATERAL_FORCE.get()) {
+            double load = corneringLoad(train, sub, diagCornering);
+            if (load > Config.DERAIL_MAX_LATERAL_FORCE.get()) {
                 train.setDerailed(true);
-                LAST_FORWARD.remove(train.id());
                 LoconauticsConstants.LOGGER.info(
-                        "[sabletrain] car {} derailed cornering: load {} > {} (mass*speed*turn)",
-                        train.id(), f(lateral), f(Config.DERAIL_MAX_LATERAL_FORCE.get()));
+                        "[sabletrain] car {} derailed cornering: load {} > {} (speed²*curvature*mass)",
+                        train.id(), f(load), f(Config.DERAIL_MAX_LATERAL_FORCE.get()));
                 return;
             }
         }
@@ -971,7 +1068,6 @@ public final class SableTrainDriver {
             double impact = trainMass(sub) * Math.abs(train.speed()) * 20.0; // mass × m/s
             if (impact > Config.DERAIL_MAX_END_IMPACT.get()) {
                 train.setDerailed(true);
-                LAST_FORWARD.remove(train.id());
                 LoconauticsConstants.LOGGER.info(
                         "[sabletrain] car {} ran off the track end with impact {} > {} (no buffer) — derailed",
                         train.id(), f(impact), f(Config.DERAIL_MAX_END_IMPACT.get()));
@@ -979,30 +1075,123 @@ public final class SableTrainDriver {
         }
     }
 
-    /** Body forward (horizontal) from the previous tick, per train — used to measure the turn rate. */
-    private static final java.util.Map<UUID, Vector3d> LAST_FORWARD = new java.util.HashMap<>();
+    /** Per-train cornering state: the windowed-curvature measurement (see {@link #corneringLoad}). */
+    private static final class Cornering {
+        Vector3d windowStartHeading; // body heading at the start of the current distance window
+        double windowDistance;       // blocks travelled since the window started
+        double curvature;            // last measured track curvature (1/blocks), EMA-smoothed
+        Vector3d lastHeading;        // most recent body heading (for the derail outward direction)
+        double lastSpeedMps;         // speed (m/s) last tick, to derive longitudinal acceleration
+        double accelMps2;            // longitudinal acceleration (m/s²), EMA-smoothed
+        boolean haveSpeed;           // false until the first speed sample is taken
+    }
+
+    /** Cornering state keyed by train id; reset on derail / re-rail so a moved car starts measuring fresh. */
+    private static final java.util.Map<UUID, Cornering> CORNERING = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Distance (blocks) the train must travel before each curvature sample — long enough to average out the
+     *  per-tick heading jitter, short enough to react within a block of entering a curve. */
+    private static final double CURVATURE_WINDOW = 1.0;
+    /** Below this curvature (1/blocks ≈ radius > ~14 blocks) the track is treated as straight — never derails. */
+    private static final double MIN_CURVATURE = 0.07;
+    /** Mass (kg) at which the mass factor is 1.0. Sized for a PROPER build: a well-built train with plenty of
+     *  blocks sits around here, so building big does not by itself push you into derail territory. */
+    private static final double DERAIL_REFERENCE_MASS = 20.0;
+    /** How strongly hard acceleration/braking adds to the lateral demand IN a curve ("stringlining"): a
+     *  longitudinal force, pulling the slack taut across a curve, throws the car toward the curve — scaled by
+     *  the car length and the curvature. 0 disables the effect. */
+    private static final double STRINGLINING_FACTOR = 0.5;
 
     /**
-     * Cornering load on the rails this tick: {@code mass × speed(m/s) × turnRate(rad/s)}. The turn rate is how
-     * fast the body's heading is rotating (this tick's forward vs last tick's), so it is 0 on straight track and
-     * grows with sharper, faster turns. Multiplying by mass means heavier trains push harder — matching the
-     * "velocity × mass" rule. Returns 0 when there's no previous heading yet (first tick).
+     * Realistic cornering load this tick, modelled on how real rail vehicles actually derail on curves:
+     *
+     * <ul>
+     *   <li><b>Centrifugal (lateral) acceleration</b> {@code a_lat = v² × curvature} — the unbalanced lateral
+     *       acceleration that drives wheel-flange climb (Nadal's criterion) and overturning. {@code curvature}
+     *       (= 1/radius) is the curve's geometry, so a sharp curve loads up far faster than a gentle one.</li>
+     *   <li><b>Stringlining</b> — hard acceleration/braking puts a longitudinal force through the car which, on a
+     *       curve, has a lateral component proportional to the curve angle over the car: {@code a_lon × length ×
+     *       curvature}. This is why trains derail when braking hard mid-curve.</li>
+     *   <li><b>Mass / loading factor</b> — heavier (higher-loaded, higher centre of gravity) cars overturn at a
+     *       lower lateral acceleration; light cars resist much more. (Pure rigid-body overturning is mass-
+     *       independent, but loading raises the CoG and the buff/draft forces, so weight matters here.)</li>
+     * </ul>
+     *
+     * The combined lateral demand is compared against {@code maxLateralForce}. Curvature is measured over a
+     * {@link #CURVATURE_WINDOW}-block window from the physics-smoothed body heading (not the jittery per-tick
+     * bogey chord). Returns 0 on straight track or until the first window has been measured.
      */
-    private static double lateralLoad(SableTrain train, ServerSubLevel sub) {
-        Vec3 f = train.car().carriage().forward();
-        Vector3d fwd = new Vector3d(f.x, 0.0, f.z);
+    private static double corneringLoad(SableTrain train, ServerSubLevel sub, boolean diag) {
+        Car car = train.car();
+        // Physics-smoothed body heading: the chord between the two captured anchor points through the LIVE pose
+        // (same source updateBogeyYaw uses), far less noisy than the bogey rail-follower chord. Falls back to the
+        // carriage tangent for kinematic-pin cars without captured anchors.
+        Vector3d fwd;
+        if (car.localLead() != null && car.localTrail() != null) {
+            Vector3d leadW = sub.logicalPose().transformPosition(car.localLead(), new Vector3d());
+            Vector3d trailW = sub.logicalPose().transformPosition(car.localTrail(), new Vector3d());
+            fwd = leadW.sub(trailW);
+            fwd.y = 0.0;
+        } else {
+            Vec3 f = car.carriage().forward();
+            fwd = new Vector3d(f.x, 0.0, f.z);
+        }
         if (fwd.lengthSquared() < 1.0e-9) {
             return 0.0;
         }
         fwd.normalize();
-        Vector3d last = LAST_FORWARD.put(train.id(), new Vector3d(fwd));
-        if (last == null) {
-            return 0.0; // no previous heading to compare against yet
+
+        double vMps = Math.abs(train.speed()) * 20.0;
+
+        Cornering c = CORNERING.computeIfAbsent(train.id(), k -> new Cornering());
+        c.lastHeading = new Vector3d(fwd);
+        // Longitudinal acceleration (m/s²): change in speed per second, lightly smoothed to kill tick noise.
+        if (c.haveSpeed) {
+            double aRaw = (vMps - c.lastSpeedMps) * 20.0;
+            c.accelMps2 = c.accelMps2 * 0.6 + aRaw * 0.4;
+        } else {
+            c.haveSpeed = true;
         }
-        double dYaw = Math.acos(Math.max(-1.0, Math.min(1.0, last.dot(fwd)))); // radians turned this tick
-        double turnRate = dYaw * 20.0;                       // rad/s
-        double speed = Math.abs(train.speed()) * 20.0;       // m/s
-        return trainMass(sub) * speed * turnRate;
+        c.lastSpeedMps = vMps;
+
+        if (c.windowStartHeading == null) {
+            c.windowStartHeading = new Vector3d(fwd);
+            c.windowDistance = 0.0;
+            return 0.0;
+        }
+        c.windowDistance += Math.abs(train.speed()); // blocks travelled this tick
+        if (c.windowDistance >= CURVATURE_WINDOW) {
+            double dYaw = Math.acos(Math.max(-1.0, Math.min(1.0, c.windowStartHeading.dot(fwd))));
+            double sample = dYaw / c.windowDistance;                  // 1/blocks
+            c.curvature = c.curvature * 0.5 + sample * 0.5;           // light EMA across windows
+            c.windowStartHeading = new Vector3d(fwd);
+            c.windowDistance = 0.0;
+        }
+
+        if (c.curvature < MIN_CURVATURE) {
+            return 0.0; // straight (or near-straight) track never derails, no matter the speed
+        }
+        double aLat = vMps * vMps * c.curvature;                      // centrifugal lateral accel ≈ v²/r
+        double carLength = Math.max(1.0, car.carriage().bogeySpacing());
+        double aStringline = Math.abs(c.accelMps2) * carLength * c.curvature * STRINGLINING_FACTOR;
+        double aLatEff = aLat + aStringline;                          // total lateral demand
+        double mass = trainMass(sub);
+        // WEIGHT is a SOFT, proportional modifier — SPEED is what really derails you. The factor only swings the
+        // load within a narrow band (0.7×–1.5×) with a gentle exponent (0.3), so building a big, heavy train does
+        // NOT push you near the edge: a heavy train derails at a somewhat lower speed than a light one, but both
+        // can run fairly fast and only VERY high speed derails either. (Real overturning is mass-independent; the
+        // small weight term stands in for higher centre-of-gravity / buff-draft forces on a loaded car.)
+        double massFactor = Math.max(0.7, Math.min(1.5, Math.pow(mass / DERAIL_REFERENCE_MASS, 0.3)));
+        double load = aLatEff * massFactor;
+
+        if (diag) {
+            LoconauticsConstants.LOGGER.info(
+                    "[sabletrain] cornering car={} v={}m/s r≈{}blk aLat={} accel={}m/s² aString={} massF={} load={} (limit {})",
+                    train.id(), f(vMps), f(c.curvature > 1e-6 ? 1.0 / c.curvature : 999.0),
+                    f(aLat), f(c.accelMps2), f(aStringline), f(massFactor), f(load),
+                    f(Config.DERAIL_MAX_LATERAL_FORCE.get()));
+        }
+        return load;
     }
 
     /** Train mass (kg) from the sub-level's mass tracker, falling back to a live block-sum if unavailable. */

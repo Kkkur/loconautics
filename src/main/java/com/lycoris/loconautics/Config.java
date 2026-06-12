@@ -249,17 +249,21 @@ public final class Config {
         BUILDER.push("derailment");
 
         DERAIL_ON_CURVE = BUILDER
-                .comment("Whether a train derails when it takes a curve too hard.",
-                        "The cornering load is mass * speed(m/s) * turn-rate(rad/s) — i.e. heavier, faster, and",
-                        "sharper-turning trains push harder on the rails. Above maxLateralForce it leaves the rail.")
+                .comment("Whether a train derails when it takes a curve too fast.",
+                        "The load is the CENTRIPETAL acceleration the wheels must resist: speed(m/s)^2 * curvature",
+                        "(1/radius), times a mild mass factor. So a SHARP curve derails at a high speed, a GENTLE",
+                        "curve only at an extreme speed, and straight track never derails. Above maxLateralForce it",
+                        "leaves the rail.")
                 .define("derailOnCurve", true);
 
         DERAIL_MAX_LATERAL_FORCE = BUILDER
-                .comment("Cornering load (mass * speed * turn-rate) above which a train derails on a curve.",
-                        "Higher = harder to derail. TUNE IN-GAME: lower it until reckless cornering derails but",
-                        "normal running does not. Scales with train mass, so heavy trains derail at lower speeds.",
-                        "Default 60.0.")
-                .defineInRange("maxLateralForce", 60.0, 0.0, 1.0e9);
+                .comment("Centripetal load (speed^2 * curvature * massFactor) above which a train derails on a curve.",
+                        "Higher = harder to derail (needs more speed / a sharper curve). Roughly: on a curve of",
+                        "radius r (blocks), the critical speed is about sqrt(maxLateralForce * r) m/s. Heavier",
+                        "consists derail a little sooner (a SOFT, proportional mass factor). TUNE IN-GAME.",
+                        "Default 50.0 — high enough that a well-built heavy train can run fairly fast on normal",
+                        "curves and only VERY high speed derails it.")
+                .defineInRange("maxLateralForce", 50.0, 0.0, 1.0e9);
 
         DERAIL_AT_TRACK_END = BUILDER
                 .comment("Whether a train derails when it runs off the END of a track (no buffer present).",

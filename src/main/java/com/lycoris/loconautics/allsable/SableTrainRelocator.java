@@ -237,6 +237,7 @@ public final class SableTrainRelocator {
                         .disableLineNormals()
                         .lineWidth(i % 2 == 1 ? 0.16666667f : 0.25f);
             }
+            drawDirectionArrow(offset, lastHoveredResult ? COLOR_VALID : COLOR_INVALID);
         }
 
         if (simulate) {
@@ -263,6 +264,63 @@ public final class SableTrainRelocator {
         }
         lastHoveredResult = result;
         return result;
+    }
+
+    /** Outliner keys for the direction arrow — well clear of the per-segment rail keys (0..span). */
+    private static final int ARROW_KEY_SHAFT = 100000;
+    private static final int ARROW_KEY_LEFT = 100001;
+    private static final int ARROW_KEY_RIGHT = 100002;
+
+    /**
+     * Draws a bold arrow floating just above the rail at the FRONT (leading end) of the ghost, pointing the way
+     * the train will FACE and TRAVEL once placed. The front is {@code toVisualise.get(0)} (the hovered block; the
+     * span is walked backwards from there) and the heading is that point minus the next one — i.e. the look
+     * direction projected onto the rail, exactly the axis the server orients the relocated train along. Raised
+     * above the rail surface (unlike the ghost line, which sits at {@code -0.925}) so it reads clearly in-world.
+     */
+    private static void drawDirectionArrow(Vec3 offset, int color) {
+        if (toVisualise == null || toVisualise.size() < 2) {
+            return;
+        }
+        // Point the arrow along the rail tangent, signed toward where the player is LOOKING — the exact same
+        // criterion the server uses to order the bogeys (and thus the train's drive direction + body facing in
+        // SableTrainSpawner.relocate), so the arrow and the placed train always agree. Anchored at the hovered
+        // (leading) end, floating above the rail.
+        Vec3 yOff = new Vec3(0.0, 0.35, 0.0);
+        Vec3 head = toVisualise.get(0).add(offset).add(yOff);
+        Vec3 behind = toVisualise.get(1).add(offset).add(yOff);
+        Vec3 railTan = head.subtract(behind);
+        if (railTan.lengthSqr() < 1.0e-6) {
+            return;
+        }
+        railTan = railTan.normalize();
+        Vec3 look = Minecraft.getInstance().player != null
+                ? Minecraft.getInstance().player.getLookAngle() : railTan;
+        double sgn = (railTan.x * look.x + railTan.z * look.z) >= 0.0 ? 1.0 : -1.0;
+        Vec3 fwd = railTan.scale(sgn); // rail tangent in the look-aligned direction
+        // Re-anchor the arrow at whichever ghost end is now "forward" so it reads from the front of the train.
+        if (sgn < 0.0) {
+            int n = toVisualise.size();
+            head = toVisualise.get(n - 1).add(offset).add(yOff);
+        }
+        Vec3 lateral = new Vec3(-fwd.z, 0.0, fwd.x); // horizontal perpendicular to travel
+
+        // A long shaft reaching out ahead of the leading end, capped by a wide arrowhead.
+        Vec3 tail = head.subtract(fwd.scale(0.3));
+        Vec3 tip = head.add(fwd.scale(1.6));
+        Vec3 wingL = tip.subtract(fwd.scale(0.7)).add(lateral.scale(0.6));
+        Vec3 wingR = tip.subtract(fwd.scale(0.7)).subtract(lateral.scale(0.6));
+        arrowSegment(ARROW_KEY_SHAFT, tail, tip, color);
+        arrowSegment(ARROW_KEY_LEFT, tip, wingL, color);
+        arrowSegment(ARROW_KEY_RIGHT, tip, wingR, color);
+    }
+
+    private static void arrowSegment(int key, Vec3 a, Vec3 b, int color) {
+        Outliner.getInstance()
+                .showLine(Pair.of(relocatingSubLevel, key), a, b)
+                .colored(color)
+                .disableLineNormals()
+                .lineWidth(0.25f);
     }
 
     /**

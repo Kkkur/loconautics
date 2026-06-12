@@ -37,6 +37,7 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import dev.ryanhcode.sable.sublevel.storage.SubLevelRemovalReason;
 
+import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
@@ -728,22 +729,26 @@ public final class SableTrainSpawner {
         ServerLevel level = player.serverLevel();
         SableTrain train = SableTrainRegistry.bySubLevel(subLevelId);
         if (train == null || train.level() != level) {
+            LoconauticsConstants.LOGGER.info("[sabletrain] relocate ABORT: train for sub-level {} not found here", subLevelId);
             return;
         }
         if (Config.WRENCH_RELOCATION_DERAILED_ONLY.get() && !train.isDerailed()) {
             return; // config restricts relocation to derailed trains
         }
         if (!player.canInteractWithBlock(pos, 24.0)) {
+            LoconauticsConstants.LOGGER.info("[sabletrain] relocate ABORT: {} out of reach", pos);
             return; // anti-cheat: the player must actually be able to reach the target rail
         }
 
         BlockState state = level.getBlockState(pos);
         if (!(state.getBlock() instanceof ITrackBlock track)) {
+            LoconauticsConstants.LOGGER.info("[sabletrain] relocate ABORT: {} is not a track block", pos);
             return;
         }
         Pair<Vec3, Direction.AxisDirection> axis = track.getNearestTrackAxis(level, pos, state, lookAngle);
         TrackGraphLocation loc = TrackGraphHelper.getGraphLocationAt(level, pos, axis.getSecond(), axis.getFirst());
         if (loc == null || loc.graph == null) {
+            LoconauticsConstants.LOGGER.info("[sabletrain] relocate ABORT: no track-graph location at {}", pos);
             return;
         }
         Vec3 upNormal = track.getUpNormal(level, pos, state);
@@ -751,7 +756,24 @@ public final class SableTrainSpawner {
         double spacing = train.car().carriage().bogeySpacing();
         RailCarriage carriage = RailCarriage.at(loc, upNormal, spacing, 0.0);
         if (carriage == null) {
+            LoconauticsConstants.LOGGER.info("[sabletrain] relocate ABORT: could not build a carriage at {}", pos);
             return;
+        }
+        // Make the train's TRAVEL direction match the player's look direction (the wand arrow): if the resolved
+        // rail tangent points against the look ray, rebuild on the opposite axis direction so "drive forward"
+        // goes the way the player is looking. The visual orientation follows from the same tangent.
+        Vec3 cf = carriage.forward();
+        if (cf.x * lookAngle.x + cf.z * lookAngle.z < 0.0) {
+            Direction.AxisDirection opp = axis.getSecond() == Direction.AxisDirection.POSITIVE
+                    ? Direction.AxisDirection.NEGATIVE : Direction.AxisDirection.POSITIVE;
+            TrackGraphLocation flippedLoc = TrackGraphHelper.getGraphLocationAt(level, pos, opp, axis.getFirst());
+            if (flippedLoc != null && flippedLoc.graph != null) {
+                RailCarriage flipped = RailCarriage.at(flippedLoc, upNormal, spacing, 0.0);
+                if (flipped != null) {
+                    carriage = flipped;
+                    loc = flippedLoc;
+                }
+            }
         }
         // CRITICAL: keep the ORIGINAL assembly reference frame. A fresh carriage captures its reference from
         // the new rail's tangent, so orientation() would stop mapping the axis the car's blocks were actually
@@ -766,11 +788,37 @@ public final class SableTrainSpawner {
                 && container.getSubLevel(subLevelId) instanceof ServerSubLevel s && !s.isRemoved() ? s : null;
         if (sub != null) {
             Vector3d center = carriage.center();
-            if (center != null) {
-                sub.logicalPose().position().set(center);
-                sub.logicalPose().orientation().set(carriage.orientation());
-                sub.updateLastPose();
+            Quaterniond orient = carriage.orientation();
+            // SAFETY: a non-finite pose (NaN/Inf from a degenerate seat) makes Sable drop the sub-level the next
+            // frame — which is exactly what made trains "disappear" on placement. Refuse to apply a bad pose.
+            if (center == null || !isFinite(center) || orient == null || !isFinite(orient)) {
+                LoconauticsConstants.LOGGER.warn(
+                        "[sabletrain] relocate ABORT: degenerate pose (center={}, orient finite={}) — left as-is",
+                        center, orient != null && isFinite(orient));
+                return;
             }
+            // Compute the final origin (anchor-corrected) WITHOUT mutating the live pose mid-calculation, so a
+            // bad intermediate can't be observed by the physics thread. Apply it in one shot at the end.
+            Vector3d origin = new Vector3d(center);
+            Vector3dc lead = train.car().localLead();
+            Vector3dc trail = train.car().localTrail();
+            if (lead != null && trail != null) {
+                // Anchor correction: pin the body's captured anchor (mid of localLead/localTrail) to the carriage
+                // centre, so the first physics tick doesn't read a residual offset as a huge "slide" (the runaway).
+                Vector3d localAnchor = new Vector3d(lead).add(trail).mul(0.5);
+                Vector3d anchorWorld = orient.transform(localAnchor, new Vector3d()).add(origin);
+                Vector3d err = anchorWorld.sub(center, new Vector3d());
+                if (isFinite(err) && err.length() < 8.0) { // ignore absurd corrections (bad anchor data)
+                    origin.sub(err);
+                }
+            }
+            if (!isFinite(origin)) {
+                LoconauticsConstants.LOGGER.warn("[sabletrain] relocate ABORT: non-finite origin — left as-is");
+                return;
+            }
+            sub.logicalPose().position().set(origin);
+            sub.logicalPose().orientation().set(orient);
+            sub.updateLastPose();
         }
 
         // Re-seat each bogey's follower EXACTLY like first assembly does: find the track UNDER the bogey's
@@ -823,13 +871,66 @@ public final class SableTrainSpawner {
             bogeyIdx++;
         }
 
+        if (bogeys.isEmpty()) {
+            LoconauticsConstants.LOGGER.info(
+                    "[sabletrain] relocate ABORT: no bogey followers could be seated at {} (no rail under the car?)", pos);
+            return; // leave the train as it was rather than half-place it with no followers
+        }
+
+        // CRITICAL for direction: the train's drive direction AND body facing come from the bogey CHORD
+        // (front = last bogey, rear = first). Order the bogeys so that chord points the way the player is
+        // LOOKING along the rail — then "drive forward" and the body's heading match the wand's arrow. The
+        // sort axis is the rail tangent signed toward the look ray (so it is well-defined even when the look
+        // is not perfectly down the rail).
+        Vec3 cf0 = carriage.forward();
+        double sgn = (cf0.x * lookAngle.x + cf0.z * lookAngle.z) >= 0.0 ? 1.0 : -1.0;
+        final double axX = cf0.x * sgn;
+        final double axZ = cf0.z * sgn;
+        bogeys.sort(java.util.Comparator.comparingDouble(b -> {
+            Vector3d c = b.rail().center();
+            return c == null ? 0.0 : c.x * axX + c.z * axZ; // ascending: rear (low) -> front (high) along look
+        }));
+
+        // FINAL SNAP — pin the body to the BOGEYS, exactly as the runtime constraint (driveConstraintGlued) does:
+        // anchor at the bogey-follower midpoint, oriented along their chord. The earlier snap used the carriage
+        // centre, which differs slightly from the bogey midpoint — that residual made the constraint read a
+        // constant "slide" each tick and DRAG the followers away from the body (the train stopped following and
+        // the wheels jittered). Aligning to the bogeys here makes the first physics tick see zero slide.
+        if (sub != null && bogeys.size() >= 2) {
+            Vector3d rear = bogeys.get(0).rail().center();
+            Vector3d front = bogeys.get(bogeys.size() - 1).rail().center();
+            Vector3dc lead = train.car().localLead();
+            Vector3dc trail = train.car().localTrail();
+            if (rear != null && front != null && lead != null && trail != null) {
+                Vector3d chord = new Vector3d(front).sub(rear);
+                if (chord.lengthSquared() > 1.0e-9) {
+                    Vector3d midpoint = new Vector3d(front).add(rear).mul(0.5);
+                    Quaterniond bodyOrient = carriage.orientationTo(chord);
+                    Vector3d localAnchor = new Vector3d(lead).add(trail).mul(0.5);
+                    Vector3d origin = midpoint.sub(bodyOrient.transform(localAnchor, new Vector3d()), new Vector3d());
+                    if (isFinite(origin) && isFinite(bodyOrient)) {
+                        sub.logicalPose().position().set(origin);
+                        sub.logicalPose().orientation().set(bodyOrient);
+                        sub.updateLastPose();
+                    }
+                }
+            }
+        }
+
         train.relocate(carriage, bogeys);
         train.setDerailed(false); // back on the rails (mirrors Create's train.derailed = false on relocate)
 
         SableTrainPersistence.persist(train);
         SableTrainSyncPacket.broadcast(train); // marker is no longer derailed
-        LoconauticsConstants.LOGGER.info("[sabletrain] relocated train {} (sub-level {}) to {}",
-                train.id(), subLevelId, pos);
+        Vector3d finalPos = carriage.center();
+        Vec3 fwdFinal = carriage.forward();
+        LoconauticsConstants.LOGGER.info(
+                "[sabletrain] relocated train {} to {} bodyCenter={} forward=({}, {}) look=({}, {}) dot={}",
+                train.id(), pos,
+                finalPos == null ? "null" : String.format("(%.1f, %.1f, %.1f)", finalPos.x, finalPos.y, finalPos.z),
+                String.format("%.2f", fwdFinal.x), String.format("%.2f", fwdFinal.z),
+                String.format("%.2f", lookAngle.x), String.format("%.2f", lookAngle.z),
+                String.format("%.2f", fwdFinal.x * lookAngle.x + fwdFinal.z * lookAngle.z));
     }
 
     /**
@@ -901,6 +1002,14 @@ public final class SableTrainSpawner {
         LoconauticsConstants.LOGGER.info(
                 "[sabletrain] re-seated train {} on the live track graph (rail broken/rebuilt nearby)", train.id());
         return true;
+    }
+
+    private static boolean isFinite(Vector3d v) {
+        return Double.isFinite(v.x) && Double.isFinite(v.y) && Double.isFinite(v.z);
+    }
+
+    private static boolean isFinite(Quaterniond q) {
+        return Double.isFinite(q.x) && Double.isFinite(q.y) && Double.isFinite(q.z) && Double.isFinite(q.w);
     }
 
     /** True if a Create train bogey block sits in the cart's footprint (scanned down to the rail level). */

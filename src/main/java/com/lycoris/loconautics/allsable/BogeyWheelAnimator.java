@@ -41,17 +41,27 @@ public final class BogeyWheelAnimator {
     private BogeyWheelAnimator() {
     }
 
-    /** Snapshot of the rendered bogey BEs belonging to the given train sub-level. */
+    /** Snapshot of the rendered bogey BEs belonging to the given train sub-level. NOTE: no isRemoved()
+     *  filter — Sable's client sub-level BEs can carry the removed flag while still being rendered, which
+     *  silently emptied this list (particles got bogeys=0 while the wheels happily kept spinning). Entries
+     *  are re-put every rendered frame, so the weak map stays fresh on its own. */
     public static java.util.List<AbstractBogeyBlockEntity> bogeysOf(java.util.UUID subLevelId) {
         java.util.List<AbstractBogeyBlockEntity> out = new java.util.ArrayList<>(2);
         synchronized (RENDERED) {
             for (Map.Entry<AbstractBogeyBlockEntity, java.util.UUID> e : RENDERED.entrySet()) {
-                if (subLevelId.equals(e.getValue()) && !e.getKey().isRemoved()) {
+                if (subLevelId.equals(e.getValue())) {
                     out.add(e.getKey());
                 }
             }
         }
         return out;
+    }
+
+    /** Total rendered-bogey index size (diagnostics). */
+    public static int renderedCount() {
+        synchronized (RENDERED) {
+            return RENDERED.size();
+        }
     }
 
     /** Called once per rendered frame per bogey; advances the wheel animation by the distance moved. */
