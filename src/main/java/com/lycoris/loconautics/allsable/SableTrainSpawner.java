@@ -838,14 +838,26 @@ public final class SableTrainSpawner {
             if (train.level() != level || train.isDerailed()) {
                 continue;
             }
-            if (SableTrainDriver.isStationInRange(train, global, STATION_DISASSEMBLE_RANGE,
-                    STATION_DISASSEMBLE_OVERSHOOT)
+            // The frontmost car parks ~1.5 blocks PAST the marker (the driver's STATION_FRONT_OFFSET back-shift),
+            // i.e. on the station's far side where the platform-side scout is unreliable — but it carries the durable
+            // atStation marker (the same flag that lit this button), so match that directly. Cars coupled/queued
+            // behind it sit on the platform side and are caught by the along-rail scout.
+            if ((isParkedAt(train, global)
+                    || SableTrainDriver.isStationInRange(train, global, STATION_DISASSEMBLE_RANGE,
+                            STATION_DISASSEMBLE_OVERSHOOT))
                     && disassembleSableTrain(train)) {
                 disassembled++;
             }
         }
         LoconauticsConstants.LOGGER.info("[sabletrain] station at {} disassembled {} Sable car(s) in detection range",
                 stationPos, disassembled);
+    }
+
+    /** True if {@code train} holds the durable "present at this station" marker (matched by stable graph id, like
+     *  {@link #findParkedTrain}); the frontmost parked car that lit the disassemble button. */
+    private static boolean isParkedAt(SableTrain train, GlobalStation station) {
+        GlobalStation at = train.atStation();
+        return at != null && (at == station || (at.id != null && at.id.equals(station.id)));
     }
 
     /**
