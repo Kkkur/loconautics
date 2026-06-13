@@ -33,8 +33,17 @@ public final class RailCarriage {
     private final TrackGraph graph;
     private final TravellingPoint leading;
     private final TravellingPoint trailing;
-    private final ITrackSelector leadingSelector;
+    /** Rebuilt whenever {@link #setSteerDirection} changes the junction choice, so the leading bogey can be
+     *  steered LEFT/RIGHT/straight at runtime (e.g. by the analog controller) instead of always going straight. */
+    private ITrackSelector leadingSelector;
     private final ITrackSelector trailingSelector;
+    /** Junction steering choice for the leading bogey. NONE = go straight (default). */
+    private SteerDirection steerDirection = SteerDirection.NONE;
+    /** When non-null this carriage's leading point FOLLOWS the given external point instead of steering on its
+     *  own (Create's model: exactly one point picks a branch at a junction, everything else follows it). Used to
+     *  make loose bogeys track the body carriage's leading point so they can never diverge onto a different
+     *  branch. See {@link #followPoint}. */
+    private TravellingPoint followTarget;
     private final double bogeySpacing;
     /** Track up-normal used to build the steering selectors (kept so the carriage can be re-serialised). */
     private final Vec3 upNormal;
@@ -53,7 +62,7 @@ public final class RailCarriage {
         this.bogeySpacing = bogeySpacing;
         this.upNormal = upNormal;
         this.speed = speed;
-        this.leadingSelector = leading.steer(SteerDirection.NONE, upNormal);
+        this.leadingSelector = leading.steer(steerDirection, upNormal);
         this.trailingSelector = trailing.follow(leading);
         // Capture the reference frame now (bogeys are already placed). The car's blocks were assembled
         // world-aligned at this moment, so orientation must be identity here and a delta from now on.
@@ -230,6 +239,45 @@ public final class RailCarriage {
      *  what governs actually stopping the train), so the driver unsticks them before each advance. */
     public void unstick() {
         stopped = false;
+    }
+
+    /** Current junction steering choice for the leading bogey. */
+    public SteerDirection steerDirection() {
+        return steerDirection;
+    }
+
+    /**
+     * Sets the branch the leading bogey takes at the next junction (the trailing bogey always follows the
+     * leading one, so the whole carriage takes the same path). Rebuilds the leading {@link ITrackSelector}
+     * so the choice takes effect on the next {@link #tick}. NONE goes straight (Create's default behaviour).
+     */
+    public void setSteerDirection(SteerDirection dir) {
+        SteerDirection d = (dir == null) ? SteerDirection.NONE : dir;
+        followTarget = null; // a steered carriage is its own authority, not a follower
+        if (d == steerDirection && leadingSelector != null) {
+            return;
+        }
+        steerDirection = d;
+        leadingSelector = leading.steer(d, upNormal);
+    }
+
+    /** The external point this carriage's leading point currently follows, or {@code null} if it steers itself. */
+    public TravellingPoint followTarget() {
+        return followTarget;
+    }
+
+    /**
+     * Makes this carriage's leading point FOLLOW {@code target} at junctions instead of steering on its own,
+     * mirroring Create's chain (only the front-most wheel steers; every other point {@code follow}s the one
+     * ahead). The trailing point keeps following this carriage's own leading point, so the whole carriage takes
+     * exactly the path {@code target} takes — it can never pick a divergent branch and tear off the rail.
+     */
+    public void followPoint(TravellingPoint target) {
+        if (target == null || target == followTarget) {
+            return;
+        }
+        followTarget = target;
+        leadingSelector = leading.follow(target);
     }
 
     /**

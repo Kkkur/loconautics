@@ -81,6 +81,9 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
 
     private boolean raisingSignal  = false;
     private boolean loweringSignal = false;
+    /** Junction steering input from the A/D keys: -1 = left, 0 = straight, +1 = right. Applied to the train's
+     *  leading bogey and synced to the client so the HUD can draw the steering arrow. */
+    private int steerInput = 0;
     /** Space (jump) held — used as the "hold to approach/park at a station" control, mirroring Create. */
     private boolean spaceSignal    = false;
 
@@ -324,6 +327,8 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         raisingSignal  = false;
         loweringSignal = false;
         spaceSignal    = false;
+        steerInput     = 0;
+        applySteer();
         updateBlockState(level, getBlockState());
         setChanged();
         sendData();
@@ -349,6 +354,14 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
                     }
                 }
             }
+            case 2 -> { // A → steer left at the next junction
+                if (pressed) setSteerInput(-1);
+                else if (steerInput == -1) setSteerInput(0);
+            }
+            case 3 -> { // D → steer right at the next junction
+                if (pressed) setSteerInput(1);
+                else if (steerInput == 1) setSteerInput(0);
+            }
             case 4 -> { // Space → hold to approach / park at a station (read by SableTrainDriver)
                 spaceSignal = pressed;
             }
@@ -365,6 +378,54 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
     /** True while the operator holds Space (the "approach/park at station" control). */
     public boolean isSpaceHeld() {
         return spaceSignal;
+    }
+
+    /** Current junction steering input: -1 = left, 0 = straight, +1 = right. Read by the HUD for the arrow. */
+    public int getSteerInput() {
+        return steerInput;
+    }
+
+    private void setSteerInput(int value) {
+        if (steerInput == value) return;
+        steerInput = value;
+        applySteer();
+        setChanged();
+        sendData();
+    }
+
+    /** Pushes the current steering choice onto the train this controller drives. The A/D input is in the DRIVER's
+     *  frame (A = the driver's left, D = the driver's right), but Create's {@code steer} resolves LEFT/RIGHT against
+     *  the leading edge's INTRINSIC direction, which may point either way along the track. So the two frames are
+     *  reconciled using the controller's facing as the source of truth: when the controller faces against the
+     *  leading edge direction, the driver's left/right is Create's right/left, and we flip. */
+    private void applySteer() {
+        if (level == null || level.isClientSide) return;
+        com.lycoris.loconautics.allsable.SableTrain train = sableTrainAt(level);
+        if (train == null) return;
+
+        int input = steerInput;
+        if (input != 0 && shouldFlipSteer(train)) {
+            input = -input;
+        }
+        com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection dir =
+                input < 0 ? com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection.LEFT
+              : input > 0 ? com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection.RIGHT
+              : com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection.NONE;
+        train.setSteerDirection(dir);
+    }
+
+    /** True when the driver's left/right is mirrored relative to Create's edge-intrinsic steer frame, i.e. the
+     *  controller faces against the leading edge's direction. Uses the controller's {@link AnalogControllerBlock#FACING}
+     *  as the source of truth for which way is "forward" for the seated driver. */
+    private boolean shouldFlipSteer(com.lycoris.loconautics.allsable.SableTrain train) {
+        com.lycoris.loconautics.allsable.RailCarriage leadRail = train.leadingBogeyRail();
+        if (leadRail == null) return false;
+        com.simibubi.create.content.trains.entity.TravellingPoint lead = leadRail.leading();
+        if (lead == null || lead.edge == null) return false;
+        net.minecraft.core.Direction facing = getBlockState().getValue(AnalogControllerBlock.FACING);
+        net.minecraft.world.phys.Vec3 edgeDir = lead.edge.getDirection(false);
+        double dot = facing.getStepX() * edgeDir.x + facing.getStepZ() * edgeDir.z;
+        return dot < 0.0;
     }
 
     /** True while the operator holds W (raise / depart). */
@@ -563,7 +624,10 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         tag.putBoolean("Locked", locked);
         tag.putInt("MaxPower", maxPower);
         if (currentUser != null) tag.putUUID("User", currentUser);
-        if (clientPacket) tag.putBoolean("HasUser", currentUser != null);
+        if (clientPacket) {
+            tag.putBoolean("HasUser", currentUser != null);
+            tag.putInt("Steer", steerInput);
+        }
 
         CompoundTag freq = new CompoundTag();
         freq.put("First",      frequencyFirst.saveOptional(registries));
@@ -583,6 +647,7 @@ public class AnalogControllerBlockEntity extends SmartBlockEntity implements Men
         // the actual UUID is not needed client-side (only hasUser() matters for rendering).
         if (clientPacket && tag.contains("HasUser")) {
             currentUser = tag.getBoolean("HasUser") ? java.util.UUID.randomUUID() : null;
+            steerInput = tag.getInt("Steer");
         } else {
             currentUser = null; // never restore stale user UUID on server
         }

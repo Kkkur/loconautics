@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.joml.Vector3dc;
 
+import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
 import com.simibubi.create.content.trains.station.GlobalStation;
 
 import net.minecraft.core.BlockPos;
@@ -157,6 +158,34 @@ public final class SableTrain {
         this.distanceToStation = Double.MAX_VALUE;
         this.dwellTicks = 0;
         this.currentStation = null;
+    }
+
+    /**
+     * Sets the junction branch this car takes. Only the LEADING bogey steers — it is the single steering authority
+     * (Create's model: one point picks the branch, everything else follows). Every other bogey and the body
+     * carriage are wired in {@link SableTrainDriver#advanceRail} to {@code follow} the leading bogey's leading
+     * point, so they take the exact same branch and can never diverge. NONE restores Create's default (straightest)
+     * choice. Returns the leading bogey carriage so callers can read back its frame (e.g. for mirror correction).
+     */
+    public RailCarriage setSteerDirection(SteerDirection dir) {
+        if (car == null) {
+            return null;
+        }
+        RailCarriage lead = leadingBogeyRail();
+        if (lead != null) {
+            lead.setSteerDirection(dir);
+        }
+        return lead;
+    }
+
+    /** The leading bogey's {@link RailCarriage} (the steering authority), or {@code null} if the car has no bogeys.
+     *  Front-to-back order matches {@link SableTrainDriver}: the last bogey is the leading one. */
+    public RailCarriage leadingBogeyRail() {
+        if (car == null || car.bogeys().isEmpty()) {
+            return null;
+        }
+        Bogey lead = car.bogeys().get(car.bogeys().size() - 1);
+        return lead.rail();
     }
 
     public double speed() {

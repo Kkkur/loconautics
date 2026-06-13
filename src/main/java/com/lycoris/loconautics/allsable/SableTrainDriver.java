@@ -205,43 +205,52 @@ public final class SableTrainDriver {
     private static void driveConstraintGlued(PhysicsPipeline pipeline, ServerSubLevel bodySub,
                                              Car car, double dt, SableTrain train) {
         RailCarriage carriage = car.carriage();
-        Vector3d railPoint = carriage.center();
-        if (railPoint == null) {
-            return;
+
+        // THE BOGEYS ARE THE RAIL AUTHORITY, never the body carriage. The body carriage is a long two-point span;
+        // on a tight curve or loop its midpoint collapses (the two points orbit while the centre barely moves or
+        // spins in place), so using it as the pose/slide reference desynced the body tens of blocks from its own
+        // bogey. Create derives the carriage pose from its bogeys' rail points; we do the same — front = the
+        // leading bogey's leading point, rear = the trailing bogey's trailing point — for ONE bogey or many.
+        Vector3d[] ref = bogeyReference(car);
+        Vector3d railPoint;
+        Vector3d tangent;
+        if (ref != null) {
+            railPoint = ref[0];
+            tangent = ref[1];
+        } else {
+            railPoint = carriage.center();
+            if (railPoint == null) {
+                return;
+            }
+            tangent = forwardUnit(carriage);
         }
-        Vector3d tangent = forwardUnit(carriage);
         Vector3dc localAnchor = new Vector3d(car.localLead()).add(car.localTrail()).mul(0.5);
 
-        // Measure the body's slide along the tangent and advance the rail by it.
+        // Measure the body's slide along the tangent and advance the rail by it. Clamp it: a multi-block slide in
+        // one substep is a body/rail desync (notably from rebuilding the junction selector mid-traversal when the
+        // operator flips steering on the junction node). Advancing the rail by the raw value teleports the car; the
+        // clamp heals the desync gradually instead. See MAX_SUBSTEP_SLIDE.
         Vector3d anchorWorld = bodySub.logicalPose().transformPosition(localAnchor, new Vector3d());
         double slide = anchorWorld.sub(railPoint, new Vector3d()).dot(tangent);
+        slide = Math.max(-MAX_SUBSTEP_SLIDE, Math.min(MAX_SUBSTEP_SLIDE, slide));
         advanceRail(car, slide);
         animateBogeyWheels(car, bodySub, slide);
 
-        railPoint = carriage.center();
-        if (railPoint == null) {
-            return;
-        }
-        tangent = forwardUnit(carriage);
-        Quaterniond q = carriage.orientation();
-
-        // THE SUB-LEVEL ADAPTS TO THE BOGEYS (Create-style), not the other way around: with 2+ bogeys, the
-        // body's constraint pose is derived FROM the bogeys' own rail points — pinned at their midpoint and
-        // oriented along the chord between them, exactly how Create stretches a carriage between its bogey
-        // anchors. The rigid bogey blocks then land on their rail points by construction, instead of the
-        // bogeys being visually dragged to wherever the body's own follower put them.
-        var bogeys = car.bogeys();
-        if (bogeys.size() >= 2) {
-            Vector3d rear = bogeys.get(0).rail().center();
-            Vector3d front = bogeys.get(bogeys.size() - 1).rail().center();
-            if (rear != null && front != null) {
-                Vector3d chord = new Vector3d(front).sub(rear);
-                if (chord.lengthSquared() > 1.0e-9) {
-                    railPoint = new Vector3d(front).add(rear).mul(0.5);
-                    tangent = new Vector3d(chord).normalize();
-                    q = carriage.orientationTo(chord);
-                }
+        // Re-read the pose from the bogeys after advancing. q uses the BODY carriage's reference frame (so the
+        // body blocks keep their assembled orientation) mapped onto the bogey-derived chord tangent.
+        Quaterniond q;
+        ref = bogeyReference(car);
+        if (ref != null) {
+            railPoint = ref[0];
+            tangent = ref[1];
+            q = carriage.orientationTo(ref[1]);
+        } else {
+            railPoint = carriage.center();
+            if (railPoint == null) {
+                return;
             }
+            tangent = forwardUnit(carriage);
+            q = carriage.orientation();
         }
 
         // Body: prismatic joint — perpendicular + rotation hard-locked, tangent free.
@@ -454,6 +463,18 @@ public final class SableTrainDriver {
     /** Per-tick clamp on the follow correction, so a badly-off follower glides back instead of jumping. */
     private static final double MAX_FOLLOW_CORRECTION = 0.5;
 
+    /**
+     * Hard cap on how far the body's measured {@code slide} may advance the rail in a SINGLE substep. Normal
+     * substep travel is well under 1 block even at full speed; a value far above that means the physics body and
+     * the rail follower have desynced (e.g. the junction selector was rebuilt mid-traversal when the operator
+     * flips the steering direction while the leading bogey is on the junction node). Feeding that raw multi-block
+     * slide into {@link #advanceRail} teleports the whole car onto a distant branch and then leaves it spinning at
+     * the junction, because the body never catches up. Clamping the slide lets any such desync heal over several
+     * substeps instead of detonating in one — the prismatic joint pulls the body back to the (near-stationary)
+     * rail point rather than the rail chasing the flung body.
+     */
+    private static final double MAX_SUBSTEP_SLIDE = 2.0;
+
     private static void advanceRail(Car car, double ds) {
         // Unstick the body carriage before each advance (like the bogey followers below). Once it parks at a dead
         // end it sets stopped=true and, without this, would stay frozen forever — so a consist driven INTO the end
@@ -468,7 +489,31 @@ public final class SableTrainDriver {
         if (bogeys.isEmpty()) {
             return;
         }
-        Vec3 bodyFwd = car.carriage().forward();
+        int n = bogeys.size();
+
+        // Single steering authority (Create's model): the LEADING bogey's leading point is the only thing that
+        // picks a branch at a junction; every OTHER bogey and the body carriage FOLLOW it, so no two points can
+        // ever choose different branches and rip the car apart. The body carriage is never the authority (its
+        // long two-point span collapses/spins on tight curves). Idempotent (followPoint/steer no-op if unchanged).
+        SableTrain.Bogey leadBogey = bogeys.get(n - 1);
+        TravellingPoint authority = leadBogey.rail().leading();
+        for (int i = 0; i < n; i++) {
+            if (bogeys.get(i) != leadBogey) {
+                bogeys.get(i).rail().followPoint(authority);
+            }
+        }
+        car.carriage().followPoint(authority);
+
+        // Travel-direction reference for travelSign. Use the bogey CHORD (rear -> front), which is the same
+        // vector the body pose is built from and changes smoothly along the track. Using car.carriage().forward()
+        // instead breaks at junctions: when the leading bogey steers onto a branch, the body carriage's own
+        // tangent swings nearly perpendicular to a bogey still on the trunk, so travelSign(bogey) flips to -1 and
+        // that bogey advances BACKWARDS — the car tears off the rail and teleports. The chord bisects the two
+        // bogey tangents, staying well under 90 degrees from each, so the sign holds through the turn.
+        Vec3 bodyFwd = bogeyChordForward(bogeys);
+        if (bodyFwd == null) {
+            bodyFwd = car.carriage().forward();
+        }
 
         // Create-style follow: bogey followers do NOT advance independently. The leading bogey (last in
         // front-to-back order) advances by ds; every other follower additionally corrects its travel so the
@@ -476,7 +521,6 @@ public final class SableTrainDriver {
         // Carriage "stress" mechanism (CarriageBogey.getStress / TravellingPoint.follow). This continuously
         // heals any arc error (coarse seating, reversed axis, past dead-end parks), pinning each bogey to its
         // own point on the curve instead of letting it hang off the body pose.
-        int n = bogeys.size();
         SableTrain.Bogey lead = bogeys.get(n - 1);
         lead.rail().unstick();
         lead.rail().setSpeed(ds * travelSign(lead, bodyFwd));
@@ -502,6 +546,23 @@ public final class SableTrainDriver {
 
             bogey.rail().setSpeed(move);
             bogey.rail().tick();
+        }
+
+        if (Config.BOUNCE_DEBUG.get() && Math.abs(ds) > 1.0e-4) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                SableTrain.Bogey b = bogeys.get(i);
+                Vector3d c = b.rail().center();
+                sb.append(" b").append(i)
+                  .append("(sign=").append(f(travelSign(b, bodyFwd)))
+                  .append(",steer=").append(b.rail().steerDirection())
+                  .append(",c=").append(c == null ? "null" : f(c.x) + "/" + f(c.y) + "/" + f(c.z))
+                  .append(",blocked=").append(b.rail().stopped()).append(')');
+            }
+            Vector3d cc = car.carriage().center();
+            LoconauticsConstants.LOGGER.info("[steer] ds={} bodyFwd={}/{} leadSteer={} carC={}{}",
+                    f(ds), f(bodyFwd.x), f(bodyFwd.z), leadBogey.rail().steerDirection(),
+                    cc == null ? "null" : f(cc.x) + "/" + f(cc.z), sb);
         }
     }
 
@@ -537,6 +598,52 @@ public final class SableTrainDriver {
     private static double travelSign(SableTrain.Bogey bogey, Vec3 bodyFwd) {
         Vec3 f = bogey.rail().forward();
         return (f.x * bodyFwd.x + f.z * bodyFwd.z) < 0.0 ? -1.0 : 1.0;
+    }
+
+    /** Unit chord (rear bogey -> front bogey), or {@code null} when there are fewer than two placed bogeys or the
+     *  two coincide. This is the smooth travel reference {@link #advanceRail} uses for {@link #travelSign}. */
+    private static Vec3 bogeyChordForward(java.util.List<SableTrain.Bogey> bogeys) {
+        if (bogeys.size() < 2) {
+            return null;
+        }
+        Vector3d rear = bogeys.get(0).rail().center();
+        Vector3d front = bogeys.get(bogeys.size() - 1).rail().center();
+        if (rear == null || front == null) {
+            return null;
+        }
+        Vector3d chord = new Vector3d(front).sub(rear);
+        if (chord.lengthSquared() < 1.0e-9) {
+            return null;
+        }
+        chord.normalize();
+        return new Vec3(chord.x, chord.y, chord.z);
+    }
+
+    /**
+     * The car's pose reference taken from its BOGEYS (the rail authority), spanning the whole car: front = the
+     * leading bogey's leading rail point, rear = the trailing bogey's trailing rail point. Returns
+     * {@code [midpoint, unitChord]} (rear -> front), or {@code null} if unavailable. Works for a single bogey
+     * (its own two points span ~bogeySpacing) or many. Used in place of the body carriage's own (unreliable on
+     * tight curves) centre/orientation for both the slide measurement and the constraint pose.
+     */
+    private static Vector3d[] bogeyReference(Car car) {
+        var bogeys = car.bogeys();
+        if (bogeys.isEmpty()) {
+            return null;
+        }
+        Vec3 frontP = bogeys.get(bogeys.size() - 1).rail().leadingPos();
+        Vec3 rearP = bogeys.get(0).rail().trailingPos();
+        if (frontP == null || rearP == null) {
+            return null;
+        }
+        Vector3d front = new Vector3d(frontP.x, frontP.y, frontP.z);
+        Vector3d rear = new Vector3d(rearP.x, rearP.y, rearP.z);
+        Vector3d chord = new Vector3d(front).sub(rear);
+        if (chord.lengthSquared() < 1.0e-9) {
+            return null;
+        }
+        Vector3d mid = new Vector3d(front).add(rear).mul(0.5);
+        return new Vector3d[] { mid, chord.normalize() };
     }
 
     /** True while the body carriage and every bogey follower still ride edges that exist in the graph. */

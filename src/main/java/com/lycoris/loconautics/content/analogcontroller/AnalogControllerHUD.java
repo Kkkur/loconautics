@@ -145,11 +145,23 @@ public class AnalogControllerHUD {
         graphics.blit(WIDGETS, dirZoneAbsX, barY - 20, 0,
                 77, 165, 28, 20, 256, 256);
 
-        // Power number — centered over the background
+        // Steering arrow — Create's rotating placement indicator, drawn in the brass circle. The leading bogey's
+        // junction choice (set via A/D on the controller) is synced as steerInput: -1 left, 0 straight, +1 right.
+        // 90° points straight up (matches Create's TrainHUD forward offset); ±45° leans the arrow into the turn.
+        int steer = ace.getSteerInput();
+        float steerAngle = 90.0f + (steer < 0 ? -45.0f : steer > 0 ? 45.0f : 0.0f);
+        PoseStack arrowPose = graphics.pose();
+        arrowPose.pushPose();
+        arrowPose.translate(originX + 91, barY - 9, 0);
+        arrowPose.scale(0.925f, 0.925f, 1.0f);
+        net.createmod.catnip.placement.PlacementClient.textured(arrowPose, 0.0f, 0.0f, 1.0f, steerAngle);
+        arrowPose.popPose();
+
+        // Power number — centered over the background, nudged 10px down so it sits below the steering arrow
         String powerText = String.valueOf(Math.abs(power));
         int textW = mc.font.width(powerText);
         int textX = dirZoneAbsX + (DIR_ZONE_W - textW) / 2;
-        int textY = dirZoneCtrY - mc.font.lineHeight / 2 + 4;
+        int textY = dirZoneCtrY - mc.font.lineHeight / 2 + 4 + 10;
         graphics.drawString(mc.font, powerText, textX, textY, 0xFFFFFF, true);
 
         // Station-stop prompt banner — copied from TrainHUD.renderOverlay (same widgets.png sheet, same anchor).
